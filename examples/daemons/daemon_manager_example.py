@@ -38,7 +38,7 @@ def example_basic_daemon_manager():
         "0200": {"01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP", "CM"]},
     }
 
-    radar_name = "RMA11"
+    radar_name = "RMA1"
     base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))
 
     # Create manager configuration
@@ -58,6 +58,7 @@ def example_basic_daemon_manager():
         enable_download_daemon=True,
         enable_processing_daemon=True,
         enable_product_daemon=True,
+        product_dir=Path(os.path.join(config.ROOT_RADAR_PRODUCTS_PATH, radar_name)),
         product_type="image",
         add_colmax=True,
     )

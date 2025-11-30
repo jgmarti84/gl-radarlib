@@ -537,3 +537,55 @@ def calculate_zdr(radar: Radar, hrefl_field=None, vrefl_field=None, zdr_field=No
     new_field["data"] = zdr_data
     radar.add_field(zdr_field, new_field, replace_existing=True)
     return radar
+
+
+def determine_reflectivity_fields(radar, logger_name: str = __name__) -> dict:
+    """
+    Determine the horizontal and vertical reflectivity fields from the radar object.
+
+    Parameters
+    ----------
+    radar : Radar
+        Py-ART Radar object containing fields.
+
+    Returns
+    -------
+    dict
+        A dictionary with the following keys:
+        - 'hrefl_field': Horizontal reflectivity field (e.g., 'DBZH').
+        - 'hrefl_field_raw': Raw horizontal reflectivity field (e.g., 'TH').
+        - 'vrefl_field': Vertical reflectivity field (e.g., 'DBZV').
+        - 'vrefl_field_raw': Raw vertical reflectivity field (e.g., 'TV').
+    """
+    logger = logging.getLogger(logger_name)
+
+    # Initialize default values
+    hrefl_field = hrefl_field_raw = "DBZH"
+    vrefl_field = vrefl_field_raw = "DBZV"
+
+    # Determine horizontal reflectivity fields
+    if "DBZH" in radar.fields and "TH" in radar.fields:
+        hrefl_field_raw = "TH"
+    elif "DBZH" in radar.fields:
+        hrefl_field = hrefl_field_raw = "DBZH"
+    elif "TH" in radar.fields:
+        hrefl_field = hrefl_field_raw = "TH"
+    else:
+        logger.warning("Campo de reflectividad horizontal inexistente.")
+
+    # Determine vertical reflectivity fields
+    if "DBZV" in radar.fields and "TV" in radar.fields:
+        vrefl_field, vrefl_field_raw = "DBZV", "TV"
+    elif "DBZV" in radar.fields:
+        vrefl_field = vrefl_field_raw = "DBZV"
+    elif "TV" in radar.fields:
+        vrefl_field = vrefl_field_raw = "TV"
+    else:
+        logger.warning("Campo de reflectividad vertical inexistente.")
+
+    return {
+        "hrefl_field": hrefl_field,
+        "hrefl_field_raw": hrefl_field_raw,
+        "vrefl_field": vrefl_field,
+        "vrefl_field_raw": vrefl_field_raw,
+    }

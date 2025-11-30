@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Product generation daemon for monitoring and generating visualization products from processed NetCDF volumes."""
-
 import asyncio
 import gc
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
@@ -297,8 +297,8 @@ class ProductGenerationDaemon:
         from radarlib.io.pyart.filters import filter_fields_grc1
         from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
         from radarlib.io.pyart.radar_png_plotter import FieldPlotConfig, RadarPlotConfig, plot_ppi_field, save_ppi_png
-        from radarlib.io.pyart.vol_process import determine_reflectivity_fields, product_path_and_filename
-        from radarlib.utils.fields_utils import get_lowest_nsweep
+        from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
+        from radarlib.utils.names_utils import product_path_and_filename
 
         filename = str(netcdf_path)
         vol_types = self.config.volume_types
@@ -420,14 +420,14 @@ class ProductGenerationDaemon:
                             )
                             _ = save_ppi_png(
                                 fig,
-                                output_dict["ceiled"][0],
+                                os.path.join(self.config.local_product_dir, output_dict["ceiled"][0]),
                                 output_dict["ceiled"][1],
                                 dpi=plot_config.dpi,
                                 transparent=plot_config.transparent,
                             )
                             _ = save_ppi_png(
                                 fig,
-                                output_dict["rounded"][0],
+                                os.path.join(self.config.local_product_dir, output_dict["rounded"][0]),
                                 output_dict["rounded"][1],
                                 dpi=plot_config.dpi,
                                 transparent=plot_config.transparent,
@@ -523,14 +523,14 @@ class ProductGenerationDaemon:
                             )
                             _ = save_ppi_png(
                                 fig,
-                                output_dict["ceiled"][0],
+                                os.path.join(self.config.local_product_dir, output_dict["ceiled"][0]),
                                 output_dict["ceiled"][1],
                                 dpi=plot_config.dpi,
                                 transparent=plot_config.transparent,
                             )
                             _ = save_ppi_png(
                                 fig,
-                                output_dict["rounded"][0],
+                                os.path.join(self.config.local_product_dir, output_dict["rounded"][0]),
                                 output_dict["rounded"][1],
                                 dpi=plot_config.dpi,
                                 transparent=plot_config.transparent,
