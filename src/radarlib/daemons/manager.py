@@ -52,8 +52,11 @@ class DaemonManagerConfig:
     processing_poll_interval: int = 30
     product_poll_interval: int = 30
     enable_download_daemon: bool = True
+    bufr_dir: Optional[Path] = None
     enable_processing_daemon: bool = True
+    netcdf_dir: Optional[Path] = None
     enable_product_daemon: bool = True
+    product_dir: Optional[Path] = None
     product_type: str = "image"
     add_colmax: bool = True
 
@@ -94,8 +97,14 @@ class DaemonManager:
 
         # Setup paths
         self.bufr_dir = config.base_path / "bufr"
+        if self.config.bufr_dir is not None:
+            self.bufr_dir = self.config.bufr_dir
         self.netcdf_dir = config.base_path / "netcdf"
+        if self.config.netcdf_dir is not None:
+            self.netcdf_dir = self.config.netcdf_dir
         self.product_dir = config.base_path / "products"
+        if self.config.product_dir is not None:
+            self.product_dir = self.config.product_dir
         self.state_db = config.base_path / "state.db"
 
         # Ensure directories exist

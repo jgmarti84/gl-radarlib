@@ -25,6 +25,7 @@ DEFAULTS: Dict[str, Any] = {
     "BUFR_RESOURCES_PATH": os.path.join(root_package, "io", "bufr", "bufr_resources"),
     "ROOT_CACHE_PATH": os.path.join(root_project, "cache"),
     "ROOT_RADAR_FILES_PATH": os.path.join(root_data, "radares"),
+    "ROOT_RADAR_PRODUCTS_PATH": root_products,
     "COLMAX_THRESHOLD": -3,
     "COLMAX_ELEV_LIMIT1": 0.65,
     "COLMAX_RHOHV_FILTER": True,
@@ -159,6 +160,7 @@ def get(key: str, default: Any = None) -> Any:
 BUFR_RESOURCES_PATH: str = get("BUFR_RESOURCES_PATH")
 ROOT_CACHE_PATH: str = get("ROOT_CACHE_PATH")
 ROOT_RADAR_FILES_PATH: str = get("ROOT_RADAR_FILES_PATH")
+ROOT_RADAR_PRODUCTS_PATH: str = get("ROOT_RADAR_PRODUCTS_PATH")
 COLMAX_THRESHOLD: float = get("COLMAX_THRESHOLD")
 COLMAX_ELEV_LIMIT1: float = get("COLMAX_ELEV_LIMIT1")
 COLMAX_RHOHV_FILTER: bool = get("COLMAX_RHOHV_FILTER")

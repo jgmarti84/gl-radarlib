@@ -155,3 +155,41 @@ def build_vol_types_regex(vol_types: Dict[str, Dict[str, list]]) -> Optional[re.
     except re.error as e:
         logger.error("Failed to compile vol_types regex: %s", e)
         return None
+
+
+def product_path_and_filename(radar, field, sweep, round_filename=True, filtered=True, extension="png"):
+    radar_name = radar.metadata["instrument_name"]
+    # root_out = config.root_products
+
+    # non-filtered fields have 'o' suffix
+    if not filtered:
+        field = f"{field}o"
+
+    fnames_dict = {}
+    try:
+        if round_filename:
+            date = get_time_from_RMA_filename(radar.metadata["filename"])
+            cdate = date + datetime.timedelta(seconds=600)
+            cdate = cdate.strftime("%Y%m%dT%H%M")[:-1] + "000Z"  # ceiled date
+            rounded_min = str(round(date.minute / 10) * 10).zfill(2)
+            rdate = f"{date.strftime('%Y%m%dT%H')}{rounded_min}00Z"  # rounded date
+
+            filename_out = f"{radar_name}_{cdate}_{field}_{str(sweep).zfill(2)}.{extension}"
+            full_path = os.path.join(rdate[:4], rdate[4:6], rdate[6:8])
+
+            filename_out2 = f"{radar_name}_{rdate}_{field}_{str(sweep).zfill(2)}.{extension}"
+            full_path2 = os.path.join(rdate[:4], rdate[4:6], rdate[6:8])
+
+            # return full_path, filename_out, full_path2, filename_out2
+            fnames_dict["ceiled"] = (full_path, filename_out)
+            fnames_dict["rounded"] = (full_path2, filename_out2)
+        else:
+            elev = str(radar.get_elevation(sweep)[0])
+            filename_out = f"{radar_name}_{elev}_{field}.{extension}"
+            full_path = os.path.join(field)
+
+            fnames_dict["non_rounded"] = (full_path, filename_out)
+    except Exception as e:
+        logger.error(f"Error generating product path and filename: {e}")
+
+    return fnames_dict
