@@ -41,8 +41,22 @@ class SQLiteStateTracker:
 
     def _init_database(self) -> None:
         """Initialize database schema."""
+        # Check if database file already exists
+        db_exists = self.db_path.exists()
+
         conn = self._get_connection()
         cursor = conn.cursor()
+
+        # Check if tables already exist by querying sqlite_master
+        cursor.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name IN ('downloads', 'volume_processing', 'product_generation')
+        """
+        )
+        existing_tables = {row[0] for row in cursor.fetchall()}
+        expected_tables = {"downloads", "volume_processing", "product_generation"}
+        missing_tables = expected_tables - existing_tables
 
         # Main downloads table
         cursor.execute(
@@ -128,7 +142,22 @@ class SQLiteStateTracker:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_product_type ON product_generation(product_type)")
 
         conn.commit()
-        logger.info(f"Initialized SQLite database at {self.db_path}")
+
+        # Log appropriate message based on database state
+        if not db_exists:
+            logger.info(f"Initialized new SQLite database at {self.db_path}")
+        elif missing_tables:
+            tables_list = ", ".join(sorted(missing_tables))
+            if len(missing_tables) == 1:
+                logger.info(
+                    f"Connected to existing SQLite database at {self.db_path} - initializing table {tables_list}"
+                )
+            else:
+                logger.info(
+                    f"Connected to existing SQLite database at {self.db_path} - initializing tables {tables_list}"
+                )
+        else:
+            logger.info(f"Connected to existing SQLite database at {self.db_path} - no new tables need to be created")
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get database connection."""

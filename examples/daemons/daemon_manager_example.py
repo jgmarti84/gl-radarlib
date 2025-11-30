@@ -38,7 +38,7 @@ def example_basic_daemon_manager():
         "0200": {"01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP", "CM"]},
     }
 
-    radar_name = "RMA1"
+    radar_name = "RMA2"
     base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))
 
     # Create manager configuration
