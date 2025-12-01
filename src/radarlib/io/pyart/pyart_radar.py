@@ -163,17 +163,15 @@ def normalize_fields_names(radar: Radar, idioma: int | bool | str = 1) -> Radar:
     return radar_norm
 
 
-def estandarizar_campos_RMA(radar: Radar, debug: bool = False, idioma: bool = True, replace_dbz_fields: bool = False):
-    return normalize_RMA_fields(radar, debug=debug, idioma=idioma, replace_dbz_fields=replace_dbz_fields)
+def estandarizar_campos_RMA(radar: Radar, idioma: bool = True, replace_dbz_fields: bool = False):
+    return normalize_RMA_fields(radar, idioma=idioma, replace_dbz_fields=replace_dbz_fields)
 
 
-def normalize_RMA_fields(
-    radar: Radar, debug=False, idioma: bool | int | str = True, replace_dbz_fields=False, logger_name=__name__
-):
+def normalize_RMA_fields(radar: Radar, idioma: bool | int | str = True, replace_dbz_fields=False):
 
     from radarlib.utils.fields_utils import calcular_zdr
 
-    logger = logging.getLogger(logger_name)
+    # logger = logging.getLogger(logger_name)
 
     try:
         # ======================================================================
@@ -201,14 +199,12 @@ def normalize_RMA_fields(
         # Genera ZDR (en caso de no existir)
         if "TDR" not in radar.fields.keys() and "TH" in radar.fields.keys() and "TV" in radar.fields.keys():
             radar = calcular_zdr(radar, ref_vertical="TV", ref_horizontal="TH", zdr_out_field="TDR")
-            if debug:
-                logger.debug("TDR Inexistente en Volumen: se ha generado.")
+            logger.debug("TDR Inexistente en Volumen: se ha generado.")
 
         # Genera ZDR (en caso de no existir)
         if "ZDR" not in radar.fields.keys() and "DBZH" in radar.fields.keys() and "DBZV" in radar.fields.keys():
             radar = calcular_zdr(radar, ref_vertical="DBZV", ref_horizontal="DBZH", zdr_out_field="ZDR")
-            if debug:
-                logger.debug("ZDR Inexistente en Volumen: se ha generado.")
+            logger.debug("ZDR Inexistente en Volumen: se ha generado.")
 
         # =====================================================================
         # Enmascaramiento de los Datos
@@ -240,8 +236,8 @@ def read_radar_netcdf(
     sweep: Optional[int] = None,
     normalize_names: bool = True,
     idioma: int | str | bool = "español",
-    debug: bool = False,
-    logger_name: str = __name__,
+    # debug: bool = False,
+    # logger_name: str = __name__,
 ):
     """
     Lee un volumen radar en formato NetCDF (CFRadial).
@@ -269,13 +265,13 @@ def read_radar_netcdf(
             logger.debug(f"ext_swps: {str(extract_sweeps)} sw: {str(sweep)}")
             radar = radar.extract_sweeps([sweep])
         if normalize_names:
-            normalize_RMA_fields(radar, debug=debug, idioma=idioma, logger_name=logger_name)
+            normalize_RMA_fields(radar, idioma=idioma)
         return radar
     else:
         raise NetCDFError(f"NetCDF file {netcdf_fname} does not exist.")
 
 
-def save_radar_netcdf(radar, filename_out=None, path_out=None, logger_name=__name__, **kwargs):
+def save_radar_netcdf(radar, filename_out=None, path_out=None, **kwargs):
     """Guarda un objeto Py-ART Radar en formato NetCDF (CFRadial).
     Parámetros:
     - radar: Objeto Radar a guardar.
@@ -285,7 +281,7 @@ def save_radar_netcdf(radar, filename_out=None, path_out=None, logger_name=__nam
     Retorna:
     - fullname: Ruta completa del archivo guardado.
     """
-    logger = logging.getLogger(logger_name)
+    # logger = logging.getLogger(logger_name)
 
     if filename_out is None:
         filename_out = radar.metadata["filename"]
@@ -303,151 +299,3 @@ def save_radar_netcdf(radar, filename_out=None, path_out=None, logger_name=__nam
     except Exception as e:
         logger.error("Error al guardar NetCDF: " + str(e))
         raise
-
-
-# def read_vol_RMA(
-#         filename, sweep=None, extract_sweeps=False,
-#         use_ftp=True, path_vol=None, debug=False, verbose=False,
-#         normalize_names=True, idioma='español', radar_db=None,
-#         logger_name=__name__, flexible_search=False, flexible_time_limit=10,
-#         regenerate=False, check_availables=False, **kwargs):
-
-#     from .standard import normalize_RMA_fields
-#     logger = logging.getLogger(logger_name)
-
-#     # inicializamos variables -------------------------------------------------
-#     if radar_db is None:
-#         radar_db = cf.radar_db
-#     url = radar_db['url']
-#     user = radar_db['user']
-#     password = radar_db['password']
-#     # base = radar_db['base']
-
-#     if not filename.endswith('.nc'):
-#         filename += '.nc'
-
-#     if path_vol is None:
-#         full_filename = get_full_path_from_RMA_filename(
-#             filename=filename, **kwargs)
-#     else:
-#         full_filename = os.path.join(path_vol, filename)
-#         use_ftp = False  # sino se generaría un error en la consulta al FTP
-
-#     # --------------------------------------------------------------------------
-#     if check_availables:
-#         check_available_volumes_from_local(
-#             filename, logger_name=logger_name, **kwargs)
-
-#         check_available_volumes_from_ftp(filename, url=url, user=user,
-#                                          password=password,
-#                                          logger_name=logger_name)
-#         logger.debug("*"*66)
-#         logger.debug("FIN DE CONSULTA: modificar nombre de archivo " +
-#                      "según se requiera !")
-#         logger.debug("*"*66)
-#         sys.exit(0)
-#     # -------------------------------------------------------------------------
-
-#     # Chequeamos si volumen esta en la base de datos local NETCDF ------------
-#     if os.path.isfile(full_filename) and not regenerate:
-#         radar = pyart.io.read(full_filename)
-
-#         if extract_sweeps and sweep is not None:
-#             # logger.debug ('Cargando NETCDF desde disco: recortamos vol')
-#             # logger.debug ('ext_swps: '+str(extract_sweeps)+' sw:'+str(sweep))
-#             radar = radar.extract_sweeps([sweep])
-#         if normalize_names:
-#             normalize_RMA_fields(radar, debug=debug, idioma=idioma,
-#                                  logger_name=logger_name)
-#         return radar
-
-#     # Chequeamos si volumen esta en la base de datos local BUFR ---------------
-#     logger.info('Convirtiendo NETCDF desde BUFR (local).')
-#     radar_name = filename.split('_')[0]
-#     bufr_list = [get_time_from_RMA_filename(filename)]
-#     update_netcdf_local_repo(
-#         radar_name=radar_name, bufr_list_to_update=bufr_list,
-#         verbose=False, debug=False, logger_name=logger_name,
-#         return_log=False, **kwargs)
-
-#     # Cargamos NetCDF convertido
-#     if os.path.isfile(full_filename):
-#         radar = pyart.io.read(full_filename)
-#         if sweep is not None and extract_sweeps:
-#             radar = radar.extract_sweeps([sweep])
-#         if normalize_names:
-#             normalize_RMA_fields(radar, debug=debug, idioma=idioma,
-#                                  logger_name=logger_name)
-#         return radar
-
-#     # Chequeamos si BUFR existe en el server FTP ------------------------------
-#     # De existir se descarga, convierte de BUFR a NetCDF y se carga
-#     if use_ftp:
-#         logger.info('Volumen no encontrado localmente, buscando en FTP ...')
-
-#         if not flexible_search:
-#             flexible_time_limit = 0
-
-#         init_date = (get_time_from_RMA_filename(filename) -
-#                      datetime.timedelta(seconds=5))
-#         end_date = init_date+datetime.timedelta(
-#                     seconds=10 + 60 * flexible_time_limit)
-
-#         radar_name = filename.split('_')[0]
-
-#         try:
-#             logger.info('')
-#             logger.info('Buscando archivos BUFR en FTP...')
-#             bufr_list_to_update = get_bufr_list_to_update(
-#                 init_date=init_date, end_date=end_date,
-#                 radar_name=radar_name, radar_db=radar_db,
-#                 verbose=verbose, debug=debug, logger_name=logger_name,
-#                 **kwargs)
-
-#             logger.info('')
-#             logger.info('Descargando archivos BUFR desde FTP...')
-#             update_bufr_local_repo(
-#                 radar_db=radar_db,
-#                 verbose=verbose, debug=debug,
-#                 radar_name=radar_name, bufr_list_to_update=bufr_list_to_update,
-#                 logger_name=logger_name, **kwargs)
-
-#             logger.info('')
-#             logger.info('Convirtiendo NetCDF...')
-#             logger.debug(bufr_list_to_update)
-#             netcdf_filenames_list = update_netcdf_local_repo(
-#                 radar_name=radar_name, bufr_list_to_update=bufr_list_to_update,
-#                 debug=debug, verbose=verbose, logger_name=logger_name,
-#                 **kwargs)
-
-#             logger.debug('Volumenes Convertidos:' + str(netcdf_filenames_list))
-
-#             if netcdf_filenames_list:
-#                 # FIXME
-#                 if flexible_search and len(netcdf_filenames_list[0]) > 1:
-#                     netcdf_filenames_list = netcdf_filenames_list[0]
-
-#                 full_filename = get_full_path_from_RMA_filename(
-#                     filename=netcdf_filenames_list[0], **kwargs)
-
-#                 logger.debug('')
-#                 logger.debug('Cargando NetCDF')
-
-#                 radar = pyart.io.read(full_filename)
-#                 if sweep is not None and extract_sweeps:
-#                     radar = radar.extract_sweeps([sweep])
-#                 if normalize_names:
-#                     normalize_RMA_fields(radar, debug=debug, idioma=idioma,
-#                                          logger_name=logger_name)
-#                 return radar
-
-#             else:
-#                 raise ValueError('Error: archivo NetCDF inexistente')
-
-#         except Exception as e:
-#             logger.error('Error generando volumen: '+filename + ': '+str(e))
-#             raise
-
-#     else:
-#         raise ValueError('Volumen de radar inexistente en base de datos ' +
-#                          'local. Intente consultando el servidor FTP')

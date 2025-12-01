@@ -52,7 +52,7 @@ class FTPClient:
         with ftp_connection_manager(self.host, self.user, self.password) as ftp:
             yield ftp
 
-    def list_files(self, remote_dir: str, method: str = "nlst") -> List[str]:
+    def list_files(self, remote_dir: str, method: str = "nlst") -> List[tuple[str, dict[str, str]]] | List[str]:
         """
         List files in a remote directory.
 

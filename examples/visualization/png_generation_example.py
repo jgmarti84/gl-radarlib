@@ -47,7 +47,7 @@ def example_fields_png():
 
         # Decode BUFR file using bufr_to_dict with legacy=True to get format
         # compatible with bufr_to_pyart_legacy
-        bufr_dict = bufr_to_dict(bufr_file, logger_name="example", legacy=False)
+        bufr_dict = bufr_to_dict(bufr_file, legacy=False)
 
         if bufr_dict is None:
             logger.warning(f"  Failed to decode BUFR file: {bufr_file}")

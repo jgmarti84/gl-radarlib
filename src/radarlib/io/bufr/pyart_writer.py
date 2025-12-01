@@ -191,7 +191,7 @@ def bufr_paths_to_pyart(
 
     fields = []
     for p in bufr_paths:
-        vol = bufr_to_dict(p, root_resources=root_resources, logger_name="bufr_to_pyart", legacy=False)
+        vol = bufr_to_dict(p, root_resources=root_resources, legacy=False)
         if vol is None:
             continue
         fields.append(vol)

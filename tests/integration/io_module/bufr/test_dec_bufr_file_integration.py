@@ -30,7 +30,7 @@ class TestBUFRDecodingConsistency:
 
     def test_decoded_dict_structure_matches(self, sample_bufr_file):
         """Test that decoded BUFR dict has all expected keys."""
-        decoded = bufr_to_dict(sample_bufr_file, root_resources=None, logger_name="test")
+        decoded = bufr_to_dict(sample_bufr_file, root_resources=None)
 
         # Current API returns a single field dict with 'data' and 'info' keys
         assert decoded is not None, "Decoded result is None"
@@ -53,7 +53,7 @@ class TestBUFRDecodingConsistency:
 
     def test_decoded_field_data_is_array(self, sample_bufr_file):
         """Test that decoded field contains data array."""
-        decoded = bufr_to_dict(sample_bufr_file, root_resources=None, logger_name="test")
+        decoded = bufr_to_dict(sample_bufr_file, root_resources=None)
 
         assert decoded is not None
         assert "data" in decoded
@@ -65,7 +65,7 @@ class TestBUFRDecodingConsistency:
 
     def test_decoded_field_values_valid(self, sample_bufr_file):
         """Test that decoded field values are physically reasonable."""
-        decoded = bufr_to_dict(sample_bufr_file, root_resources=None, logger_name="test")
+        decoded = bufr_to_dict(sample_bufr_file, root_resources=None)
 
         data = decoded["data"]  # type: ignore
 
@@ -89,7 +89,7 @@ class TestBUFRDecodingConsistency:
 
     def test_decoded_metadata_values_reasonable(self, sample_bufr_file):
         """Test that decoded metadata values are reasonable."""
-        decoded = bufr_to_dict(sample_bufr_file, root_resources=None, logger_name="test")
+        decoded = bufr_to_dict(sample_bufr_file, root_resources=None)
         info = decoded["info"]  # type: ignore
 
         # Date/time checks from 'ano_vol', 'mes_vol', etc.

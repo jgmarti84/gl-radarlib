@@ -32,7 +32,7 @@ def radar_object(sample_RMA11_vol1_bufr_files):
         )
 
     radar = read_radar_netcdf(str(netcdf_fname))
-    radar = estandarizar_campos_RMA(radar=radar, debug=False, idioma=0)  # type: ignore
+    radar = estandarizar_campos_RMA(radar=radar, idioma=0)  # type: ignore
     return radar
 
 

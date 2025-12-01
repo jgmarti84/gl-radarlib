@@ -58,7 +58,7 @@ def test_dec_bufr_file_monkeypatched(monkeypatch, sample_sweep_bytes):
     # <RADAR>_<ESTRATEGIA>_<NVOL>_<TIPO>_<TIMESTAMP>.BUFR
     test_filename = "RMA11_0315_01_KDP_20251020T151109Z.BUFR"
     meta_vol, sweeps, vol_data, run_log = bufr_mod.dec_bufr_file(
-        test_filename, root_resources=None, logger_name="test", parallel=False  # type: ignore[arg-type]
+        test_filename, root_resources=None, parallel=False  # type: ignore[arg-type]
     )
     assert isinstance(meta_vol, dict)
     assert vol_data.ndim == 2

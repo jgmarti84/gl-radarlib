@@ -32,7 +32,7 @@ class TestPyARTConversionConsistency:
     @pytest.fixture
     def decoded_field(self, sample_bufr_file):
         """Get decoded field for testing."""
-        decoded = bufr_to_dict(sample_bufr_file, root_resources=None, logger_name="test")
+        decoded = bufr_to_dict(sample_bufr_file, root_resources=None)
         return decoded
 
     def test_radar_object_created(self, decoded_field):

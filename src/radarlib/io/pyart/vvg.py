@@ -11,15 +11,17 @@ import numpy as np
 # import grc.global_parameters as cf
 from radarlib import config
 
+logger = logging.getLogger(__name__)
+
 
 def get_vertical_vinculation_gate_map(
     radar,
-    logger_name=__name__,
+    # logger_name=__name__,
     use_sweeps_above: float = 0,
     altitude_threshold=20000,
     save_vvg_map=True,
     root_cache=None,
-    verbose=False,
+    # verbose=False,
     regenerate_flag=False,
 ):
     """
@@ -70,12 +72,12 @@ def get_vertical_vinculation_gate_map(
     # ==========================================================================
     # Inicializamos Variables
     # ==========================================================================
-    logger = logging.getLogger(logger_name)
+    # logger = logging.getLogger(logger_name)
 
     if root_cache is None:
         root_cache = config.ROOT_CACHE_PATH
 
-    root_cache_vvgmap = root_cache + "VVG_Map/"
+    root_cache_vvgmap = os.path.join(root_cache, "VVG_Map/")
     if not os.path.isdir(root_cache_vvgmap):
         os.makedirs(root_cache_vvgmap)
 
@@ -112,7 +114,7 @@ def get_vertical_vinculation_gate_map(
 
         # leyendo hscan_map_data
         vvg_map = np.load(vvgm_filename + ".npy")
-        logger.debug("Leyendo vvgm de archivo ...") if verbose else None
+        logger.debug("Leyendo vvgm de archivo ...")
 
         vvg_map = np.ma.masked_invalid(vvg_map)
         vvg_map = np.ma.masked_equal(vvg_map, vvg_map.fill_value)

@@ -69,7 +69,7 @@ def test_end_to_end_bufr_multiple_files_to_pyart_radar(tmp_path: Path):
     # Decode all BUFR files into a list of field dicts
     decoded_fields = []
     for bufr_file in bufr_files:
-        decoded = bufr_to_dict(str(bufr_file), root_resources=None, logger_name="test")
+        decoded = bufr_to_dict(str(bufr_file), root_resources=None)
         if decoded is not None:
             decoded_fields.append(decoded)
 

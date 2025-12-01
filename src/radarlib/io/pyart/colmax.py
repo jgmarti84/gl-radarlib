@@ -33,7 +33,7 @@ def generate_colmax(
     TDR_umbral=8.5,
     TH_filter=False,
     TH_umbral=10,
-    logger_name=__name__,
+    # logger_name=__name__,
     save_changes=False,
     path_out=None,
 ) -> Radar:
@@ -51,7 +51,7 @@ def generate_colmax(
         wrad_threshold=WRAD_umbral,
         zdr_filter=TDR_filter,
         zdr_threshold=TDR_umbral,
-        logger_name=logger_name,
+        # logger_name=logger_name,
         save_changes=save_changes,
         path_out=path_out,
         verbose=False,
@@ -76,7 +76,7 @@ def generate_colmax_(
     zdr_field: Optional[str] = None,
     zdr_filter: bool = True,
     zdr_threshold: float = 8.5,
-    logger_name: str = __name__,
+    # logger_name: str = __name__,
     save_changes: bool = False,
     path_out: Optional[str] = None,
     regenerate_flag: bool = False,
@@ -138,7 +138,7 @@ def generate_colmax_(
     ValueError
         If radar has fewer than 2 sweeps or source field is missing.
     """
-    logger = logging.getLogger(logger_name)
+    # logger = logging.getLogger(logger_name)
 
     # Initialize field names
     if refl_field is None:
@@ -281,7 +281,7 @@ def _apply_polarimetric_filters(
                 source_field=refl_field,
                 target_fields=[target_field],
                 overwrite_fields=True,
-                logger_name=logger.name,
+                # logger_name=logger.name,
             )
         except Exception as e:
             logger.warning(f"Error filtering with {refl_field}: {e}")
@@ -295,7 +295,7 @@ def _apply_polarimetric_filters(
                 source_field=rhv_field,
                 target_fields=[target_field],
                 overwrite_fields=True,
-                logger_name=logger.name,
+                # logger_name=logger.name,
             )
         except Exception as e:
             logger.warning(f"Error filtering with {rhv_field}: {e}")
@@ -309,7 +309,7 @@ def _apply_polarimetric_filters(
                 source_field=zdr_field,
                 target_fields=[target_field],
                 overwrite_fields=True,
-                logger_name=logger.name,
+                # logger_name=logger.name,
             )
         except Exception as e:
             logger.warning(f"Error filtering with {zdr_field}: {e}")
@@ -323,7 +323,7 @@ def _apply_polarimetric_filters(
                 source_field=wrad_field,
                 target_fields=[target_field],
                 overwrite_fields=True,
-                logger_name=logger.name,
+                # logger_name=logger.name,
             )
         except Exception as e:
             logger.warning(f"Error filtering with {wrad_field}: {e}")

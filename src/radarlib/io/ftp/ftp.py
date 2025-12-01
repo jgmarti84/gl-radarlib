@@ -485,12 +485,3 @@ async def exponential_backoff_retry(coro, max_retries: int = 5, base_delay: floa
             logger.warning(f"Attempt {attempt} failed: {e}. Retrying in {sleep_time:.1f} seconds...")
             print(f"Retry attempt {attempt} after {sleep_time:.1f}s due to {e}")
             await asyncio.sleep(sleep_time)
-
-
-if __name__ == "__main__":
-    # For usage examples, see:
-    # - examples/ftp_client_example.py
-    # - examples/ftp_daemon_example.py
-    # - examples/ftp_integration_example.py
-    print("This module provides low-level FTP functions.")
-    print("For usage examples, see the examples/ directory.")

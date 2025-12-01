@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Apr 24 22:36:41 2017
-@author: jsaffe
+Field filtering functions for Py-ART radar objects.
 """
 import logging
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def filterfield_excluding_gates_below(
@@ -15,11 +16,11 @@ def filterfield_excluding_gates_below(
     target_fields=None,
     overwrite_fields=False,
     new_fields_complement_name="f",
-    logger_name="__name__",
+    # logger_name="__name__",
     add_applied_filters_field=False,
 ):
 
-    logger = logging.getLogger(logger_name)
+    # logger = logging.getLogger(logger_name)
 
     if target_fields is None:
         target_fields = radar.fields.keys()
@@ -75,11 +76,11 @@ def filterfield_excluding_gates_above(
     target_fields=None,
     overwrite_fields=False,
     new_fields_complement_name="f",
-    logger_name="__name__",
+    # logger_name="__name__",
     add_applied_filters_field=False,
 ):
 
-    logger = logging.getLogger(logger_name)
+    # logger = logging.getLogger(logger_name)
 
     if target_fields is None:
         target_fields = radar.fields.keys()
@@ -128,11 +129,9 @@ def filterfield_excluding_gates_above(
         logger.error("Error en filtrado de campos. Field " + source_field + " no encontrado.")
 
 
-def filter_fields_from_mask(
-    radar, mask, target_fields=None, overwrite_fields=False, new_fields_complement_name="f", logger_name="__name__"
-):
+def filter_fields_from_mask(radar, mask, target_fields=None, overwrite_fields=False, new_fields_complement_name="f"):
 
-    logger = logging.getLogger(logger_name)
+    # logger = logging.getLogger(logger_name)
 
     if target_fields is None:
         target_fields = radar.fields.keys()

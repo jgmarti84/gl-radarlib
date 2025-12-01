@@ -366,7 +366,6 @@ class ProductGenerationDaemon:
                         WRAD_umbral=config.COLMAX_WRAD_UMBRAL,
                         TDR_filter=config.COLMAX_TDR_FILTER,
                         TDR_umbral=config.COLMAX_TDR_UMBRAL,
-                        logger_name=logger.name,
                         save_changes=True,
                     )
                     logger.debug(f"COLMAX generated successfully for {filename_stem}.")
@@ -498,7 +497,6 @@ class ProductGenerationDaemon:
                                 mean_threshold=config.GRC_MEAN_THRESHOLD,
                                 target_fields=[hrefl_field],
                                 overwrite_fields=False,
-                                logger_name=logger.name,
                             )
 
                         sweep = get_lowest_nsweep(radar)

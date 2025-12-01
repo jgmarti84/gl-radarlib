@@ -47,7 +47,7 @@ def example_single_field_geotiff():
         logger.info(f"Decoding file {i+1}/{num_files}: {Path(bufr_file).name}")
 
         # Decode BUFR file using bufr_to_dict
-        bufr_dict = bufr_to_dict(bufr_file, logger_name="example", legacy=False)
+        bufr_dict = bufr_to_dict(bufr_file, legacy=False)
 
         if bufr_dict is None:
             logger.warning(f"  Failed to decode BUFR file: {bufr_file}")
@@ -119,7 +119,7 @@ def example_multi_field_utm_geotiff():
         bufr_file = str(bufr_files[i])
         logger.info(f"Decoding file {i+1}/{num_files}: {Path(bufr_file).name}")
 
-        bufr_dict = bufr_to_dict(bufr_file, logger_name="example", legacy=False)
+        bufr_dict = bufr_to_dict(bufr_file, legacy=False)
 
         if bufr_dict is None:
             logger.warning(f"  Failed to decode BUFR file: {bufr_file}")
@@ -194,7 +194,7 @@ def example_multi_format_export():
         bufr_file = str(bufr_files[i])
         logger.info(f"Decoding file {i+1}/{num_files}: {Path(bufr_file).name}")
 
-        bufr_dict = bufr_to_dict(bufr_file, logger_name="example", legacy=False)
+        bufr_dict = bufr_to_dict(bufr_file, legacy=False)
 
         if bufr_dict is None:
             logger.warning(f"  Failed to decode BUFR file: {bufr_file}")

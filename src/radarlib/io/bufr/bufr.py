@@ -12,6 +12,8 @@ import pandas as pd
 
 from radarlib import config
 
+logger = logging.getLogger(__name__)
+
 
 class SweepConsistencyException(Exception):
     pass
@@ -664,7 +666,7 @@ def build_info_dict(meta_vol: dict, meta_sweeps: list[dict]) -> dict:
 def dec_bufr_file(
     bufr_filename: str,
     root_resources: str | None = None,
-    logger_name: Optional[str] = None,
+    # logger_name: Optional[str] = None,
     parallel: bool = True,
 ) -> Tuple[Dict[str, Any], List[dict], np.ndarray, List[List[Any]]]:
     """
@@ -694,8 +696,8 @@ def dec_bufr_file(
         No se modifica la lógica de validación existente; las excepciones
         se registran en el logger y se propagan cuando corresponda.
     """
-    filename = bufr_filename.split("/")[-1]
-    logger = logging.getLogger((logger_name or __name__) + "." + filename.split("_")[0])
+    # filename = bufr_filename.split("/")[-1]
+    # logger = logging.getLogger((logger_name or __name__) + "." + filename.split("_")[0])
 
     run_log = []
 
@@ -780,7 +782,7 @@ def dec_bufr_file(
 def bufr_to_dict(
     bufr_filename: str,
     root_resources: str | None = None,
-    logger_name: str | None = None,
+    # logger_name: str | None = None,
     legacy: bool = False,
 ) -> Optional[dict]:
     """
@@ -803,8 +805,8 @@ def bufr_to_dict(
     # TODO: include a check for input type. bufr_filename should be str or Path
     # and not a list nor dict. Potentially include a fallback in case it's a
     # list of strings
-    filename = bufr_filename.split("/")[-1]
-    logger_local = logging.getLogger((logger_name or __name__) + "." + filename.split("_")[0])
+    # filename = bufr_filename.split("/")[-1]
+    # logger_local = logging.getLogger((logger_name or __name__) + "." + filename.split("_")[0])
     # Implement retry/backoff for transient failures (e.g., I/O, C-library transient errors)
     max_attempts = 3
     base_delay = 0.5
@@ -813,7 +815,7 @@ def bufr_to_dict(
             meta_vol, meta_sweeps, vol_data, run_log = dec_bufr_file(
                 bufr_filename=bufr_filename,
                 root_resources=root_resources,
-                logger_name=logger_name,
+                # logger_name=logger_name,
             )
 
             vol: Dict[str, Any] = {"data": vol_data}
@@ -827,7 +829,7 @@ def bufr_to_dict(
 
         except Exception as e:
             # Log with local logger including attempt count
-            logger_local.warning(f"Attempt {attempt}/{max_attempts} failed for {bufr_filename}: {e}")
+            logger.warning(f"Attempt {attempt}/{max_attempts} failed for {bufr_filename}: {e}")
             if attempt < max_attempts:
                 # exponential backoff with jitter
                 delay = base_delay * (2 ** (attempt - 1))
@@ -835,29 +837,10 @@ def bufr_to_dict(
                 time.sleep(delay)
                 continue
             else:
-                logger_local.error("Error en bufr_to_dict (final): %s", e, exc_info=True)
+                logger.error("Error en bufr_to_dict (final): %s", e, exc_info=True)
                 # attach to run_log for compatibility (if exists)
                 try:
                     run_log.append([3, str(e)])
                 except Exception:
                     pass
                 return None
-
-
-if __name__ == "__main__":
-
-    bufr_fname = "AR5_1000_1_DBZH_20240101T000746Z.BUFR"
-    path = "tests/data/bufr/"
-    bufr_path = os.path.join(path, bufr_fname)
-    bufr_dict = bufr_to_dict(bufr_path, logger_name="bufr_process", legacy=False)
-
-    with decbufr_library_context() as libs:
-        metadata = get_metadata(libs, bufr_path)
-        size = get_size_data(libs, bufr_path)
-        vol = get_raw_volume(libs, bufr_path, size)
-        nsweeps = int(vol[0])
-        elevations = get_elevations(libs, bufr_path, max_elev=nsweeps)
-        sw = parse_sweeps(vol, nsweeps, elevations)
-
-    metadata, sweeps, vol_data, run_log = dec_bufr_file(bufr_path, logger_name="bufr_process")
-    print("finished!")

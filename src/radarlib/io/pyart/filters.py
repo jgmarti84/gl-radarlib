@@ -6,6 +6,8 @@ from pyart.config import get_field_name
 
 from radarlib.io.pyart.fieldfilters import filter_fields_from_mask
 
+logger = logging.getLogger(__name__)
+
 
 def filter_fields_grc1(
     radar,
@@ -30,14 +32,14 @@ def filter_fields_grc1(
     size=80,
     mean_filter=True,
     mean_threshold=0.85,
-    logger_name=__name__,
+    # logger_name=__name__,
     verbose=False,
     target_fields=None,
     overwrite_fields=False,
     new_fields_complement_name="f",
 ):
 
-    logger = logging.getLogger(logger_name)
+    # logger = logging.getLogger(logger_name)
 
     if refl_field is None:
         refl_field = get_field_name("reflectivity")
@@ -125,7 +127,7 @@ def filter_fields_grc1(
         target_fields=target_fields,
         overwrite_fields=overwrite_fields,
         new_fields_complement_name=new_fields_complement_name,
-        logger_name=logger_name,
+        # logger_name=logger_name,
     )
     logger.debug("Generando nuevos campos filtrados.") if (verbose and not overwrite_fields) else None
     logger.debug("Sobreescribiendo campos con datos filtrados.") if (verbose and overwrite_fields) else None
@@ -137,12 +139,12 @@ def despeckle_field_with_mean_threshold(
     radar,
     field,
     label_dict=None,
-    threshold=-100,
-    size=10,
+    threshold: float | int = -100,
+    size: float | int = 10,
     gatefilter=None,
-    delta=5.0,
-    mean_filter=True,
-    mean_threshold=-100,
+    delta: float = 5.0,
+    mean_filter: bool = True,
+    mean_threshold: float | int = -100,
 ):
     """
     Despeckle a radar volume by identifying small objects in each scan and

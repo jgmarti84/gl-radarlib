@@ -11,7 +11,6 @@ from typing import Generator, List, Optional, Tuple
 from radarlib.utils.names_utils import build_vol_types_regex
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 class FTPError(Exception):
@@ -59,10 +58,6 @@ class RadarFTPClient:
     # Context Manager
     # ----------------------
     def __enter__(self):
-        # self.ftp = ftplib.FTP(self.host)
-        # self.ftp.login(self.user, self.password)
-        # logger.info(f"Connected to FTP {self.host}")
-        # return self
         self._connect()
         return self
 
@@ -77,12 +72,6 @@ class RadarFTPClient:
                     pass
         logger.info("FTP connection closed")
         self.ftp = None
-        # if self.ftp:
-        #     try:
-        #         self.ftp.quit()
-        #     except Exception:
-        #         self.ftp.close()
-        # logger.info("FTP connection closed")
 
     def is_connected(self) -> bool:
         """
@@ -123,15 +112,6 @@ class RadarFTPClient:
     # ----------------------
     # Low-level listing
     # ----------------------
-    # def list_dir(self, remote_path: str) -> List[str]:
-    #     """
-    #     List directory contents using single active connection.
-    #     """
-    #     try:
-    #         self.ftp.cwd(remote_path)
-    #         return self.ftp.nlst()
-    #     except ftplib.all_errors as e:
-    #         raise FTPError(f"Error listing directory {remote_path}: {e}")
     def list_dir(self, remote_path: str) -> List[str]:
         """
         List directory contents using single active connection.
@@ -156,38 +136,6 @@ class RadarFTPClient:
     # ----------------------
     # File download
     # ----------------------
-    # def download_file(self, remote_path: str, local_path: Path) -> Path:
-    #     """Download a single file efficiently using the current session."""
-    #     self._ensure_connection()
-    #     local_path.parent.mkdir(parents=True, exist_ok=True)
-    #     try:
-    #         with open(local_path, "wb") as f:
-    #             # remote_path puede ser una Path o string
-    #             fname = remote_path if isinstance(remote_path, str) else remote_path.as_posix()
-    #             # Si remote_path contiene subdirectorios, moverse al directorio padre
-    #             try:
-    #                 # intentar usar objeto Path si se pasó
-    #                 rp = Path(fname)
-    #                 if rp.parent.as_posix() != ".":
-    #                     self.ftp.cwd(rp.parent.as_posix())
-    #                     retrieve_name = rp.name
-    #                 else:
-    #                     retrieve_name = fname
-    #             except Exception:
-    #                 retrieve_name = fname
-    #             self.ftp.retrbinary(f"RETR {retrieve_name}", f.write)
-    #         logger.info(f"Downloaded {remote_path} -> {local_path}")
-    #         return local_path
-    #     except EOFError as e:
-    #         logger.warning(f"EOFError while downloading {remote_path}: attempting reconnect and retry: {e}")
-    #         try:
-    #             self._ensure_connection()
-    #             return self.download_file(remote_path, local_path)
-    #         except Exception as e2:
-    #             raise FTPError(f"Error downloading {remote_path} after reconnect: {e2}")
-    #     except ftplib.all_errors as e:
-    #         raise FTPError(f"Error downloading {remote_path}: {e}")
-
     def download_file(self, remote_path: str, local_path: Path) -> Path:
         """Download a single file efficiently using the current session."""
         local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -210,7 +158,7 @@ class RadarFTPClient:
         include_start: bool = True,
         include_end: bool = True,
         vol_types: Optional[dict] | re.Pattern = None,
-    ) -> Generator[Tuple[datetime, str, str], None, None]:
+    ) -> Generator[Tuple[datetime, str, str | Path], None, None]:
         """
         Traverse FTP folders for BUFR files, constrained to dt_start..dt_end.
         Correctly handles boundary pruning at each level.
@@ -312,7 +260,7 @@ class RadarFTPClientAsync(RadarFTPClient):
     - Download methods are wrapped with asyncio.to_thread so they run concurrently.
     """
 
-    def __init__(self, host: str, user: str, password: str, base_dir: str = "L2", max_workers: int = None):
+    def __init__(self, host: str, user: str, password: str, base_dir: str = "L2", max_workers: Optional[int] = None):
         super().__init__(host, user, password, base_dir)
         self._max_workers = max_workers
         self._semaphore = asyncio.Semaphore(self.max_workers)
@@ -336,7 +284,7 @@ class RadarFTPClientAsync(RadarFTPClient):
     # ------------------------------
     # Async parallel downloads
     # ------------------------------
-    async def download_file_async(self, remote_path: str, local_path: Path) -> Path:
+    async def download_file_async(self, remote_path: Path, local_path: Path) -> Path:
         """
         Each download runs inside its own short-lived FTP connection,
         dispatched safely in a thread via asyncio.to_thread.
@@ -344,7 +292,7 @@ class RadarFTPClientAsync(RadarFTPClient):
         async with self._semaphore:
             return await asyncio.to_thread(self._download_with_fresh_connection, remote_path, local_path)
 
-    def _download_with_fresh_connection(self, remote_path: str, local_path: Path) -> Path:
+    def _download_with_fresh_connection(self, remote_path: Path, local_path: Path) -> Path:
         """This is blocking; run per-task in thread for safety."""
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -363,53 +311,7 @@ class RadarFTPClientAsync(RadarFTPClient):
         except ftplib.all_errors as e:
             raise FTPError(f"Error downloading {remote_path}: {e}")
 
-    async def download_files_parallel(self, files: List[Tuple[str, Path]]) -> List[Path]:
+    async def download_files_parallel(self, files: List[Tuple[Path, Path]]) -> List[Path]:
         """Download multiple files asynchronously in parallel."""
         tasks = [asyncio.create_task(self.download_file_async(remote, local)) for remote, local in files]
         return await asyncio.gather(*tasks, return_exceptions=False)
-
-
-# if __name__ == "__main__":
-#     from config import load_config
-#     import os
-
-#     CONFIG = load_config()
-#     ip = CONFIG["ftp"]["host"]
-#     user = CONFIG["ftp"]["user"]
-#     password = CONFIG["ftp"]["password"]
-
-#     root_bufr_path = os.path.join(CONFIG["paths"]["project_root"], CONFIG["paths"]["bufr"])
-
-#     start_date = datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc)
-#     end_date = datetime(2024, 1, 15, 10, 5, tzinfo=timezone.utc)
-
-#     radar_name = "RMA11"
-
-#     radar_local_dir = Path(f"{root_bufr_path}/{radar_name}")
-#     radar_local_dir.mkdir(parents=True, exist_ok=True)
-
-#     with RadarFTPClient(ip, user, password, base_dir="L2/") as client:
-#         # Traverse a radar’s files
-#         for dt, fname, remote in client.traverse_radar(radar_name, dt_start=start_date, dt_end=end_date):
-#             print(dt, fname, remote)
-#             local_path = radar_local_dir / fname
-#             client.download_file(remote, local_path)
-
-
-# async def main():
-
-#     async with RadarFTPClientAsync(ip, user, password) as client:
-#         # traversal comes from the sync class
-#         candidates = []
-
-#         for dt, fname, remote in client.traverse_radar(radar_name, dt_start=start_date, dt_end=end_date):
-#             local_path = radar_local_dir / fname
-#             candidates.append((remote, local_path))
-
-#         # parallel async downloads
-#         results = await client.download_files_parallel(candidates)
-#         print("Downloaded:", results)
-
-# asyncio.run(main())
-
-# print("All done.")

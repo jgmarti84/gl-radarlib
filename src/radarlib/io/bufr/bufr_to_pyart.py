@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+from pyart.core.radar import Radar
 
 from radarlib.utils.names_utils import get_netcdf_filename_from_bufr_filename
 
@@ -46,7 +47,7 @@ def _find_reference_field(fields: List[dict]) -> int:
     return max_idx
 
 
-def _create_empty_radar(n_gates: int, n_rays: int, n_sweeps: int, radar_name: str):
+def _create_empty_radar(n_gates: int, n_rays: int, n_sweeps: int) -> Radar:
     """Create an empty pyart PPI radar object using testing factory.
 
     This keeps the implementation testable without constructing full
@@ -94,7 +95,6 @@ def bufr_fields_to_pyart_radar(
     include_scan_metadata: bool = False,
     root_scan_config_files: Optional[Path] = None,
     config: Optional[Dict[str, Any]] = None,
-    debug: bool = False,
 ) -> Any:
     """Convert a list of BUFR-parsed field dicts to a Py-ART Radar object.
 
@@ -118,8 +118,8 @@ def bufr_fields_to_pyart_radar(
     ref_rays_per_sweep = int(ref_field["info"]["sweeps"]["nrayos"].iloc[0])
     ref_nsweeps = int(ref_field["info"].get("nsweeps", 1))
 
-    radar_name = ref_field["info"]["metadata"].get("instrument_name", "RADAR")
-    radar = _create_empty_radar(ref_ngates, ref_rays_per_sweep, ref_nsweeps, radar_name)
+    # radar_name = ref_field["info"]["metadata"].get("instrument_name", "RADAR")
+    radar = _create_empty_radar(ref_ngates, ref_rays_per_sweep, ref_nsweeps)
 
     # range axis
     gate_size = int(ref_field["info"]["sweeps"]["gate_size"].iloc[0])
@@ -183,7 +183,6 @@ def bufr_paths_to_pyart(
     include_scan_metadata: bool = False,
     root_scan_config_files: Optional[Path] = None,
     config: Optional[Dict[str, Any]] = None,
-    debug: bool = False,
     save_path: Optional[Path] = None,
 ) -> Any:
     """Decode one or more BUFR files and convert to Py-ART Radar object."""
@@ -191,7 +190,7 @@ def bufr_paths_to_pyart(
 
     fields = []
     for p in bufr_paths:
-        vol = bufr_to_dict(p, root_resources=root_resources, logger_name="bufr_to_pyart", legacy=False)
+        vol = bufr_to_dict(p, root_resources=root_resources, legacy=False)
         if vol is None:
             continue
         fields.append(vol)
@@ -201,13 +200,11 @@ def bufr_paths_to_pyart(
         include_scan_metadata=include_scan_metadata,
         root_scan_config_files=root_scan_config_files,
         config=config,
-        debug=debug,
     )
 
     if save_path is not None:
         save_path = Path(save_path)
         save_path.mkdir(parents=True, exist_ok=True)
-        # base = Path(p).stem
         netcdf_fname = get_netcdf_filename_from_bufr_filename(str(Path(p).stem))
         out_file = save_path / netcdf_fname
         save_radar_to_cfradial(radar, out_file)
@@ -219,7 +216,6 @@ def bufr_to_pyart(
     fields: List[dict],
     *,
     debug: bool = False,
-    logger_name: str = __name__,
     include_scan_metadata: bool = False,
     root_scan_config_files: Optional[Path] = None,
 ) -> Any:
@@ -254,7 +250,6 @@ def bufr_to_pyart(
         fields,
         include_scan_metadata=include_scan_metadata,
         root_scan_config_files=root_scan_config_files,
-        debug=debug,
     )
 
 
