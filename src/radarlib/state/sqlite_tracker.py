@@ -3,6 +3,7 @@
 
 import hashlib
 import logging
+import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -143,6 +144,9 @@ class SQLiteStateTracker:
 
         conn.commit()
 
+        # Run migrations to add new columns if needed
+        self._migrate_schema()
+
         # Log appropriate message based on database state
         if not db_exists:
             logger.info(f"Initialized new SQLite database at {self.db_path}")
@@ -158,6 +162,45 @@ class SQLiteStateTracker:
                 )
         else:
             logger.info(f"Connected to existing SQLite database at {self.db_path} - no new tables need to be created")
+
+    def _migrate_schema(self) -> None:
+        """
+        Apply schema migrations for new columns.
+
+        Adds cleanup-related columns to existing tables if they don't exist.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # Check and add cleanup_status column to downloads table
+        cursor.execute("PRAGMA table_info(downloads)")
+        download_columns = {row[1] for row in cursor.fetchall()}
+
+        if "cleanup_status" not in download_columns:
+            cursor.execute("ALTER TABLE downloads ADD COLUMN cleanup_status TEXT DEFAULT 'active'")
+            logger.info("Added cleanup_status column to downloads table")
+
+        if "cleaned_at" not in download_columns:
+            cursor.execute("ALTER TABLE downloads ADD COLUMN cleaned_at TEXT")
+            logger.info("Added cleaned_at column to downloads table")
+
+        # Check and add cleanup_status column to volume_processing table
+        cursor.execute("PRAGMA table_info(volume_processing)")
+        volume_columns = {row[1] for row in cursor.fetchall()}
+
+        if "cleanup_status" not in volume_columns:
+            cursor.execute("ALTER TABLE volume_processing ADD COLUMN cleanup_status TEXT DEFAULT 'active'")
+            logger.info("Added cleanup_status column to volume_processing table")
+
+        if "cleaned_at" not in volume_columns:
+            cursor.execute("ALTER TABLE volume_processing ADD COLUMN cleaned_at TEXT")
+            logger.info("Added cleaned_at column to volume_processing table")
+
+        # Add indexes for cleanup queries
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_download_cleanup_status ON downloads(cleanup_status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_volume_cleanup_status ON volume_processing(cleanup_status)")
+
+        conn.commit()
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get database connection."""
@@ -1038,3 +1081,470 @@ class SQLiteStateTracker:
             logger.info(f"Reset {num_reset} stuck {product_type} generations from 'processing' back to 'pending'")
 
         return num_reset
+
+    # ==================================================================================
+    # Cleanup Methods - Metadata-Only Retention Policy
+    # ==================================================================================
+
+    def get_bufr_files_for_cleanup(
+        self, retention_days: int, radar_name: Optional[str] = None, product_types: Optional[List[str]] = None
+    ) -> List[Dict]:
+        """
+        Get BUFR files that are eligible for cleanup based on retention policy.
+
+        Files are eligible for cleanup when:
+        - They belong to a completed volume (NetCDF generated)
+        - All specified product types have been successfully generated
+        - They are older than the retention period
+        - They haven't been cleaned up yet (cleanup_status = 'active')
+
+        Args:
+            retention_days: Minimum age in days before a file can be cleaned up
+            radar_name: Optional filter by radar name
+            product_types: List of product types that must be completed before cleanup.
+                          If None, defaults to ['image'].
+
+        Returns:
+            List of dictionaries with file information ready for cleanup
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        cutoff_iso = cutoff_date.isoformat()
+
+        if product_types is None:
+            product_types = ["image"]
+
+        # Build query for product type checks
+        product_type_placeholders = ", ".join("?" for _ in product_types)
+        product_type_count = len(product_types)
+
+        if radar_name:
+            cursor.execute(
+                f"""
+                SELECT d.*, vp.volume_id, vp.netcdf_path, vp.status as volume_status
+                FROM downloads d
+                INNER JOIN volume_processing vp
+                    ON d.radar_name = vp.radar_name
+                    AND d.strategy = vp.strategy
+                    AND d.vol_nr = vp.vol_nr
+                    AND d.observation_datetime = vp.observation_datetime
+                WHERE d.status = 'completed'
+                    AND d.radar_name = ?
+                    AND (d.cleanup_status = 'active' OR d.cleanup_status IS NULL)
+                    AND d.observation_datetime < ?
+                    AND vp.status = 'completed'
+                    AND (
+                        SELECT COUNT(*)
+                        FROM product_generation pg
+                        WHERE pg.volume_id = vp.volume_id
+                            AND pg.product_type IN ({product_type_placeholders})
+                            AND pg.status = 'completed'
+                    ) = ?
+                ORDER BY d.observation_datetime ASC
+            """,
+                (radar_name, cutoff_iso, *product_types, product_type_count),
+            )
+        else:
+            cursor.execute(
+                f"""
+                SELECT d.*, vp.volume_id, vp.netcdf_path, vp.status as volume_status
+                FROM downloads d
+                INNER JOIN volume_processing vp
+                    ON d.radar_name = vp.radar_name
+                    AND d.strategy = vp.strategy
+                    AND d.vol_nr = vp.vol_nr
+                    AND d.observation_datetime = vp.observation_datetime
+                WHERE d.status = 'completed'
+                    AND (d.cleanup_status = 'active' OR d.cleanup_status IS NULL)
+                    AND d.observation_datetime < ?
+                    AND vp.status = 'completed'
+                    AND (
+                        SELECT COUNT(*)
+                        FROM product_generation pg
+                        WHERE pg.volume_id = vp.volume_id
+                            AND pg.product_type IN ({product_type_placeholders})
+                            AND pg.status = 'completed'
+                    ) = ?
+                ORDER BY d.observation_datetime ASC
+            """,
+                (cutoff_iso, *product_types, product_type_count),
+            )
+
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_netcdf_files_for_cleanup(
+        self, retention_days: int, radar_name: Optional[str] = None, product_types: Optional[List[str]] = None
+    ) -> List[Dict]:
+        """
+        Get NetCDF files (volumes) that are eligible for cleanup based on retention policy.
+
+        Files are eligible for cleanup when:
+        - All specified product types have been successfully generated
+        - They are older than the retention period
+        - They haven't been cleaned up yet (cleanup_status = 'active')
+
+        Args:
+            retention_days: Minimum age in days before a file can be cleaned up
+            radar_name: Optional filter by radar name
+            product_types: List of product types that must be completed before cleanup.
+                          If None, defaults to ['image'].
+
+        Returns:
+            List of dictionaries with volume information ready for cleanup
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        cutoff_iso = cutoff_date.isoformat()
+
+        if product_types is None:
+            product_types = ["image"]
+
+        # Build query for product type checks
+        product_type_placeholders = ", ".join("?" for _ in product_types)
+        product_type_count = len(product_types)
+
+        if radar_name:
+            cursor.execute(
+                f"""
+                SELECT vp.*
+                FROM volume_processing vp
+                WHERE vp.status = 'completed'
+                    AND vp.radar_name = ?
+                    AND (vp.cleanup_status = 'active' OR vp.cleanup_status IS NULL)
+                    AND vp.observation_datetime < ?
+                    AND vp.netcdf_path IS NOT NULL
+                    AND (
+                        SELECT COUNT(*)
+                        FROM product_generation pg
+                        WHERE pg.volume_id = vp.volume_id
+                            AND pg.product_type IN ({product_type_placeholders})
+                            AND pg.status = 'completed'
+                    ) = ?
+                ORDER BY vp.observation_datetime ASC
+            """,
+                (radar_name, cutoff_iso, *product_types, product_type_count),
+            )
+        else:
+            cursor.execute(
+                f"""
+                SELECT vp.*
+                FROM volume_processing vp
+                WHERE vp.status = 'completed'
+                    AND (vp.cleanup_status = 'active' OR vp.cleanup_status IS NULL)
+                    AND vp.observation_datetime < ?
+                    AND vp.netcdf_path IS NOT NULL
+                    AND (
+                        SELECT COUNT(*)
+                        FROM product_generation pg
+                        WHERE pg.volume_id = vp.volume_id
+                            AND pg.product_type IN ({product_type_placeholders})
+                            AND pg.status = 'completed'
+                    ) = ?
+                ORDER BY vp.observation_datetime ASC
+            """,
+                (cutoff_iso, *product_types, product_type_count),
+            )
+
+        return [dict(row) for row in cursor.fetchall()]
+
+    def mark_bufr_cleanup_status(
+        self, filename: str, cleanup_status: str, error_message: Optional[str] = None
+    ) -> bool:
+        """
+        Mark a BUFR file's cleanup status.
+
+        Args:
+            filename: Name of the file
+            cleanup_status: New status ('active', 'pending_cleanup', 'cleaned', 'cleanup_failed')
+            error_message: Optional error message if cleanup failed
+
+        Returns:
+            True if the update was successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        if cleanup_status == "cleaned":
+            cursor.execute(
+                """
+                UPDATE downloads
+                SET cleanup_status = ?, cleaned_at = ?, updated_at = ?
+                WHERE filename = ?
+            """,
+                (cleanup_status, now, now, filename),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE downloads
+                SET cleanup_status = ?, updated_at = ?
+                WHERE filename = ?
+            """,
+                (cleanup_status, now, filename),
+            )
+
+        conn.commit()
+        success = cursor.rowcount > 0
+        if success:
+            logger.debug(f"Marked BUFR file '{filename}' cleanup_status as {cleanup_status}")
+        return success
+
+    def mark_netcdf_cleanup_status(
+        self, volume_id: str, cleanup_status: str, error_message: Optional[str] = None
+    ) -> bool:
+        """
+        Mark a NetCDF volume's cleanup status.
+
+        Args:
+            volume_id: Volume identifier
+            cleanup_status: New status ('active', 'pending_cleanup', 'cleaned', 'cleanup_failed')
+            error_message: Optional error message if cleanup failed
+
+        Returns:
+            True if the update was successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        if cleanup_status == "cleaned":
+            cursor.execute(
+                """
+                UPDATE volume_processing
+                SET cleanup_status = ?, cleaned_at = ?, updated_at = ?
+                WHERE volume_id = ?
+            """,
+                (cleanup_status, now, now, volume_id),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE volume_processing
+                SET cleanup_status = ?, updated_at = ?
+                WHERE volume_id = ?
+            """,
+                (cleanup_status, now, volume_id),
+            )
+
+        conn.commit()
+        success = cursor.rowcount > 0
+        if success:
+            logger.debug(f"Marked NetCDF volume '{volume_id}' cleanup_status as {cleanup_status}")
+        return success
+
+    def delete_file_safely(self, file_path: str) -> bool:
+        """
+        Safely delete a file from disk.
+
+        Args:
+            file_path: Path to the file to delete
+
+        Returns:
+            True if file was deleted or doesn't exist, False on error
+        """
+        try:
+            path = Path(file_path)
+            if path.exists():
+                os.remove(path)
+                logger.debug(f"Deleted file: {file_path}")
+            else:
+                logger.debug(f"File already deleted or doesn't exist: {file_path}")
+            return True
+        except OSError as e:
+            logger.error(f"Failed to delete file {file_path}: {e}")
+            return False
+
+    def cleanup_bufr_file(self, filename: str) -> bool:
+        """
+        Clean up a single BUFR file (delete from disk, keep metadata).
+
+        This is an atomic operation: marks file as pending, deletes it,
+        then marks as cleaned. On failure, rolls back to active status.
+
+        Args:
+            filename: Name of the file to cleanup
+
+        Returns:
+            True if cleanup was successful, False otherwise
+        """
+        # Get file info first
+        file_info = self.get_file_info(filename)
+        if not file_info:
+            logger.warning(f"Cannot cleanup BUFR file '{filename}': not found in database")
+            return False
+
+        local_path = file_info.get("local_path")
+        if not local_path:
+            logger.warning(f"Cannot cleanup BUFR file '{filename}': no local path recorded")
+            return False
+
+        # Mark as pending cleanup
+        self.mark_bufr_cleanup_status(filename, "pending_cleanup")
+
+        # Attempt to delete file
+        if self.delete_file_safely(local_path):
+            # Success - mark as cleaned
+            self.mark_bufr_cleanup_status(filename, "cleaned")
+            logger.info(f"Successfully cleaned up BUFR file '{filename}'")
+            return True
+        else:
+            # Failure - rollback to active
+            self.mark_bufr_cleanup_status(filename, "active", "Failed to delete file from disk")
+            logger.error(f"Failed to cleanup BUFR file '{filename}'")
+            return False
+
+    def cleanup_netcdf_file(self, volume_id: str) -> bool:
+        """
+        Clean up a single NetCDF file (delete from disk, keep metadata).
+
+        This is an atomic operation: marks volume as pending, deletes it,
+        then marks as cleaned. On failure, rolls back to active status.
+
+        Args:
+            volume_id: Volume identifier
+
+        Returns:
+            True if cleanup was successful, False otherwise
+        """
+        # Get volume info first
+        volume_info = self.get_volume_info(volume_id)
+        if not volume_info:
+            logger.warning(f"Cannot cleanup NetCDF volume '{volume_id}': not found in database")
+            return False
+
+        netcdf_path = volume_info.get("netcdf_path")
+        if not netcdf_path:
+            logger.warning(f"Cannot cleanup NetCDF volume '{volume_id}': no netcdf path recorded")
+            return False
+
+        # Mark as pending cleanup
+        self.mark_netcdf_cleanup_status(volume_id, "pending_cleanup")
+
+        # Attempt to delete file
+        if self.delete_file_safely(netcdf_path):
+            # Success - mark as cleaned
+            self.mark_netcdf_cleanup_status(volume_id, "cleaned")
+            logger.info(f"Successfully cleaned up NetCDF volume '{volume_id}'")
+            return True
+        else:
+            # Failure - rollback to active
+            self.mark_netcdf_cleanup_status(volume_id, "active", "Failed to delete file from disk")
+            logger.error(f"Failed to cleanup NetCDF volume '{volume_id}'")
+            return False
+
+    def get_cleanup_stats(self, radar_name: Optional[str] = None) -> Dict:
+        """
+        Get cleanup statistics.
+
+        Args:
+            radar_name: Optional filter by radar name
+
+        Returns:
+            Dictionary with cleanup statistics
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        stats = {
+            "bufr_active": 0,
+            "bufr_cleaned": 0,
+            "bufr_pending": 0,
+            "netcdf_active": 0,
+            "netcdf_cleaned": 0,
+            "netcdf_pending": 0,
+        }
+
+        # BUFR stats
+        if radar_name:
+            cursor.execute(
+                """
+                SELECT cleanup_status, COUNT(*) as count
+                FROM downloads
+                WHERE radar_name = ?
+                GROUP BY cleanup_status
+            """,
+                (radar_name,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT cleanup_status, COUNT(*) as count
+                FROM downloads
+                GROUP BY cleanup_status
+            """
+            )
+
+        for row in cursor.fetchall():
+            status = row[0] or "active"
+            count = row[1]
+            if status == "active":
+                stats["bufr_active"] = count
+            elif status == "cleaned":
+                stats["bufr_cleaned"] = count
+            elif status == "pending_cleanup":
+                stats["bufr_pending"] = count
+
+        # NetCDF stats
+        if radar_name:
+            cursor.execute(
+                """
+                SELECT cleanup_status, COUNT(*) as count
+                FROM volume_processing
+                WHERE radar_name = ?
+                GROUP BY cleanup_status
+            """,
+                (radar_name,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT cleanup_status, COUNT(*) as count
+                FROM volume_processing
+                GROUP BY cleanup_status
+            """
+            )
+
+        for row in cursor.fetchall():
+            status = row[0] or "active"
+            count = row[1]
+            if status == "active":
+                stats["netcdf_active"] = count
+            elif status == "cleaned":
+                stats["netcdf_cleaned"] = count
+            elif status == "pending_cleanup":
+                stats["netcdf_pending"] = count
+
+        return stats
+
+    def can_redownload_bufr(self, filename: str) -> Optional[Dict]:
+        """
+        Check if a cleaned BUFR file can be re-downloaded and get its remote path.
+
+        This enables lazy re-download from FTP when needed.
+
+        Args:
+            filename: Name of the file to check
+
+        Returns:
+            Dictionary with remote_path and metadata if file can be re-downloaded,
+            None otherwise
+        """
+        file_info = self.get_file_info(filename)
+        if not file_info:
+            return None
+
+        if file_info.get("cleanup_status") != "cleaned":
+            return None
+
+        return {
+            "filename": file_info["filename"],
+            "remote_path": file_info["remote_path"],
+            "radar_name": file_info.get("radar_name"),
+            "observation_datetime": file_info.get("observation_datetime"),
+            "checksum": file_info.get("checksum"),
+        }

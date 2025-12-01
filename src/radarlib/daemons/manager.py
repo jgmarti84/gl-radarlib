@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Daemon manager for Download, Processing, and Product Generation daemons."""
+"""Daemon manager for Download, Processing, Product Generation, and Cleanup daemons."""
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
+from radarlib.daemons.cleanup_daemon import CleanupDaemon, CleanupDaemonConfig
 from radarlib.daemons.download_daemon import DownloadDaemon, DownloadDaemonConfig
 from radarlib.daemons.processing_daemon import ProcessingDaemon, ProcessingDaemonConfig
 from radarlib.daemons.product_daemon import ProductGenerationDaemon, ProductGenerationDaemonConfig
@@ -32,11 +33,16 @@ class DaemonManagerConfig:
         download_poll_interval: Seconds between download checks
         processing_poll_interval: Seconds between processing checks
         product_poll_interval: Seconds between product generation checks
+        cleanup_poll_interval: Seconds between cleanup checks (default: 1800 = 30 min)
         enable_download_daemon: Whether to start download daemon
         enable_processing_daemon: Whether to start processing daemon
         enable_product_daemon: Whether to start product generation daemon
+        enable_cleanup_daemon: Whether to start cleanup daemon
         product_type: Type of product to generate ('image', 'geotiff', etc.)
         add_colmax: Whether to generate COLMAX field in product daemon
+        bufr_retention_days: Days to keep BUFR files before cleanup (default: 7)
+        netcdf_retention_days: Days to keep NetCDF files before cleanup (default: 7)
+        cleanup_product_types: Product types that must be completed before cleanup
     """
 
     radar_name: str
@@ -51,14 +57,19 @@ class DaemonManagerConfig:
     download_poll_interval: int = 60
     processing_poll_interval: int = 30
     product_poll_interval: int = 30
+    cleanup_poll_interval: int = 1800  # 30 minutes
     enable_download_daemon: bool = True
     bufr_dir: Optional[Path] = None
     enable_processing_daemon: bool = True
     netcdf_dir: Optional[Path] = None
     enable_product_daemon: bool = True
     product_dir: Optional[Path] = None
+    enable_cleanup_daemon: bool = False  # Disabled by default for safety
     product_type: str = "image"
     add_colmax: bool = True
+    bufr_retention_days: int = 7
+    netcdf_retention_days: int = 7
+    cleanup_product_types: List[str] = field(default_factory=lambda: ["image"])
 
     def __post_init__(self):
         """Post-initialization checks."""
@@ -70,7 +81,7 @@ class DaemonManagerConfig:
 
 class DaemonManager:
     """
-    Simple manager for FTP download, BUFR processing, and product generation daemons.
+    Simple manager for FTP download, BUFR processing, product generation, and cleanup daemons.
 
     Provides easy start/stop control and configuration management for all daemons.
 
@@ -92,6 +103,7 @@ class DaemonManager:
         self.download_daemon: Optional[DownloadDaemon] = None
         self.processing_daemon: Optional[ProcessingDaemon] = None
         self.product_daemon: Optional[ProductGenerationDaemon] = None
+        self.cleanup_daemon: Optional[CleanupDaemon] = None
         self._tasks = []
         self._running = False
 
@@ -156,12 +168,24 @@ class DaemonManager:
         )
         return ProductGenerationDaemon(product_config)
 
+    def _create_cleanup_daemon(self) -> CleanupDaemon:
+        """Create cleanup daemon with current configuration."""
+        cleanup_config = CleanupDaemonConfig(
+            state_db=self.state_db,
+            radar_name=self.config.radar_name,
+            poll_interval=self.config.cleanup_poll_interval,
+            bufr_retention_days=self.config.bufr_retention_days,
+            netcdf_retention_days=self.config.netcdf_retention_days,
+            product_types=self.config.cleanup_product_types,
+        )
+        return CleanupDaemon(cleanup_config)
+
     async def start(self) -> None:
         """
         Start enabled daemons.
 
-        Starts the download, processing, and/or product generation daemons based on configuration.
-        Runs until stopped or cancelled.
+        Starts the download, processing, product generation, and/or cleanup daemons
+        based on configuration. Runs until stopped or cancelled.
         """
         if self._running:
             logger.warning("Daemons are already running")
@@ -192,6 +216,13 @@ class DaemonManager:
             task = asyncio.create_task(self.product_daemon.run())
             self._tasks.append(("product", task))
             logger.info("Started product generation daemon")
+
+        # Create and start cleanup daemon
+        if self.config.enable_cleanup_daemon:
+            self.cleanup_daemon = self._create_cleanup_daemon()
+            task = asyncio.create_task(self.cleanup_daemon.run())
+            self._tasks.append(("cleanup", task))
+            logger.info("Started cleanup daemon")
 
         if not self._tasks:
             logger.warning("No daemons enabled in configuration")
@@ -224,6 +255,10 @@ class DaemonManager:
         if self.product_daemon:
             self.product_daemon.stop()
             logger.info("Stopped product generation daemon")
+
+        if self.cleanup_daemon:
+            self.cleanup_daemon.stop()
+            logger.info("Stopped cleanup daemon")
 
         # Cancel any running tasks
         for name, task in self._tasks:
@@ -330,6 +365,11 @@ class DaemonManager:
                 "enabled": self.config.enable_product_daemon,
                 "running": self.product_daemon is not None and self.product_daemon._running,
                 "stats": self.product_daemon.get_stats() if self.product_daemon else None,
+            },
+            "cleanup_daemon": {
+                "enabled": self.config.enable_cleanup_daemon,
+                "running": self.cleanup_daemon is not None and self.cleanup_daemon._running,
+                "stats": self.cleanup_daemon.get_stats() if self.cleanup_daemon else None,
             },
         }
         return status
