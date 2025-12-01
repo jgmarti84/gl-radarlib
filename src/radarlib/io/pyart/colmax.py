@@ -206,11 +206,11 @@ def generate_colmax_(
     sw_tuples_az, sweep_ref = get_ordered_sweep_list(radar_copy, use_sweeps_above)
     vvg_map = get_vertical_vinculation_gate_map(
         radar=radar_copy,
-        logger_name=logger.name,
+        # logger_name=logger.name,
         use_sweeps_above=use_sweeps_above,
         save_vvg_map=True,
         root_cache=root_cache,
-        verbose=verbose,
+        # verbose=verbose,
         regenerate_flag=regenerate_flag,
     )
 

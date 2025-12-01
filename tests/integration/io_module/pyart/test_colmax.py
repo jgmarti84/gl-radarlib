@@ -86,27 +86,6 @@ class TestGenerateColmax:
             assert result_radar is not None
             assert "COLMAX" in result_radar.fields
 
-    # def test_colmax_insufficient_sweeps(self):
-    #     """Test that COLMAX fails gracefully with single sweep."""
-    #     pytest.importorskip("pyart")
-    #     from pyart.core import Radar as PyartRadar
-    #     import numpy as np
-
-    #     # Create minimal single-sweep radar
-    #     radar = PyartRadar(
-    #         time={"data": np.array([0]), "units": "seconds since 2020-01-01"},
-    #         metadata={},
-    #         latitude={"data": np.array([0])},
-    #         longitude={"data": np.array([0])},
-    #         altitude={"data": np.array([0])},
-    #     )
-    #     radar.nsweeps = 1
-    #     radar.nrays = 360
-    #     radar.ngates = 100
-
-    #     result = generate_colmax(radar=radar)
-    #     assert result is False, "COLMAX should fail with single sweep"
-
     def test_colmax_missing_source_field(self, radar_object):
         """Test that COLMAX fails gracefully with missing source field."""
         radar = radar_object
@@ -198,11 +177,9 @@ class TestColmaxPerformance:
         sw_tuples_az, sweep_ref = get_ordered_sweep_list(radar, use_sweeps_above=0)
         vvg_map = get_vertical_vinculation_gate_map(
             radar=radar,
-            logger_name=__name__,
             use_sweeps_above=0,
             save_vvg_map=True,
             root_cache=config.ROOT_CACHE_PATH,
-            verbose=False,
             regenerate_flag=False,
         )
 
@@ -274,11 +251,9 @@ class TestColmaxPerformance:
         sw_tuples_az, sweep_ref = get_ordered_sweep_list(radar, use_sweeps_above=0)
         vvg_map = get_vertical_vinculation_gate_map(
             radar=radar,
-            logger_name=__name__,
             use_sweeps_above=0,
             save_vvg_map=True,
             root_cache=config.ROOT_CACHE_PATH,
-            verbose=False,
             regenerate_flag=False,
         )
 
