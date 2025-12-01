@@ -3,7 +3,6 @@
 
 import hashlib
 import logging
-import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1350,7 +1349,7 @@ class SQLiteStateTracker:
         try:
             path = Path(file_path)
             if path.exists():
-                os.remove(path)
+                path.unlink()
                 logger.debug(f"Deleted file: {file_path}")
             else:
                 logger.debug(f"File already deleted or doesn't exist: {file_path}")
