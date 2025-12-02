@@ -8,7 +8,10 @@
         "PYTHONUNBUFFERED": "1",
         "FTP_HOST": "200.16.116.24",
         "FTP_USER": "IMontamat",
-        "FTP_PASS": "1m0nt"
+        "FTP_PASS": "1m0nt",
+        "ROOT_CACHE_PATH": "/workspaces/radarlib/cache",
+        "ROOT_RADAR_FILES_PATH": "/workspaces/radarlib/data/radares",
+        "ROOT_RADAR_PRODUCTS_PATH": "/workspaces/radarlib/product_output"
     },
     "customizations": {
         "vscode": {
@@ -22,7 +25,8 @@
             "extensions": [
                 "ms-python.python",
                 "ms-toolsai.jupyter",
-                "ms-vscode.cpptools"
+                "ms-vscode.cpptools",
+                "qwtel.sqlite-viewer"
             ]
         }
     },

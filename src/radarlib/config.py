@@ -23,8 +23,7 @@ from radarlib.resources import resolve_bufr_resources_path
 # When running as installed package, these fallback to reasonable defaults
 _this_file = Path(__file__).resolve()
 root_package = _this_file.parent
-root_project = root_package.parent.parent
-root_src = root_package.parent
+root_project = Path.home().parent / "radarlib"
 root_data = root_project / "data"
 root_products = root_project / "product_output"
 
@@ -156,16 +155,8 @@ def _auto_load() -> None:
             else:
                 _config[key] = env_val
 
-    # # 2) package-local radarlib.json (src/radarlib/radarlib.json)
-    # pkg_local = Path(__file__).resolve().parent / "radarlib.json"
-    # if _try_load_file(str(pkg_local)):
-    #     return
 
-    # # 3) project root candidate (one level up)
-    # project_local = Path(__file__).resolve().parent.parent / "radarlib.json"
-    # _try_load_file(str(project_local))
-
-
+# 2) package config file
 _auto_load()
 
 
