@@ -67,7 +67,19 @@ echo "Generando documentación PDF..."
 echo ""
 
 if command -v xelatex &> /dev/null; then
-    # Usar XeLaTeX para mejor soporte de Unicode
+    # Detect available fonts for better compatibility
+    MAIN_FONT="DejaVu Serif"
+    MONO_FONT="DejaVu Sans Mono"
+    
+    # Check if DejaVu fonts are available, fallback to system fonts if not
+    if ! fc-list | grep -q "DejaVu Serif" 2>/dev/null; then
+        MAIN_FONT="Liberation Serif"
+    fi
+    if ! fc-list | grep -q "DejaVu Sans Mono" 2>/dev/null; then
+        MONO_FONT="Liberation Mono"
+    fi
+    
+    # Use XeLaTeX for better Unicode support
     pandoc "${MD_FILES[@]}" \
         -o "$OUTPUT_PDF" \
         --from markdown \
@@ -76,8 +88,8 @@ if command -v xelatex &> /dev/null; then
         -V geometry:margin=1in \
         -V fontsize=11pt \
         -V lang=es-419 \
-        -V mainfont="DejaVu Serif" \
-        -V monofont="DejaVu Sans Mono" \
+        -V mainfont="$MAIN_FONT" \
+        -V monofont="$MONO_FONT" \
         -V documentclass=report \
         -V colorlinks=true \
         -V linkcolor=blue \
@@ -86,7 +98,7 @@ if command -v xelatex &> /dev/null; then
         --highlight-style=tango \
         --metadata title="Documentación de radarlib" \
         --metadata author="Grupo Radar Córdoba (GRC)" \
-        --metadata date="$(date +%Y-%m-%d)"
+        --metadata date="v0.1.0"
     
     echo "✅ PDF generado exitosamente: $OUTPUT_PDF"
 else
@@ -104,7 +116,7 @@ else
         --highlight-style=tango \
         --metadata title="Documentación de radarlib" \
         --metadata author="Grupo Radar Córdoba (GRC)" \
-        --metadata date="$(date +%Y-%m-%d)" \
+        --metadata date="v0.1.0" \
         -c "https://cdn.simplecss.org/simple.min.css"
     
     echo "✅ HTML generado: $OUTPUT_HTML"
