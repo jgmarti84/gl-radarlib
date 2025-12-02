@@ -16,7 +16,11 @@ aioftp = "^0.22.0"
 numpy = "^2.3.5"
 pandas = "^2.3.3"
 arm-pyart = "^2.1.1"
-# Add your runtime dependencies here
+xarray = "^2024.0.0"
+netcdf4 = "^1.7.0"
+pillow = "^10.0.0"
+scipy = "^1.14.0"
+matplotlib = "^3.9.0"
 
 # dev deps using the new group API
 [tool.poetry.group.dev.dependencies]

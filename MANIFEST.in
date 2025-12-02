@@ -1,0 +1,15 @@
+# Include BUFR resources (C library, configuration files, etc.)
+recursive-include src/radarlib/io/bufr/bufr_resources *
+
+# Include documentation and license files
+include README.md
+include LICENSE
+
+# Exclude development files and cache
+exclude .gitignore
+exclude .github
+exclude .pytest_cache
+exclude .mypy_cache
+exclude .tox
+global-exclude __pycache__
+global-exclude *.pyc

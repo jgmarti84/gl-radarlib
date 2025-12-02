@@ -13,16 +13,33 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-# workspace root/project path. Prefer environment (GITHUB_WORKSPACE/WORKSPACE), fall back to two levels up.
-root_project = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-root_src = os.path.join(root_project, "src")
-root_package = os.path.join(root_src, "radarlib")
-root_data = os.path.join(root_project, "data")
-root_products = os.path.join(root_project, "product_output")
+# Import resource resolver for package data
+from radarlib.resources import resolve_bufr_resources_path
+
+# Workspace/project paths (for development/testing only)
+# When running as installed package, these fallback to reasonable defaults
+_this_file = Path(__file__).resolve()
+root_package = _this_file.parent
+root_project = root_package.parent.parent
+root_src = root_package.parent
+root_data = root_project / "data"
+root_products = root_project / "product_output"
+
+# Resolve BUFR resources path using importlib for wheel-safe access
+try:
+    _bufr_resources_path = str(resolve_bufr_resources_path())
+except Exception as e:
+    # Fallback for development: use direct path
+    _bufr_resources_path = str(root_package / "io" / "bufr" / "bufr_resources")
+    import warnings
+
+    warnings.warn(f"Could not resolve BUFR resources via importlib, using fallback: {e}", stacklevel=2)
+
 DEFAULTS: Dict[str, Any] = {
-    "BUFR_RESOURCES_PATH": os.path.join(root_package, "io", "bufr", "bufr_resources"),
+    "BUFR_RESOURCES_PATH": _bufr_resources_path,
     "ROOT_CACHE_PATH": os.path.join(root_project, "cache"),
     "ROOT_RADAR_FILES_PATH": os.path.join(root_data, "radares"),
     "ROOT_RADAR_PRODUCTS_PATH": root_products,
