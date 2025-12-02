@@ -160,6 +160,7 @@ class TestGenerateColmax:
         assert radar is not result_radar
 
 
+@pytest.mark.integration
 class TestColmaxPerformance:
     """Test suite for COLMAX performance improvements."""
 
