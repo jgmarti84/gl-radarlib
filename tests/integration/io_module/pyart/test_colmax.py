@@ -36,6 +36,7 @@ def radar_object(sample_RMA11_vol1_bufr_files):
     return radar
 
 
+@pytest.mark.integration
 class TestGenerateColmax:
     """Test suite for COLMAX generation."""
 
