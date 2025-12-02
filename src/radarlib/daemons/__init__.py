@@ -7,6 +7,7 @@ This module provides the core daemons for the radar data processing pipeline:
 - **DownloadDaemon**: Monitors FTP server and downloads BUFR files
 - **ProcessingDaemon**: Processes BUFR files and creates NetCDF volumes
 - **ProductGenerationDaemon**: Generates visualization products (PNG, GeoTIFF) from NetCDF
+- **CleanupDaemon**: Manages disk space by cleaning up processed files
 - **DaemonManager**: Orchestrates all daemons for a complete pipeline
 
 Example:
@@ -17,6 +18,7 @@ Example:
 """
 
 # Main daemons
+from radarlib.daemons.cleanup_daemon import CleanupDaemon, CleanupDaemonConfig
 from radarlib.daemons.download_daemon import DownloadDaemon, DownloadDaemonConfig, DownloadDaemonError
 
 # Legacy daemons (for backward compatibility)
@@ -34,6 +36,8 @@ __all__ = [
     "ProcessingDaemonConfig",
     "ProductGenerationDaemon",
     "ProductGenerationDaemonConfig",
+    "CleanupDaemon",
+    "CleanupDaemonConfig",
     "DaemonManager",
     "DaemonManagerConfig",
     # Legacy daemons

@@ -60,6 +60,10 @@ def example_basic_daemon_manager():
         # product_dir=Path(os.path.join(config.ROOT_RADAR_PRODUCTS_PATH, radar_name)),
         product_type="image",
         add_colmax=True,
+        enable_cleanup_daemon=True,
+        netcdf_retention_days=2 / 24,
+        bufr_retention_days=2 / 24,
+        cleanup_poll_interval=1800,
     )
 
     # Create manager
