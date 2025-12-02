@@ -108,7 +108,7 @@ class CleanupDaemon:
         """
         self._running = True
 
-        logger.info(f"Starting Cleanup daemon")
+        logger.info("Starting Cleanup daemon")
         if self.config.radar_name:
             logger.info(f"Filtering cleanup for radar: {self.config.radar_name}")
         logger.info(

@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """Tests for the CleanupDaemon and cleanup-related functionality."""
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -352,14 +350,6 @@ class TestCleanupDaemonIntegration:
         tracker.mark_volume_processing(volume_id, "completed", str(tmp_path / "test.nc"))
         tracker.register_product_generation(volume_id, "image")
         tracker.mark_product_status(volume_id, "image", "completed")
-
-        config = CleanupDaemonConfig(
-            state_db=state_db,
-            radar_name="RMA1",
-            bufr_retention_days=7,  # 7 day retention
-        )
-
-        daemon = CleanupDaemon(config)
 
         # Get files ready for cleanup
         files = tracker.get_bufr_files_for_cleanup(7, "RMA1", ["image"])
