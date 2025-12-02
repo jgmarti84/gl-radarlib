@@ -1250,9 +1250,7 @@ class SQLiteStateTracker:
 
         return [dict(row) for row in cursor.fetchall()]
 
-    def mark_bufr_cleanup_status(
-        self, filename: str, cleanup_status: str, error_message: Optional[str] = None
-    ) -> bool:
+    def mark_bufr_cleanup_status(self, filename: str, cleanup_status: str, error_message: Optional[str] = None) -> bool:
         """
         Mark a BUFR file's cleanup status.
 
