@@ -118,7 +118,7 @@ DEFAULTS: Dict[str, Any] = {
     "GRC_DESPECKLE_FILTER": True,
     "GRC_MEAN_FILTER": True,
     "GRC_MEAN_THRESHOLD": 0.85,
-    "DEFAULT_VOLUME_TYPES": default_volume_types,
+    "VOLUME_TYPES": default_volume_types,
 }
 
 _config: Dict[str, Any] = DEFAULTS.copy()
@@ -252,7 +252,7 @@ GRC_RHOHV_THRESHOLD2: float = get("GRC_RHOHV_THRESHOLD2")
 GRC_DESPECKLE_FILTER: bool = get("GRC_DESPECKLE_FILTER")
 GRC_MEAN_FILTER: bool = get("GRC_MEAN_FILTER")
 GRC_MEAN_THRESHOLD: float = get("GRC_MEAN_THRESHOLD")
-DEFAULT_VOLUME_TYPES: Dict[str, Dict[str, list]] = get("DEFAULT_VOLUME_TYPES")
+VOLUME_TYPES: Dict[str, Dict[str, list]] = get("VOLUME_TYPES")
 
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)

@@ -24,8 +24,6 @@
             },
             "extensions": [
                 "ms-python.python",
-                "ms-toolsai.jupyter",
-                "ms-vscode.cpptools",
                 "qwtel.sqlite-viewer"
             ]
         }
