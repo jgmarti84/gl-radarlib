@@ -37,6 +37,13 @@ except Exception as e:
 
     warnings.warn(f"Could not resolve BUFR resources via importlib, using fallback: {e}", stacklevel=2)
 
+default_volume_types: Dict[str, Dict[str, list]] = {
+    "0315": {
+        "01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP"],
+        "02": ["VRAD", "WRAD"]
+        }
+    }
+
 DEFAULTS: Dict[str, Any] = {
     "BUFR_RESOURCES_PATH": _bufr_resources_path,
     "ROOT_CACHE_PATH": os.path.join(root_project, "cache"),
@@ -114,6 +121,7 @@ DEFAULTS: Dict[str, Any] = {
     "GRC_DESPECKLE_FILTER": True,
     "GRC_MEAN_FILTER": True,
     "GRC_MEAN_THRESHOLD": 0.85,
+    "DEFAULT_VOLUME_TYPES": default_volume_types
 }
 
 _config: Dict[str, Any] = DEFAULTS.copy()
@@ -152,6 +160,11 @@ def _auto_load() -> None:
                 try:
                     _config[key] = type(default_val)(env_val)
                 except ValueError:
+                    pass
+            elif isinstance(default_val, dict):
+                try:
+                    _config[key] = json.loads(env_val)
+                except:
                     pass
             else:
                 _config[key] = env_val
@@ -242,6 +255,7 @@ GRC_RHOHV_THRESHOLD2: float = get("GRC_RHOHV_THRESHOLD2")
 GRC_DESPECKLE_FILTER: bool = get("GRC_DESPECKLE_FILTER")
 GRC_MEAN_FILTER: bool = get("GRC_MEAN_FILTER")
 GRC_MEAN_THRESHOLD: float = get("GRC_MEAN_THRESHOLD")
+DEFAULT_VOLUME_TYPES: Dict[str, Dict[str, list]] = get("DEFAULT_VOLUME_TYPES")
 
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)
