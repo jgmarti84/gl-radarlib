@@ -24,4 +24,3 @@ src/radarlib/cacheVVG_Map/
 # Generated documentation (keep source .md files)
 docs/es/*.html
 docs/es/*.pdf
-

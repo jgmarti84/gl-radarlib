@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 class RadarMonitoringSystem:
     """Sistema de monitoreo de radar integrado con radarlib."""
-    
+
     def __init__(
         self,
         radar_codes: List[str],
@@ -63,7 +63,7 @@ class RadarMonitoringSystem:
     ):
         """
         Inicializar el sistema de monitoreo.
-        
+
         Args:
             radar_codes: Lista de códigos de radar a monitorear (ej: ["RMA1", "RMA3"])
             base_output_dir: Directorio base para salida
@@ -75,14 +75,14 @@ class RadarMonitoringSystem:
         self.ftp_config = ftp_config
         self.volume_types = volume_types
         self.managers: Dict[str, DaemonManager] = {}
-        
+
         # Crear directorios
         self.base_output_dir.mkdir(parents=True, exist_ok=True)
-        
+
     def create_daemon_config(self, radar_code: str) -> DaemonManagerConfig:
         """Crear configuración de daemon para un radar específico."""
         radar_path = self.base_output_dir / radar_code
-        
+
         return DaemonManagerConfig(
             radar_name=radar_code,
             base_path=radar_path,
@@ -105,35 +105,35 @@ class RadarMonitoringSystem:
             product_type="image",
             add_colmax=True,
         )
-    
+
     async def start_monitoring(self):
         """Iniciar monitoreo de todos los radares."""
         tasks = []
-        
+
         for radar_code in self.radar_codes:
             logger.info(f"Iniciando monitoreo para {radar_code}")
-            
+
             config = self.create_daemon_config(radar_code)
             manager = DaemonManager(config)
             self.managers[radar_code] = manager
-            
+
             task = asyncio.create_task(manager.start())
             tasks.append(task)
-        
+
         try:
             await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             logger.info("Deteniendo todos los daemons...")
             for manager in self.managers.values():
                 manager.stop()
-    
+
     def get_status(self) -> Dict:
         """Obtener estado de todos los radares monitoreados."""
         status = {}
         for radar_code, manager in self.managers.items():
             status[radar_code] = manager.get_status()
         return status
-    
+
     def stop_all(self):
         """Detener todos los daemons."""
         for manager in self.managers.values():
@@ -142,17 +142,17 @@ class RadarMonitoringSystem:
 
 class ManualRadarProcessor:
     """Procesador manual de archivos de radar."""
-    
+
     def __init__(self, output_dir: Path):
         """
         Inicializar el procesador.
-        
+
         Args:
             output_dir: Directorio de salida para productos
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def process_bufr_files(
         self,
         bufr_files: List[str],
@@ -161,18 +161,18 @@ class ManualRadarProcessor:
     ) -> Dict:
         """
         Procesar una lista de archivos BUFR y generar productos.
-        
+
         Args:
             bufr_files: Lista de rutas a archivos BUFR
             generate_colmax_field: Si generar campo COLMAX
             fields_to_plot: Campos a graficar (None = usar configuración)
-        
+
         Returns:
             Dict con resultados del procesamiento
         """
         if fields_to_plot is None:
             fields_to_plot = config.FIELDS_TO_PLOT
-        
+
         results = {
             'decoded_volumes': [],
             'radar_object': None,
@@ -180,7 +180,7 @@ class ManualRadarProcessor:
             'geotiff_files': {},
             'errors': []
         }
-        
+
         # Paso 1: Decodificar archivos BUFR
         logger.info(f"Decodificando {len(bufr_files)} archivos BUFR...")
         for bufr_file in bufr_files:
@@ -195,11 +195,11 @@ class ManualRadarProcessor:
             except Exception as e:
                 results['errors'].append(f"Excepción en {bufr_file}: {e}")
                 logger.error(f"  ✗ {Path(bufr_file).name}: {e}")
-        
+
         if not results['decoded_volumes']:
             logger.error("No se pudieron decodificar archivos")
             return results
-        
+
         # Paso 2: Crear objeto Radar PyART
         logger.info("Creando objeto Radar PyART...")
         try:
@@ -210,7 +210,7 @@ class ManualRadarProcessor:
             results['errors'].append(f"Error creando Radar: {e}")
             logger.error(f"Error creando objeto Radar: {e}")
             return results
-        
+
         # Paso 3: Generar COLMAX (opcional)
         if generate_colmax_field:
             logger.info("Generando campo COLMAX...")
@@ -228,21 +228,21 @@ class ManualRadarProcessor:
                 logger.info("  ✓ COLMAX generado")
             except Exception as e:
                 logger.warning(f"  No se pudo generar COLMAX: {e}")
-        
+
         # Paso 4: Generar gráficos PNG
         logger.info("Generando gráficos PNG...")
         png_dir = self.output_dir / "png"
         png_dir.mkdir(exist_ok=True)
-        
+
         plot_config = RadarPlotConfig(
             figsize=(15, 15),
             dpi=config.PNG_DPI,
             transparent=True
         )
-        
+
         # Filtrar campos disponibles
         available_fields = [f for f in fields_to_plot if f in radar.fields]
-        
+
         try:
             results['png_files'] = plot_multiple_fields(
                 radar,
@@ -255,12 +255,12 @@ class ManualRadarProcessor:
         except Exception as e:
             results['errors'].append(f"Error generando PNG: {e}")
             logger.error(f"Error generando PNG: {e}")
-        
+
         # Paso 5: Exportar GeoTIFF
         logger.info("Exportando GeoTIFF...")
         geotiff_dir = self.output_dir / "geotiff"
         geotiff_dir.mkdir(exist_ok=True)
-        
+
         try:
             results['geotiff_files'] = export_fields_to_geotiff(
                 radar,
@@ -273,17 +273,17 @@ class ManualRadarProcessor:
         except Exception as e:
             results['errors'].append(f"Error exportando GeoTIFF: {e}")
             logger.error(f"Error exportando GeoTIFF: {e}")
-        
+
         return results
-    
+
     def save_radar_netcdf(self, radar, filename: str) -> Path:
         """Guardar objeto Radar a NetCDF."""
         from radarlib.io.bufr.bufr_to_pyart import save_radar_to_cfradial
-        
+
         netcdf_dir = self.output_dir / "netcdf"
         netcdf_dir.mkdir(exist_ok=True)
         output_file = netcdf_dir / filename
-        
+
         return save_radar_to_cfradial(radar, output_file)
 
 
@@ -292,7 +292,7 @@ def ejemplo_monitoreo_automatico():
     print("=" * 60)
     print("Ejemplo: Sistema de Monitoreo Automático de Radar")
     print("=" * 60)
-    
+
     # Configuración
     volume_types = {
         "0315": {
@@ -300,14 +300,14 @@ def ejemplo_monitoreo_automatico():
             "02": ["VRAD", "WRAD"]
         }
     }
-    
+
     ftp_config = {
         'host': config.FTP_HOST,
         'user': config.FTP_USER,
         'password': config.FTP_PASS,
         'base_path': '/L2'
     }
-    
+
     # Crear sistema de monitoreo
     sistema = RadarMonitoringSystem(
         radar_codes=["RMA1", "RMA3"],
@@ -315,16 +315,16 @@ def ejemplo_monitoreo_automatico():
         ftp_config=ftp_config,
         volume_types=volume_types
     )
-    
+
     print("\nIniciando monitoreo...")
     print("Presione Ctrl+C para detener\n")
-    
+
     try:
         asyncio.run(sistema.start_monitoring())
     except KeyboardInterrupt:
         print("\nDeteniendo sistema...")
         sistema.stop_all()
-    
+
     # Mostrar estado final
     status = sistema.get_status()
     for radar, radar_status in status.items():
@@ -338,7 +338,7 @@ def ejemplo_procesamiento_manual():
     print("=" * 60)
     print("Ejemplo: Procesamiento Manual de Archivos BUFR")
     print("=" * 60)
-    
+
     # Lista de archivos BUFR a procesar
     bufr_files = [
         "RMA1_0315_01_DBZH_20250101T120000Z.BUFR",
@@ -348,30 +348,30 @@ def ejemplo_procesamiento_manual():
         "RMA1_0315_02_VRAD_20250101T120000Z.BUFR",
         "RMA1_0315_02_WRAD_20250101T120000Z.BUFR",
     ]
-    
+
     # Crear procesador
     procesador = ManualRadarProcessor(
         output_dir=Path("./procesamiento_manual")
     )
-    
+
     # Procesar archivos
     resultados = procesador.process_bufr_files(
         bufr_files=bufr_files,
         generate_colmax_field=True,
         fields_to_plot=["DBZH", "VRAD", "ZDR", "RHOHV", "COLMAX"]
     )
-    
+
     # Mostrar resultados
     print("\nResultados:")
     print(f"  Volúmenes decodificados: {len(resultados['decoded_volumes'])}")
     print(f"  Imágenes PNG: {len(resultados['png_files'])}")
     print(f"  Archivos GeoTIFF: {len(resultados['geotiff_files'])}")
-    
+
     if resultados['errors']:
         print(f"\nErrores ({len(resultados['errors'])}):")
         for error in resultados['errors']:
             print(f"  - {error}")
-    
+
     # Guardar NetCDF
     if resultados['radar_object'] is not None:
         nc_path = procesador.save_radar_netcdf(
@@ -386,7 +386,7 @@ def ejemplo_consulta_simple():
     print("=" * 60)
     print("Ejemplo: Consulta de Configuración")
     print("=" * 60)
-    
+
     print(f"\nConfiguración actual de radarlib:")
     print(f"  FTP Host: {config.FTP_HOST}")
     print(f"  FTP User: {config.FTP_USER}")
@@ -400,7 +400,7 @@ def ejemplo_consulta_simple():
 if __name__ == "__main__":
     # Ejecutar ejemplo de consulta simple
     ejemplo_consulta_simple()
-    
+
     # Descomentar para ejecutar otros ejemplos:
     # ejemplo_procesamiento_manual()
     # ejemplo_monitoreo_automatico()

@@ -23,20 +23,20 @@ with RadarFTPClient(
     base_dir="L2",
     timeout=30
 ) as client:
-    
+
     # Listar directorio
     archivos = client.list_dir("/L2/RMA1/2025/01/01/12")
-    
+
     # Descargar archivo
     from pathlib import Path
     client.download_file(
         "/L2/RMA1/archivo.BUFR",
         Path("./local/archivo.BUFR")
     )
-    
+
     # Recorrer estructura de radar
     from datetime import datetime, timezone
-    
+
     for dt, filename, remote_path in client.traverse_radar(
         radar_name="RMA1",
         dt_start=datetime(2025, 1, 1, tzinfo=timezone.utc),
@@ -61,13 +61,13 @@ async def descargar_archivos():
         password="contraseña",
         max_workers=5
     ) as client:
-        
+
         # Descargar archivo individual
         await client.download_file_async(
             Path("/L2/RMA1/archivo.BUFR"),
             Path("./local/archivo.BUFR")
         )
-        
+
         # Descargar múltiples archivos en paralelo
         archivos = [
             (Path("/L2/RMA1/archivo1.BUFR"), Path("./local/archivo1.BUFR")),
@@ -126,7 +126,7 @@ if resultado is not None:
     # Datos del volumen (numpy array 2D)
     data = resultado['data']
     print(f"Shape: {data.shape}")  # (total_rays, ngates)
-    
+
     # Información del volumen
     info = resultado['info']
     print(f"Radar: {info['nombre_radar']}")
@@ -136,7 +136,7 @@ if resultado is not None:
     print(f"Hora: {info['hora_vol']}:{info['min_vol']}")
     print(f"Ubicación: {info['lat']}, {info['lon']}")
     print(f"Altitud: {info['altura']} m")
-    
+
     # Información de barridos (DataFrame)
     sweeps_df = info['sweeps']
     print(f"Número de barridos: {info['nsweeps']}")
@@ -190,7 +190,7 @@ with decbufr_library_context() as lib:
     # Obtener metadatos
     meta = get_metadata(lib, "archivo.BUFR")
     print(f"Ubicación: {meta['lat']}, {meta['lon']}")
-    
+
     # Obtener elevaciones
     elevs = get_elevations(lib, "archivo.BUFR")
     print(f"Elevaciones: {elevs}")

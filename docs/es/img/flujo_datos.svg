@@ -18,93 +18,93 @@
       <polygon points="0 0, 8 3, 0 6" fill="#1976d2"/>
     </marker>
   </defs>
-  
+
   <!-- Title -->
   <text x="400" y="30" text-anchor="middle" class="title">Flujo de Datos - radarlib</text>
-  
+
   <!-- Row 1: Input -->
   <rect x="20" y="60" width="140" height="70" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="2" rx="8"/>
   <text x="90" y="85" text-anchor="middle" class="step-title">🌐 Servidor FTP</text>
   <text x="90" y="100" text-anchor="middle" class="step-text">Archivos BUFR</text>
   <text x="90" y="115" text-anchor="middle" class="step-text">/L2/RADAR/...</text>
-  
+
   <path d="M 160 95 L 190 95" class="arrow-thick"/>
-  
+
   <rect x="200" y="60" width="140" height="70" class="step"/>
   <text x="270" y="85" text-anchor="middle" class="step-title">📥 Descarga</text>
   <text x="270" y="100" text-anchor="middle" class="step-text">DownloadDaemon</text>
   <text x="270" y="115" text-anchor="middle" class="step-text">RadarFTPClientAsync</text>
-  
+
   <path d="M 340 95 L 370 95" class="arrow-thick"/>
-  
+
   <rect x="380" y="60" width="140" height="70" class="step-output"/>
   <text x="450" y="85" text-anchor="middle" class="step-title">💾 BUFR Local</text>
   <text x="450" y="100" text-anchor="middle" class="step-text">RMA1_0315_01_DBZH</text>
   <text x="450" y="115" text-anchor="middle" class="step-text">_YYYYMMDD.BUFR</text>
-  
+
   <!-- Row 2: Processing -->
   <path d="M 450 130 L 450 155" class="arrow-thick"/>
-  
+
   <rect x="380" y="160" width="140" height="70" class="step-process"/>
   <text x="450" y="185" text-anchor="middle" class="step-title">🔧 Decodificación</text>
   <text x="450" y="200" text-anchor="middle" class="step-text">bufr_to_dict()</text>
   <text x="450" y="215" text-anchor="middle" class="step-text">libdecbufr.so</text>
-  
+
   <path d="M 520 195 L 550 195" class="arrow-thick"/>
-  
+
   <rect x="560" y="160" width="140" height="70" class="step"/>
   <text x="630" y="185" text-anchor="middle" class="step-title">📊 Diccionario</text>
   <text x="630" y="200" text-anchor="middle" class="step-text">{'data': ndarray,</text>
   <text x="630" y="215" text-anchor="middle" class="step-text">'info': {...}}</text>
-  
+
   <!-- Row 3: PyART -->
   <path d="M 630 230 L 630 255" class="arrow-thick"/>
-  
+
   <rect x="560" y="260" width="140" height="70" class="step-process"/>
   <text x="630" y="285" text-anchor="middle" class="step-title">🔄 Conversión</text>
   <text x="630" y="300" text-anchor="middle" class="step-text">bufr_to_pyart()</text>
   <text x="630" y="315" text-anchor="middle" class="step-text">ProcessingDaemon</text>
-  
+
   <path d="M 560 295 L 530 295" class="arrow-thick"/>
-  
+
   <rect x="380" y="260" width="140" height="70" class="step"/>
   <text x="450" y="285" text-anchor="middle" class="step-title">📡 PyART Radar</text>
   <text x="450" y="300" text-anchor="middle" class="step-text">pyart.core.Radar</text>
   <text x="450" y="315" text-anchor="middle" class="step-text">Múltiples campos</text>
-  
+
   <path d="M 380 295 L 350 295" class="arrow-thick"/>
-  
+
   <rect x="200" y="260" width="140" height="70" class="step-output"/>
   <text x="270" y="285" text-anchor="middle" class="step-title">💾 NetCDF</text>
   <text x="270" y="300" text-anchor="middle" class="step-text">CFRadial</text>
   <text x="270" y="315" text-anchor="middle" class="step-text">RMA1_0315_01.nc</text>
-  
+
   <!-- Row 4: Products -->
   <path d="M 450 330 L 450 355" class="arrow-thick"/>
-  
+
   <rect x="380" y="360" width="140" height="70" class="step-process"/>
   <text x="450" y="385" text-anchor="middle" class="step-title">🎨 Visualización</text>
   <text x="450" y="400" text-anchor="middle" class="step-text">ProductDaemon</text>
   <text x="450" y="415" text-anchor="middle" class="step-text">COLMAX, Filtros</text>
-  
+
   <!-- Output branches -->
   <path d="M 380 395 L 350 395 L 350 460 L 160 460" class="arrow"/>
   <path d="M 450 430 L 450 455" class="arrow"/>
   <path d="M 520 395 L 550 395 L 550 460 L 640 460" class="arrow"/>
-  
+
   <!-- Output products -->
   <rect x="20" y="440" width="140" height="50" class="step-output"/>
   <text x="90" y="462" text-anchor="middle" class="step-title">🖼️ PNG</text>
   <text x="90" y="477" text-anchor="middle" class="step-text">Imágenes PPI</text>
-  
+
   <rect x="380" y="455" width="140" height="50" class="step-output"/>
   <text x="450" y="477" text-anchor="middle" class="step-title">📈 COLMAX</text>
   <text x="450" y="492" text-anchor="middle" class="step-text">Máximo columnar</text>
-  
+
   <rect x="560" y="440" width="140" height="50" class="step-output"/>
   <text x="630" y="462" text-anchor="middle" class="step-title">🗺️ GeoTIFF</text>
   <text x="630" y="477" text-anchor="middle" class="step-text">Datos georef.</text>
-  
+
   <!-- Side annotations -->
   <rect x="20" y="160" width="140" height="170" fill="#fff3e0" stroke="#e65100" stroke-width="1" rx="5"/>
   <text x="90" y="185" text-anchor="middle" class="step-title">🗄️ SQLite</text>
@@ -115,7 +115,7 @@
   <text x="90" y="280" text-anchor="middle" class="step-text">• product_generation</text>
   <text x="90" y="310" text-anchor="middle" class="step-text" style="font-style:italic;">Estado y</text>
   <text x="90" y="322" text-anchor="middle" class="step-text" style="font-style:italic;">coordinación</text>
-  
+
   <!-- Dotted lines to database -->
   <path d="M 270 130 L 270 150 L 160 150" stroke="#e65100" stroke-width="1" stroke-dasharray="4,2" fill="none"/>
   <path d="M 270 260 L 180 260 L 180 240 L 160 240" stroke="#e65100" stroke-width="1" stroke-dasharray="4,2" fill="none"/>

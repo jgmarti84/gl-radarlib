@@ -21,21 +21,21 @@
       <polygon points="0 0, 10 3.5, 0 7" fill="#388e3c"/>
     </marker>
   </defs>
-  
+
   <!-- Title -->
   <text x="450" y="30" text-anchor="middle" class="title">Arquitectura de Daemons - radarlib</text>
   <text x="450" y="50" text-anchor="middle" class="subtitle">Sistema de procesamiento de datos de radar</text>
-  
+
   <!-- FTP Server (External) -->
   <rect x="30" y="80" width="140" height="80" class="box-external"/>
   <text x="100" y="110" text-anchor="middle" class="box-title">Servidor FTP</text>
   <text x="100" y="130" text-anchor="middle" class="box-text">Archivos BUFR</text>
   <text x="100" y="145" text-anchor="middle" class="box-text">/L2/RADAR/YYYY/MM/DD</text>
-  
+
   <!-- Daemon Manager Container -->
   <rect x="200" y="70" width="680" height="580" class="box" fill="#f8f9fa"/>
   <text x="540" y="95" text-anchor="middle" class="box-title" style="font-size: 16px;">DAEMON MANAGER</text>
-  
+
   <!-- Download Daemon -->
   <rect x="220" y="110" width="180" height="130" class="box-daemon"/>
   <text x="310" y="135" text-anchor="middle" class="box-title">DOWNLOAD DAEMON</text>
@@ -44,12 +44,12 @@
   <text x="310" y="185" text-anchor="middle" class="box-text">• Descarga paralela</text>
   <text x="310" y="200" text-anchor="middle" class="box-text">• Verificación checksum</text>
   <text x="310" y="215" text-anchor="middle" class="box-text">• Reanudación automática</text>
-  
+
   <!-- BUFR Files -->
   <rect x="220" y="260" width="180" height="50" class="box-data"/>
   <text x="310" y="285" text-anchor="middle" class="box-title">📁 Archivos BUFR</text>
   <text x="310" y="300" text-anchor="middle" class="box-text">(.BUFR)</text>
-  
+
   <!-- Processing Daemon -->
   <rect x="440" y="110" width="180" height="130" class="box-daemon"/>
   <text x="530" y="135" text-anchor="middle" class="box-title">PROCESSING DAEMON</text>
@@ -58,12 +58,12 @@
   <text x="530" y="185" text-anchor="middle" class="box-text">• Creación PyART Radar</text>
   <text x="530" y="200" text-anchor="middle" class="box-text">• Guardado NetCDF</text>
   <text x="530" y="215" text-anchor="middle" class="box-text">• Detección volúmenes</text>
-  
+
   <!-- NetCDF Files -->
   <rect x="440" y="260" width="180" height="50" class="box-data"/>
   <text x="530" y="285" text-anchor="middle" class="box-title">📁 Archivos NetCDF</text>
   <text x="530" y="300" text-anchor="middle" class="box-text">(CFRadial .nc)</text>
-  
+
   <!-- Product Daemon -->
   <rect x="660" y="110" width="200" height="130" class="box-daemon"/>
   <text x="760" y="135" text-anchor="middle" class="box-title">PRODUCT DAEMON</text>
@@ -72,12 +72,12 @@
   <text x="760" y="185" text-anchor="middle" class="box-text">• Plots PPI</text>
   <text x="760" y="200" text-anchor="middle" class="box-text">• Filtros polarimétricos</text>
   <text x="760" y="215" text-anchor="middle" class="box-text">• Export PNG/GeoTIFF</text>
-  
+
   <!-- Product Files -->
   <rect x="660" y="260" width="200" height="50" class="box-data"/>
   <text x="760" y="285" text-anchor="middle" class="box-title">📁 Productos</text>
   <text x="760" y="300" text-anchor="middle" class="box-text">(.png, .tif)</text>
-  
+
   <!-- Cleanup Daemon -->
   <rect x="220" y="340" width="180" height="100" class="box-daemon"/>
   <text x="310" y="365" text-anchor="middle" class="box-title">CLEANUP DAEMON</text>
@@ -85,24 +85,24 @@
   <text x="310" y="400" text-anchor="middle" class="box-text">• Eliminación archivos</text>
   <text x="310" y="415" text-anchor="middle" class="box-text">• Gestión de espacio</text>
   <text x="310" y="430" text-anchor="middle" class="box-text">• Verificación productos</text>
-  
+
   <!-- SQLite Database -->
   <rect x="440" y="340" width="420" height="100" class="box-db"/>
   <text x="650" y="365" text-anchor="middle" class="box-title">🗄️ BASE DE DATOS SQLITE (state.db)</text>
-  
+
   <!-- Database Tables -->
   <rect x="460" y="385" width="120" height="45" fill="#fff" stroke="#e65100" rx="5"/>
   <text x="520" y="405" text-anchor="middle" class="box-text" style="font-weight: bold;">downloads</text>
   <text x="520" y="420" text-anchor="middle" class="box-text">Archivos BUFR</text>
-  
+
   <rect x="590" y="385" width="130" height="45" fill="#fff" stroke="#e65100" rx="5"/>
   <text x="655" y="405" text-anchor="middle" class="box-text" style="font-weight: bold;">volume_processing</text>
   <text x="655" y="420" text-anchor="middle" class="box-text">Volúmenes radar</text>
-  
+
   <rect x="730" y="385" width="120" height="45" fill="#fff" stroke="#e65100" rx="5"/>
   <text x="790" y="405" text-anchor="middle" class="box-text" style="font-weight: bold;">product_gen</text>
   <text x="790" y="420" text-anchor="middle" class="box-text">Productos</text>
-  
+
   <!-- Configuration Box -->
   <rect x="220" y="470" width="640" height="80" fill="#e3f2fd" stroke="#1565c0" stroke-width="2" rx="8"/>
   <text x="540" y="495" text-anchor="middle" class="box-title">⚙️ CONFIGURACIÓN</text>
@@ -110,7 +110,7 @@
   <text x="540" y="520" text-anchor="middle" class="box-text">radarlib.json</text>
   <text x="730" y="520" text-anchor="middle" class="box-text">DaemonManagerConfig</text>
   <text x="540" y="540" text-anchor="middle" class="box-text">FTP_HOST | FTP_USER | ROOT_RADAR_FILES_PATH | COLMAX_* | GRC_* | PNG_DPI</text>
-  
+
   <!-- Output Products Box -->
   <rect x="220" y="570" width="640" height="70" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2" rx="8"/>
   <text x="540" y="595" text-anchor="middle" class="box-title">📊 PRODUCTOS DE SALIDA</text>
@@ -118,38 +118,38 @@
   <text x="450" y="620" text-anchor="middle" class="box-text">🗺️ GeoTIFF</text>
   <text x="600" y="620" text-anchor="middle" class="box-text">📁 NetCDF CFRadial</text>
   <text x="750" y="620" text-anchor="middle" class="box-text">📈 COLMAX</text>
-  
+
   <!-- Arrows -->
   <!-- FTP to Download -->
   <path d="M 170 120 L 215 120" class="arrow"/>
-  
+
   <!-- Download to BUFR -->
   <path d="M 310 240 L 310 255" class="arrow-data"/>
-  
+
   <!-- BUFR to Processing -->
   <path d="M 400 285 L 435 285 L 435 175 L 438 175" class="arrow"/>
-  
+
   <!-- Processing to NetCDF -->
   <path d="M 530 240 L 530 255" class="arrow-data"/>
-  
+
   <!-- NetCDF to Product -->
   <path d="M 620 285 L 655 285 L 655 175 L 658 175" class="arrow"/>
-  
+
   <!-- Product to Products -->
   <path d="M 760 240 L 760 255" class="arrow-data"/>
-  
+
   <!-- Download to DB -->
   <path d="M 310 240 L 310 325 L 480 325 L 480 338" class="arrow" stroke-dasharray="5,3"/>
-  
+
   <!-- Processing to DB -->
   <path d="M 530 240 L 530 320 L 600 320 L 600 338" class="arrow" stroke-dasharray="5,3"/>
-  
+
   <!-- Product to DB -->
   <path d="M 760 240 L 760 320 L 720 320 L 720 338" class="arrow" stroke-dasharray="5,3"/>
-  
+
   <!-- Cleanup to DB -->
   <path d="M 400 390 L 435 390" class="arrow" stroke-dasharray="5,3"/>
-  
+
   <!-- Legend -->
   <rect x="30" y="560" width="150" height="100" fill="#fff" stroke="#ccc" rx="5"/>
   <text x="105" y="580" text-anchor="middle" class="box-text" style="font-weight: bold;">LEYENDA</text>
@@ -161,7 +161,7 @@
   <text x="70" y="636" class="box-text">Base de datos</text>
   <rect x="40" y="644" width="20" height="12" class="box-external"/>
   <text x="70" y="654" class="box-text">Externo</text>
-  
+
   <!-- Footer -->
   <text x="450" y="690" text-anchor="middle" class="box-text" style="fill: #666;">
     Grupo Radar Córdoba (GRC) - radarlib v0.1.0

@@ -537,14 +537,14 @@ config = DaemonManagerConfig(
 
 async def main():
     manager = DaemonManager(config)
-    
+
     try:
         print("Iniciando todos los daemons...")
         await manager.start()
     except KeyboardInterrupt:
         print("\nDeteniendo daemons...")
         manager.stop()
-        
+
     # Mostrar estadísticas finales
     status = manager.get_status()
     print(f"\nEstadísticas finales:")
