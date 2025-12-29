@@ -27,7 +27,8 @@ jobs:
       - name: Run pre-commit inside container
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace radarlib-dev:ci bash -lc "\
-            if [ ! -d .git ]; then git init && git add . && git commit -m 'ci: temp commit' || true; fi && \
+            # create a container-local git dir so host .git isn't modified\
+            TMPGIT=$(mktemp -d) && git init --separate-git-dir=$TMPGIT && git add . && git commit -m 'ci: temp commit' || true && \
             pre-commit run --all-files --show-diff-on-failure --color always || true"
       - name: Run unit tests inside container
         run: |
