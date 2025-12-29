@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
+RUN python -m pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY requirements-dev.txt /app/requirements-dev.txt

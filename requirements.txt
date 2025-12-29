@@ -2,4 +2,4 @@ numpy
 pandas
 arm-pyart
 rasterio
-aioftp
+radar-processor @ git+https://github.com/jgmarti84/radar-processor.git@dev/match-radarlib-vmin-vmax-cmap#egg=radar-cog-processor
