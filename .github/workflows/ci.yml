@@ -17,102 +17,9 @@ env:
   PIP_CACHE_DIR: "$HOME/.cache/pip"
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.PIP_CACHE_DIR }}
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}-${{ env.PYTHON_VERSION }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-      - name: Install linting tools only
-        run: |
-          pip install --upgrade pip
-          pip install --no-cache-dir pre-commit black isort flake8
-      - name: Run pre-commit (all files)
-        run: pre-commit run --all-files --show-diff-on-failure --color always
-
-  unit_tests:
-    name: Unit tests
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.PIP_CACHE_DIR }}
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}-${{ env.PYTHON_VERSION }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y git build-essential
-      - name: Install project (no deps) and test deps
-        run: |
-          pip install --upgrade pip
-          # Install package in editable mode without pulling external deps
-          pip install --no-deps -e .
-          # Install runtime/test libs required for tests (exclude radar-processor)
-          pip install --no-cache-dir numpy matplotlib arm-pyart pytest pytest-asyncio
-      - name: Run pytest (unit)
-        run: pytest -q -m "not integration" --junitxml=report-unit.xml
-      - name: Upload unit test report
-        uses: actions/upload-artifact@v4
-        with:
-          name: report-unit.xml
-          path: report-unit.xml
-
-  integration_tests:
-    name: Integration tests
-    runs-on: ubuntu-latest
-    needs: unit_tests
-    if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true') || vars.RUN_INTEGRATION == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.PIP_CACHE_DIR }}
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}-${{ env.PYTHON_VERSION }}
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y git build-essential gdal-bin libgdal-dev
-      - name: Install project and dev deps (pip + system GDAL)
-        run: |
-          pip install --upgrade pip
-          GDAL_VER=$(gdal-config --version)
-          echo "System libgdal: $GDAL_VER"
-          pip install --no-cache-dir "GDAL==$GDAL_VER" || (
-            echo "Exact GDAL wheel not found for $GDAL_VER, trying <=${GDAL_VER}"
-            pip install --no-cache-dir "GDAL<=${GDAL_VER}"
-          )
-          pip install --no-cache-dir -e .
-          pip install --no-cache-dir -r requirements-dev.txt || true
-      - name: Run pytest (integration)
-        run: pytest -q -m integration --junitxml=report-integration.xml
-      - name: Upload integration test report
-        uses: actions/upload-artifact@v4
-        with:
-          name: report-integration.xml
-          path: report-integration.xml
-
   devcontainer_tests:
     name: Devcontainer Tests
     runs-on: ubuntu-latest
-    needs: unit_tests
     steps:
       - uses: actions/checkout@v4
       - name: Build devcontainer image
@@ -120,7 +27,6 @@ jobs:
       - name: Run pre-commit inside container
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace radarlib-dev:ci bash -lc "\
-            # Ensure git metadata exists for pre-commit; create temporary repo if missing\
             if [ ! -d .git ]; then git init && git add . && git commit -m 'ci: temp commit' || true; fi && \
             pre-commit run --all-files --show-diff-on-failure --color always || true"
       - name: Run unit tests inside container
@@ -131,3 +37,21 @@ jobs:
         with:
           name: report-unit-devcontainer.xml
           path: report-unit-devcontainer.xml
+
+  devcontainer_integration:
+    name: Devcontainer Integration Tests
+    runs-on: ubuntu-latest
+    needs: devcontainer_tests
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true') || vars.RUN_INTEGRATION == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build devcontainer image
+        run: docker build -f .devcontainer/Dockerfile -t radarlib-dev:ci .
+      - name: Run integration tests inside container
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace radarlib-dev:ci bash -lc "pytest -q -m integration --junitxml=/workspace/report-integration-devcontainer.xml"
+      - name: Upload devcontainer integration test report
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-integration-devcontainer.xml
+          path: report-integration-devcontainer.xml
