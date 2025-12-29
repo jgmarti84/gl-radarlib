@@ -35,9 +35,16 @@ jobs:
             ${{ runner.os }}-pip-
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y git build-essential gdal-bin libgdal-dev
-      - name: Install project and dev deps
+      - name: Install project and dev deps (pip + system GDAL)
         run: |
           pip install --upgrade pip
+          GDAL_VER=$(gdal-config --version)
+          echo "System libgdal: $GDAL_VER"
+          # Try to install a matching GDAL Python wheel; fall back to <= if exact not available
+          pip install --no-cache-dir "GDAL==$GDAL_VER" || (
+            echo "Exact GDAL wheel not found for $GDAL_VER, trying <=${GDAL_VER}"
+            pip install --no-cache-dir "GDAL<=${GDAL_VER}"
+          )
           pip install --no-cache-dir -e .
           pip install --no-cache-dir -r requirements-dev.txt || true
       - name: Ensure pre-commit present
@@ -62,9 +69,15 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}-${{ env.PYTHON_VERSION }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y git build-essential gdal-bin libgdal-dev
-      - name: Install project and dev deps
+      - name: Install project and dev deps (pip + system GDAL)
         run: |
           pip install --upgrade pip
+          GDAL_VER=$(gdal-config --version)
+          echo "System libgdal: $GDAL_VER"
+          pip install --no-cache-dir "GDAL==$GDAL_VER" || (
+            echo "Exact GDAL wheel not found for $GDAL_VER, trying <=${GDAL_VER}"
+            pip install --no-cache-dir "GDAL<=${GDAL_VER}"
+          )
           pip install --no-cache-dir -e .
           pip install --no-cache-dir -r requirements-dev.txt || true
       - name: Run pytest (unit)
@@ -93,9 +106,15 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}-${{ env.PYTHON_VERSION }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y git build-essential gdal-bin libgdal-dev
-      - name: Install project and dev deps
+      - name: Install project and dev deps (pip + system GDAL)
         run: |
           pip install --upgrade pip
+          GDAL_VER=$(gdal-config --version)
+          echo "System libgdal: $GDAL_VER"
+          pip install --no-cache-dir "GDAL==$GDAL_VER" || (
+            echo "Exact GDAL wheel not found for $GDAL_VER, trying <=${GDAL_VER}"
+            pip install --no-cache-dir "GDAL<=${GDAL_VER}"
+          )
           pip install --no-cache-dir -e .
           pip install --no-cache-dir -r requirements-dev.txt || true
       - name: Run pytest (integration)
