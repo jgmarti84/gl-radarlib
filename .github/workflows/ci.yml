@@ -62,8 +62,8 @@ jobs:
           pip install --upgrade pip
           # Install package in editable mode without pulling external deps
           pip install --no-deps -e .
-          # Install only test/runtime deps required for unit tests
-          pip install --no-cache-dir pytest pytest-asyncio
+          # Install runtime/test libs required for tests (exclude radar-processor)
+          pip install --no-cache-dir numpy matplotlib arm-pyart pytest pytest-asyncio
       - name: Run pytest (unit)
         run: pytest -q -m "not integration" --junitxml=report-unit.xml
       - name: Upload unit test report
