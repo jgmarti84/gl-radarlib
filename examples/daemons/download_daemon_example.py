@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
     # Use configured paths (or override with custom paths if needed)
     radar_bufr_dir = Path(config.ROOT_RADAR_FILES_PATH) / radar_name / "bufr"
-    radar_state_db = Path(config.ROOT_RADAR_FILES_PATH) / radar_name / "state_db"
+    radar_state_db = Path(config.ROOT_RADAR_FILES_PATH) / radar_name / "state.db"
 
     dconfig = DownloadDaemonConfig(
         host=config.DEFAULTS["FTP_HOST"],
