@@ -345,30 +345,6 @@ class ProductGenerationDaemon:
             else:
                 logger.debug("Complete volume.")
 
-            # --- Generate COLMAX -----------------------------------------------------------
-            if self.config.add_colmax:
-                logger.debug(f"Generating COLMAX for {filename_stem}")
-                try:
-                    from radarlib.io.pyart.colmax import generate_colmax
-
-                    radar = generate_colmax(
-                        radar=radar,
-                        elev_limit1=config.COLMAX_ELEV_LIMIT1,
-                        field_for_colmax=hrefl_field,
-                        RHOHV_filter=config.COLMAX_RHOHV_FILTER,
-                        RHOHV_umbral=config.COLMAX_RHOHV_UMBRAL,
-                        WRAD_filter=config.COLMAX_WRAD_FILTER,
-                        WRAD_umbral=config.COLMAX_WRAD_UMBRAL,
-                        TDR_filter=config.COLMAX_TDR_FILTER,
-                        TDR_umbral=config.COLMAX_TDR_UMBRAL,
-                        save_changes=True,
-                    )
-                    logger.debug(f"COLMAX generated successfully for {filename_stem}.")
-                except Exception as e:
-                    error_msg = f"Generating COLMAX: {e}"
-                    logger.error(f"Error generating COLMAX for {filename_stem}: {e}")
-                    # Continue with processing even if COLMAX fails
-
             # --- Prepare field lists ----------------------------------------------------
             cog_generated = False
             fields_to_plot = config.FIELDS_TO_PLOT
@@ -376,6 +352,13 @@ class ProductGenerationDaemon:
 
             # Get lowest sweep for PPI products
             sweep = get_lowest_nsweep(radar)
+
+            # Define FilterObj class for use in filtered loops
+            class FilterObj:
+                def __init__(self, field, min_val, max_val):
+                    self.field = field
+                    self.min = min_val
+                    self.max = max_val
 
             # --- COG Generation block (unfiltered) ----------------------------------------------
             logger.info(f"Generating unfiltered COG products for {filename_stem}")
@@ -512,12 +495,6 @@ class ProductGenerationDaemon:
                             filters_list.append({"field": zdr_field, "min": None, "max": config.GRC_ZDR_THRESHOLD})
 
                     # Convert filters_list to simple objects for radar_processor
-                    class FilterObj:
-                        def __init__(self, field, min_val, max_val):
-                            self.field = field
-                            self.min = min_val
-                            self.max = max_val
-
                     filter_objects = [FilterObj(f["field"], f["min"], f["max"]) for f in filters_list]
 
                     # Get vmin/vmax/cmap from config (filtered version, without NOFILTERS)

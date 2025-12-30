@@ -58,7 +58,7 @@ def example_basic_daemon_manager():
         enable_processing_daemon=True,
         enable_product_daemon=True,
         # product_dir=Path(os.path.join(config.ROOT_RADAR_PRODUCTS_PATH, radar_name)),
-        product_type="image",
+        product_type="geotiff",
         add_colmax=True,
         enable_cleanup_daemon=True,
         netcdf_retention_days=2 / 24,
