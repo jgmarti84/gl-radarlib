@@ -287,6 +287,9 @@ class ProductGenerationDaemon:
         Similar flow to PNG generation but outputs GeoTIFF files instead.
         """
 
+        # Use a temporary directory for radar_processor output
+        import tempfile
+
         from pyart.config import get_field_name
         from radar_processor import process_radar_to_cog
 
@@ -345,6 +348,45 @@ class ProductGenerationDaemon:
             else:
                 logger.debug("Complete volume.")
 
+            # Get lowest sweep for PPI products
+            sweep = get_lowest_nsweep(radar)
+
+            # --- Generate COLMAX -----------------------------------------------------------
+            if self.config.add_colmax:
+                logger.debug(f"Generating COLMAX for {filename_stem}")
+                try:
+                    temp_dir = tempfile.mkdtemp()
+                    vmin_key = "VMIN_REFL_NOFILTERS"
+                    vmax_key = "VMAX_REFL_NOFILTERS"
+                    cmap_key = "CMAP_REFL_NOFILTERS"
+                    vmin = config.__dict__.get(vmin_key, None)
+                    vmax = config.__dict__.get(vmax_key, None)
+                    cmap = config.__dict__.get(cmap_key, None)
+
+                    # Prepare overrides
+                    colormap_overrides = {"filled_DBZH": cmap} if cmap else None
+                    vmin_overrides = {"filled_DBZH": vmin} if vmin is not None else None
+                    vmax_overrides = {"filled_DBZH": vmax} if vmax is not None else None
+
+                    # Call process_radar_to_cog
+                    result = process_radar_to_cog(
+                        filepath=str(netcdf_path),
+                        product="COLMAX",
+                        field_requested=hrefl_field,
+                        elevation=sweep,
+                        filters=None,
+                        output_dir=temp_dir,
+                        volume=volume_info.get("volume_number"),
+                        colormap_overrides=colormap_overrides,
+                        vmin_overrides=vmin_overrides,
+                        vmax_overrides=vmax_overrides,
+                    )
+                    logger.debug(f"COLMAX generated successfully for {filename_stem}.")
+                except Exception as e:
+                    error_msg = f"Generating COLMAX: {e}"
+                    logger.error(f"Error generating COLMAX for {filename_stem}: {e}")
+                    # Continue with plotting even if COLMAX fails
+
             # --- Prepare field lists ----------------------------------------------------
             cog_generated = False
             fields_to_plot = config.FIELDS_TO_PLOT
@@ -388,9 +430,6 @@ class ProductGenerationDaemon:
                     vmin = config.__dict__.get(vmin_key, None)
                     vmax = config.__dict__.get(vmax_key, None)
                     cmap = config.__dict__.get(cmap_key, None)
-
-                    # Use a temporary directory for radar_processor output
-                    import tempfile
 
                     temp_dir = tempfile.mkdtemp()
 
@@ -671,7 +710,7 @@ class ProductGenerationDaemon:
                 logger.debug("Complete volume.")
 
             # --- Generate COLMAX -----------------------------------------------------------
-            if self.config.add_colmax and self.config.product_type == "image":
+            if self.config.add_colmax:
                 logger.debug(f"Generating COLMAX for {filename_stem}")
                 try:
                     radar = generate_colmax(
