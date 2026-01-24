@@ -4,12 +4,23 @@ import asyncio
 import gc
 import logging
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
+import numpy as np
+from pyart.config import get_field_name
+from radar_grid import GridGeometry, compute_grid_geometry, load_geometry, save_geometry
+
+from radarlib import config
+from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
 from radarlib.state.sqlite_tracker import SQLiteStateTracker
+from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
+from radarlib.utils.names_utils import product_path_and_filename
 
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -43,6 +54,7 @@ class ProductGenerationDaemonConfig:
     product_type: str = "image"
     add_colmax: bool = True
     stuck_volume_timeout_minutes: int = 60
+    geometry: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 class ProductGenerationDaemon:
@@ -89,6 +101,250 @@ class ProductGenerationDaemon:
             "volumes_processed": 0,
             "volumes_failed": 0,
         }
+        # gemoetry for Geotiff generation
+        self.geometry = self.init_geometry(config.geometry)
+
+    def init_geometry(
+        self, geometry: Optional[Dict[str, Dict[str, Any]]]
+    ) -> Optional[Dict[str, Dict[str, GridGeometry]]]:
+        """
+        Initialize geometry structures from input dictionary.
+
+        This method implements a cascading strategy to handle multiple input formats:
+        1. If entry is already a GridGeometry instance, use it directly
+        2. If entry is a string (filepath), load the GridGeometry from file
+        3. If entry is a dict with grid parameters, attempt to build filename and load,
+           or fall back to building new geometry from a sample radar NetCDF
+        4. Last resort: build geometry from a sample NetCDF file using provided parameters
+
+        Args:
+            geometry: Dictionary with structure matching volume_types:
+                     {strategy: {vol_num: (GridGeometry|str|dict)}}
+                     where dict can contain: grid_resolution, min_radius, toa, rfactor
+
+        Returns:
+            Dictionary with structure {strategy: {vol_num: GridGeometry}} or None
+
+        Raises:
+            AssertionError: If geometry structure doesn't match volume_types
+            Exception: If all geometry initialization strategies fail
+        """
+        if not geometry:
+            logger.warning("No geometry provided, COG product generation may fail.")
+            return None
+
+        # Validate geometry structure matches volume_types
+        vol_types_keys = set(self.config.volume_types.keys())
+        assert (
+            set(geometry.keys()) == vol_types_keys
+        ), f"Geometry keys {set(geometry.keys())} do not match volume_types keys {vol_types_keys}"
+
+        result_geometry: Dict[str, Dict[str, GridGeometry]] = {}
+
+        for strategy in vol_types_keys:
+            vol_nums_keys = set(self.config.volume_types[strategy].keys())
+            message = f"Geometry[{strategy}] keys {set(geometry[strategy].keys())}"
+            message += f" do not match volume_types[{strategy}] keys {vol_nums_keys}"
+            assert set(geometry[strategy].keys()) == vol_nums_keys, message
+
+            result_geometry[strategy] = {}
+
+            for vol_num in vol_nums_keys:
+                geom_entry = geometry[strategy][vol_num]
+
+                # Strategy 1: Already a GridGeometry instance
+                if isinstance(geom_entry, GridGeometry):
+                    logger.info(f"Found existing GridGeometry instance for {strategy}-{vol_num}")
+                    result_geometry[strategy][vol_num] = geom_entry
+                    continue
+
+                # Strategy 2: String filepath - load geometry from file
+                if isinstance(geom_entry, str):
+                    try:
+                        loaded_geom = load_geometry(geom_entry)
+                        logger.info(f"Loaded geometry from file: {geom_entry}")
+                        result_geometry[strategy][vol_num] = loaded_geom
+                        continue
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to load geometry from {geom_entry}: {e}. " "Will attempt alternative strategies."
+                        )
+
+                # Strategy 3: Dictionary with parameters - attempt to build filename and load
+                if isinstance(geom_entry, dict):
+                    try:
+                        geom_file = self._build_geometry_filename_from_params(strategy, vol_num, geom_entry)
+                        if geom_file and geom_file.exists():
+                            loaded_geom = load_geometry(str(geom_file))
+                            logger.info(f"Loaded pre-built geometry from {geom_file}")
+                            result_geometry[strategy][vol_num] = loaded_geom
+                            continue
+                    except Exception as e:
+                        logger.debug(f"Failed to build/load geometry from parameters for {strategy}-{vol_num}: {e}")
+
+                try:
+                    # search radar geometry folder for existing geometry files
+                    radar_geometry_path = Path(
+                        os.path.join(config.ROOT_RADAR_FILES_PATH, self.config.radar_name, "geometry")
+                    )
+                    geom_files = radar_geometry_path.glob(f"{self.config.radar_name}_{strategy}_{vol_num}_*.npz")
+                    geom_files = sorted(
+                        radar_geometry_path.glob(f"{self.config.radar_name}_{strategy}_{vol_num}_*.npz"),
+                        key=lambda p: p.name,
+                    )
+                    if geom_files:
+                        logger.info("Found existing geometry files, loading the first one.")
+                        loaded_geom = load_geometry(str(geom_files[0]))
+                        logger.info(f"Loaded geometry from {geom_files[0]}")
+                        result_geometry[strategy][vol_num] = loaded_geom
+                        continue
+                except Exception as e:
+                    logger.debug(f"Failed to load existing geometry file for {strategy}-{vol_num}: {e}")
+
+                # Strategy 4: Last resort - build geometry from gate coordinates file
+                try:
+                    built_geom = self._build_geometry_from_gate_coordinates(strategy, vol_num, geom_entry)
+                    logger.info(f"Built new geometry for {self.config.radar_name} {strategy}-{vol_num}")
+                    result_geometry[strategy][vol_num] = built_geom
+
+                except Exception as e:
+                    logger.error(
+                        f"Failed to build geometry for {strategy}-{vol_num}: {e}",
+                        exc_info=True,
+                    )
+                    raise Exception(
+                        f"Exhausted all strategies for geometry initialization " f"({strategy}-{vol_num}): {e}"
+                    ) from e
+
+        logger.info("Geometry initialization completed successfully")
+        return result_geometry
+
+    def _build_geometry_filename_from_params(
+        self, strategy: str, vol_num: str, params: Dict[str, Any]
+    ) -> Optional[Path]:
+        """
+        Build a geometry filename from parameters and check if it exists.
+
+        Expected parameters:
+            - grid_resolution (int): Grid resolution in meters
+            - min_radius (float): Minimum radius in meters
+            - toa (float): Top of atmosphere height in meters
+            - rfactor (float): Beam factor (e.g., 0.017)
+
+        Returns:
+            Path to geometry file if it exists and can be constructed, None otherwise
+        """
+        try:
+            # Default geometry directory: data/geometry/{radar_name}
+            geometry_base_dir = Path("data") / "radares" / f"{self.config.radar_name}" / "geometry"
+
+            # Extract parameters
+            grid_res: Any = params.get("grid_resolution")
+            min_rad: Any = params.get("min_radius")
+            toa: Any = params.get("toa")
+            rfactor: Any = params.get("rfactor")
+
+            if not all([grid_res, min_rad, toa, rfactor]):
+                logger.debug(f"Missing parameters for geometry filename: {params}")
+                return None
+
+            # Build filename pattern: RADAR_STRATEGY_VOLNUM_RES{res}_TOA{toa}_FAC{rfactor}_MR{minrad}_geometry.npz
+            rfactor_int = int(str(rfactor).replace("0.", "")[:3])
+            filename = (
+                f"{self.config.radar_name}_{strategy}_{vol_num}_"
+                f"RES{int(grid_res)}_TOA{int(toa)}_FAC{rfactor_int:03d}_"
+                f"MR{int(min_rad)}_geometry.npz"
+            )
+            geometry_path = geometry_base_dir / filename
+
+            if geometry_path.exists():
+                logger.debug(f"Found geometry file: {geometry_path}")
+                return geometry_path
+
+            logger.debug(f"Geometry file does not exist: {geometry_path}")
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error building geometry filename from params: {e}")
+            return None
+
+    def _build_geometry_from_gate_coordinates(self, strategy: str, vol_num: str, params: Any) -> GridGeometry:
+        """
+        Build a new GridGeometry from precomputed gate coordinates file.
+        """
+
+        # Extract parameters or use defaults
+        if isinstance(params, dict):
+            grid_resolution = params.get("grid_resolution", 1500)
+            min_radius = params.get("min_radius", 250.0)
+            toa = params.get("toa", 12000.0)
+            beam_factor = params.get("rfactor", 0.017)
+        else:
+            grid_resolution = 1500
+            min_radius = 250.0
+            toa = 12000.0
+            beam_factor = 0.017
+
+        logger.info(
+            f"Building geometry for {strategy}-{vol_num} with: "
+            f"resolution={grid_resolution}m, toa={toa}m, "
+            f"min_radius={min_radius}m, beam_factor={beam_factor}"
+        )
+
+        # Load a sample radar from NetCDF
+        try:
+            gate_coords_file = next(
+                Path(config.ROOT_GATE_COORDS_PATH).glob(f"{self.config.radar_name}_{strategy}_{vol_num}*.npz")
+            )
+            logger.debug(f"Using gate coordinates file: {gate_coords_file}")
+        except StopIteration:
+            raise FileNotFoundError(
+                f"No gate coordinates files found in {config.ROOT_GATE_COORDS_PATH} "
+                "to use as sample for geometry building"
+            )
+
+        # Get gate coordinates
+        gate_x = np.load(gate_coords_file)["gate_x"]
+        gate_y = np.load(gate_coords_file)["gate_y"]
+        gate_z = np.load(gate_coords_file)["gate_z"]
+
+        z_grid_limits = (0.0, toa)
+        y_grid_limits = (gate_y.min(), gate_y.max())
+        x_grid_limits = (gate_x.min(), gate_x.max())
+
+        z_points = int(np.ceil(z_grid_limits[1] / grid_resolution)) + 1
+        y_points = int((y_grid_limits[1] - y_grid_limits[0]) / grid_resolution)
+        x_points = int((x_grid_limits[1] - x_grid_limits[0]) / grid_resolution)
+
+        grid_shape = (z_points, y_points, x_points)
+        grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
+
+        # Create temporary directory for intermediate processing
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Compute geometry
+            logger.debug("Computing grid geometry...")
+            geometry = compute_grid_geometry(
+                gate_x,
+                gate_y,
+                gate_z,
+                grid_shape,
+                grid_limits,
+                temp_dir=temp_dir,
+                toa=toa,
+                min_radius=min_radius,
+                radar_altitude=0,
+                beam_factor=beam_factor,
+                n_workers=3,
+            )
+
+        logger.info(f"Successfully built geometry for {strategy}-{vol_num}")
+        radar_geometry_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, self.config.radar_name, "geometry"))
+        os.makedirs(radar_geometry_path, exist_ok=True)
+        filename_suffix = f"{self.config.radar_name}_{strategy}_{vol_num}_RES{grid_resolution}_TOA{toa}"
+        filename_suffix += "_FAC{beam_factor}_MR{min_radius}_geometry.npz"
+        geometry_filename = radar_geometry_path / filename_suffix
+        save_geometry(geometry, str(geometry_filename))
+        return geometry
 
     async def run(self) -> None:
         """
@@ -287,17 +543,6 @@ class ProductGenerationDaemon:
         Similar flow to PNG generation but outputs GeoTIFF files instead.
         """
 
-        # Use a temporary directory for radar_processor output
-        import tempfile
-
-        from pyart.config import get_field_name
-        from radar_processor import process_radar_to_cog
-
-        from radarlib import config
-        from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
-        from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
-        from radarlib.utils.names_utils import product_path_and_filename
-
         filename = str(netcdf_path)
         vol_types = self.config.volume_types
 
@@ -350,57 +595,188 @@ class ProductGenerationDaemon:
 
             # Get lowest sweep for PPI products
             sweep = get_lowest_nsweep(radar)
+            from radar_grid import (
+                GateFilter,
+                GridFilter,
+                apply_geometry,
+                column_max,
+                constant_elevation_ppi,
+                get_field_data,
+                save_product_as_geotiff,
+            )
 
             # --- Generate COLMAX -----------------------------------------------------------
             if self.config.add_colmax:
-                logger.debug(f"Generating COLMAX for {filename_stem}")
-                try:
-                    temp_dir = tempfile.mkdtemp()
-                    vmin_key = "VMIN_REFL_NOFILTERS"
-                    vmax_key = "VMAX_REFL_NOFILTERS"
-                    cmap_key = "CMAP_REFL_NOFILTERS"
-                    vmin = config.__dict__.get(vmin_key, None)
-                    vmax = config.__dict__.get(vmax_key, None)
-                    cmap = config.__dict__.get(cmap_key, None)
+                # Non filtered COLMAX
+                if "COLMAX" in config.FIELDS_TO_PLOT:
+                    logger.debug(f"Generating COLMAX for {filename_stem}")
+                    try:
+                        # COLMAX is generated from the reflectivity field
+                        colmax_data = get_field_data(radar, hrefl_field)
 
-                    # Prepare overrides
-                    colormap_overrides = {"filled_DBZH": cmap} if cmap else None
-                    vmin_overrides = {"filled_DBZH": vmin} if vmin is not None else None
-                    vmax_overrides = {"filled_DBZH": vmax} if vmax is not None else None
+                        temp_dir = tempfile.mkdtemp()
+                        vmin_key = "VMIN_REFL_NOFILTERS"
+                        vmax_key = "VMAX_REFL_NOFILTERS"
+                        cmap_key = "CMAP_REFL_NOFILTERS"
+                        vmin = config.__dict__.get(vmin_key, None)
+                        vmax = config.__dict__.get(vmax_key, None)
+                        cmap = config.__dict__.get(cmap_key, None)
 
-                    # Call process_radar_to_cog
-                    result = process_radar_to_cog(
-                        filepath=str(netcdf_path),
-                        product="COLMAX",
-                        field_requested=hrefl_field,
-                        elevation=sweep,
-                        filters=None,
-                        output_dir=temp_dir,
-                        volume=volume_info.get("volume_number"),
-                        colormap_overrides=colormap_overrides,
-                        vmin_overrides=vmin_overrides,
-                        vmax_overrides=vmax_overrides,
-                    )
-                    logger.debug(f"COLMAX generated successfully for {filename_stem}.")
-                except Exception as e:
-                    error_msg = f"Generating COLMAX: {e}"
-                    logger.error(f"Error generating COLMAX for {filename_stem}: {e}")
-                    # Continue with plotting even if COLMAX fails
+                        gf = GateFilter(radar)
+                        gf.exclude_below_elevation_angle(config.COLMAX_ELEV_LIMIT1)
+                        if config.COLMAX_RHOHV_FILTER:
+                            gf.exclude_below(rhv_field, config.COLMAX_RHOHV_UMBRAL)
+                        if config.COLMAX_WRAD_FILTER:
+                            gf.exclude_above(wrad_field, config.COLMAX_WRAD_UMBRAL)
+                        if config.COLMAX_TDR_FILTER:
+                            gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
+                        colmax_data_filtered = apply_geometry(
+                            self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                            colmax_data,
+                            additional_filters=[gf],
+                        )
+                        colmax = column_max(
+                            colmax_data_filtered, geometry=self.geometry[volume_info["strategy"]][volume_info["vol_nr"]]
+                        )
+
+                        # Save as COG using convenience function
+                        output_file = Path(temp_dir) / "ppi.cog"
+                        save_product_as_geotiff(
+                            colmax,
+                            self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                            float(radar.latitude["data"].data[0]),
+                            float(radar.longitude["data"].data[0]),
+                            output_file,
+                            product_type="COLMAX",
+                            cmap=cmap,
+                            vmin=vmin,
+                            vmax=vmax,
+                            as_cog=True,
+                            overview_factors=[2, 4, 8, 16],
+                            resampling_method="average",  # Better for intensity data
+                        )
+
+                        if output_file.exists():
+                            # Generate the proper filename using radarlib naming convention
+                            output_dict = product_path_and_filename(
+                                radar, colmax_field, sweep, round_filename=True, filtered=False, extension="tif"
+                            )
+
+                            # Ceiled version path
+                            target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
+                            target_subdir.mkdir(parents=True, exist_ok=True)
+                            target_path = target_subdir / output_dict["ceiled"][1]
+
+                            shutil.move(str(output_file), str(target_path))
+                            logger.info(f"Generated unfiltered COG: {colmax_field} sweep {sweep} -> {target_path.name}")
+
+                            # Also create the "rounded" version if different from ceiled
+                            rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
+                            rounded_subdir.mkdir(parents=True, exist_ok=True)
+                            rounded_path = rounded_subdir / output_dict["rounded"][1]
+
+                            if target_path != rounded_path:
+                                shutil.copy2(target_path, rounded_path)
+                                logger.debug(f"Created rounded version: {rounded_path.name}")
+
+                            cog_generated = True
+
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        logger.debug(f"COLMAX generated successfully for {filename_stem}.")
+
+                    except Exception as e:
+                        error_msg = f"Generating COLMAX: {e}"
+                        logger.error(f"Error generating COLMAX for {filename_stem}: {e}")
+
+                if "COLMAX" in config.FILTERED_FIELDS_TO_PLOT:
+                    # filtered COLMAX
+                    logger.debug(f"Generating Filtered COLMAX for {filename_stem}")
+                    try:
+                        # COLMAX is generated from the reflectivity field
+                        colmax_data = get_field_data(radar, hrefl_field)
+
+                        temp_dir = tempfile.mkdtemp()
+                        vmin_key = "VMIN_REFL"
+                        vmax_key = "VMAX_REFL"
+                        cmap_key = "CMAP_REFL"
+                        vmin = config.__dict__.get(vmin_key, None)
+                        vmax = config.__dict__.get(vmax_key, None)
+                        cmap = config.__dict__.get(cmap_key, None)
+
+                        gf = GateFilter(radar)
+                        gf.exclude_below_elevation_angle(config.COLMAX_ELEV_LIMIT1)
+                        if config.COLMAX_RHOHV_FILTER:
+                            gf.exclude_below(rhv_field, config.COLMAX_RHOHV_UMBRAL)
+                        if config.COLMAX_WRAD_FILTER:
+                            gf.exclude_above(wrad_field, config.COLMAX_WRAD_UMBRAL)
+                        if config.COLMAX_TDR_FILTER:
+                            gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
+
+                        colmax_data_filtered = apply_geometry(
+                            self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                            colmax_data,
+                            additional_filters=[gf],
+                        )
+                        colmax = column_max(
+                            colmax_data_filtered, geometry=self.geometry[volume_info["strategy"]][volume_info["vol_nr"]]
+                        )
+                        gridf = GridFilter()
+                        colmax = gridf.apply_below(colmax, config.COLMAX_THRESHOLD)
+
+                        # Save as COG using convenience function
+                        output_file = Path(temp_dir) / "ppi.cog"
+                        save_product_as_geotiff(
+                            colmax,
+                            self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                            float(radar.latitude["data"].data[0]),
+                            float(radar.longitude["data"].data[0]),
+                            output_file,
+                            product_type="COLMAX",
+                            cmap=cmap,
+                            vmin=vmin,
+                            vmax=vmax,
+                            as_cog=True,
+                            overview_factors=[2, 4, 8, 16],
+                            resampling_method="average",  # Better for intensity data
+                        )
+
+                        if output_file.exists():
+                            # Generate the proper filename using radarlib naming convention
+                            output_dict = product_path_and_filename(
+                                radar, colmax_field, sweep, round_filename=True, filtered=True, extension="tif"
+                            )
+
+                            # Ceiled version path
+                            target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
+                            target_subdir.mkdir(parents=True, exist_ok=True)
+                            target_path = target_subdir / output_dict["ceiled"][1]
+
+                            shutil.move(str(output_file), str(target_path))
+                            logger.info(f"Generated unfiltered COG: {colmax_field} sweep {sweep} -> {target_path.name}")
+
+                            # Also create the "rounded" version if different from ceiled
+                            rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
+                            rounded_subdir.mkdir(parents=True, exist_ok=True)
+                            rounded_path = rounded_subdir / output_dict["rounded"][1]
+
+                            if target_path != rounded_path:
+                                shutil.copy2(target_path, rounded_path)
+                                logger.debug(f"Created rounded version: {rounded_path.name}")
+
+                            cog_generated = True
+
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        logger.debug(f"COLMAX generated successfully for {filename_stem}.")
+
+                    except Exception as e:
+                        error_msg = f"Generating COLMAX: {e}"
+                        logger.error(f"Error generating COLMAX for {filename_stem}: {e}")
+                        # Continue with plotting even if COLMAX fails
 
             # --- Prepare field lists ----------------------------------------------------
             cog_generated = False
             fields_to_plot = config.FIELDS_TO_PLOT
             plotted_fields = [f for f in fields_to_plot if f in radar.fields]
-
-            # Get lowest sweep for PPI products
-            sweep = get_lowest_nsweep(radar)
-
-            # Define FilterObj class for use in filtered loops
-            class FilterObj:
-                def __init__(self, field, min_val, max_val):
-                    self.field = field
-                    self.min = min_val
-                    self.max = max_val
 
             # --- COG Generation block (unfiltered) ----------------------------------------------
             logger.info(f"Generating unfiltered COG products for {filename_stem}")
@@ -433,60 +809,66 @@ class ProductGenerationDaemon:
 
                     temp_dir = tempfile.mkdtemp()
 
-                    # Prepare overrides
-                    colormap_overrides = {plot_field: cmap} if cmap else None
-                    vmin_overrides = {plot_field: vmin} if vmin is not None else None
-                    vmax_overrides = {plot_field: vmax} if vmax is not None else None
-
-                    # Call process_radar_to_cog
-                    result = process_radar_to_cog(
-                        filepath=str(netcdf_path),
-                        product="PPI",
-                        field_requested=plot_field,
-                        elevation=sweep,
-                        filters=None,
-                        output_dir=temp_dir,
-                        volume=volume_info.get("volume_number"),
-                        colormap_overrides=colormap_overrides,
-                        vmin_overrides=vmin_overrides,
-                        vmax_overrides=vmax_overrides,
+                    # # Prepare overrides
+                    field_data = get_field_data(radar, plot_field)
+                    grid_data = apply_geometry(
+                        self.geometry[volume_info["strategy"]][volume_info["vol_nr"]], field_data
                     )
 
-                    if result and "image_url" in result:
-                        generated_file = Path(result["image_url"])
+                    # Generate PPI
+                    elevation_angle = radar.get_elevation(sweep)
+                    elevation_angle = float(np.unique(elevation_angle)[0])
+                    ppi = constant_elevation_ppi(
+                        grid_data,
+                        self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                        elevation_angle=elevation_angle,
+                        interpolation="linear",
+                    )
 
-                        if generated_file.exists():
-                            # Generate the proper filename using radarlib naming convention
-                            output_dict = product_path_and_filename(
-                                radar, plot_field, sweep, round_filename=True, filtered=False, extension="tif"
-                            )
+                    # Save as COG using convenience function
+                    output_file = Path(temp_dir) / "ppi.cog"
+                    save_product_as_geotiff(
+                        ppi,
+                        self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                        float(radar.latitude["data"].data[0]),
+                        float(radar.longitude["data"].data[0]),
+                        output_file,
+                        product_type="PPI",
+                        cmap=cmap,
+                        vmin=vmin,
+                        vmax=vmax,
+                        as_cog=True,
+                        overview_factors=[2, 4, 8, 16],
+                        resampling_method="average",  # Better for intensity data
+                    )
 
-                            # Ceiled version path
-                            target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
-                            target_subdir.mkdir(parents=True, exist_ok=True)
-                            target_path = target_subdir / output_dict["ceiled"][1]
+                    if output_file.exists():
+                        # Generate the proper filename using radarlib naming convention
+                        output_dict = product_path_and_filename(
+                            radar, plot_field, sweep, round_filename=True, filtered=False, extension="tif"
+                        )
 
-                            # Move file to target location
-                            import shutil
+                        # Ceiled version path
+                        target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
+                        target_subdir.mkdir(parents=True, exist_ok=True)
+                        target_path = target_subdir / output_dict["ceiled"][1]
 
-                            shutil.move(str(generated_file), str(target_path))
-                            logger.info(f"Generated unfiltered COG: {plot_field} sweep {sweep} -> {target_path.name}")
+                        shutil.move(str(output_file), str(target_path))
+                        logger.info(f"Generated unfiltered COG: {plot_field} sweep {sweep} -> {target_path.name}")
 
-                            # Also create the "rounded" version if different from ceiled
-                            rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
-                            rounded_subdir.mkdir(parents=True, exist_ok=True)
-                            rounded_path = rounded_subdir / output_dict["rounded"][1]
+                        # Also create the "rounded" version if different from ceiled
+                        rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
+                        rounded_subdir.mkdir(parents=True, exist_ok=True)
+                        rounded_path = rounded_subdir / output_dict["rounded"][1]
 
-                            if target_path != rounded_path:
-                                shutil.copy2(target_path, rounded_path)
-                                logger.debug(f"Created rounded version: {rounded_path.name}")
+                        if target_path != rounded_path:
+                            shutil.copy2(target_path, rounded_path)
+                            logger.debug(f"Created rounded version: {rounded_path.name}")
 
-                            cog_generated = True
-
-                    # Cleanup temp directory
-                    import shutil
+                        cog_generated = True
 
                     shutil.rmtree(temp_dir, ignore_errors=True)
+                    logger.debug(f"Generated unfiltered COG for {plot_field} successfully.")
 
                 except Exception as e:
                     logger.error(f"Error generating unfiltered COG for {plot_field}: {e}")
@@ -504,16 +886,7 @@ class ProductGenerationDaemon:
                     continue
 
                 try:
-                    # Build filters for this field
-                    from pyart.correct import GateFilter
-
-                    gatefilter = GateFilter(radar)
-                    filters_list = []
-
-                    if field in [colmax_field]:
-                        # COLMAX filter
-                        filters_list.append({"field": colmax_field, "min": config.COLMAX_THRESHOLD, "max": None})
-                    elif field in [
+                    if field in [
                         hrefl_field,
                         vrefl_field,
                         rhv_field,
@@ -523,18 +896,20 @@ class ProductGenerationDaemon:
                         wrad_field,
                         vrad_field,
                     ]:
+                        gf = GateFilter(radar)
                         # Standard QC filters
                         if config.GRC_RHV_FILTER:
-                            filters_list.append({"field": rhv_field, "min": config.GRC_RHV_THRESHOLD, "max": None})
+                            gf.exclude_below(rhv_field, config.GRC_RHV_THRESHOLD)
+                            # filters_list.append({"field": rhv_field, "min": config.GRC_RHV_THRESHOLD, "max": None})
                         if config.GRC_WRAD_FILTER:
-                            filters_list.append({"field": wrad_field, "min": None, "max": config.GRC_WRAD_THRESHOLD})
+                            gf.exclude_above(wrad_field, config.GRC_WRAD_THRESHOLD)
+                            # filters_list.append({"field": wrad_field, "min": None, "max": config.GRC_WRAD_THRESHOLD})
                         if config.GRC_REFL_FILTER:
-                            filters_list.append({"field": hrefl_field, "min": config.GRC_REFL_THRESHOLD, "max": None})
+                            gf.exclude_below(hrefl_field, config.GRC_REFL_THRESHOLD)
+                            # filters_list.append({"field": hrefl_field, "min": config.GRC_REFL_THRESHOLD, "max": None})
                         if config.GRC_ZDR_FILTER:
-                            filters_list.append({"field": zdr_field, "min": None, "max": config.GRC_ZDR_THRESHOLD})
-
-                    # Convert filters_list to simple objects for radar_processor
-                    filter_objects = [FilterObj(f["field"], f["min"], f["max"]) for f in filters_list]
+                            gf.exclude_above(zdr_field, config.GRC_ZDR_THRESHOLD)
+                            # filters_list.append({"field": zdr_field, "min": None, "max": config.GRC_ZDR_THRESHOLD})
 
                     # Get vmin/vmax/cmap from config (filtered version, without NOFILTERS)
                     if field in [hrefl_field, vrefl_field, colmax_field]:
@@ -549,71 +924,68 @@ class ProductGenerationDaemon:
                     vmax = config.__dict__.get(vmax_key, None)
                     cmap = config.__dict__.get(cmap_key, None)
 
-                    # Use a temporary directory for radar_processor output
-                    import tempfile
-
                     temp_dir = tempfile.mkdtemp()
 
-                    # Prepare overrides
-                    colormap_overrides = {plot_field: cmap} if cmap else None
-                    vmin_overrides = {plot_field: vmin} if vmin is not None else None
-                    vmax_overrides = {plot_field: vmax} if vmax is not None else None
-
-                    # Debug logging
-                    logger.info(f"Generating filtered COG for {plot_field} with {len(filter_objects)} filters:")
-                    for fobj in filter_objects:
-                        logger.info(f"  Filter: {fobj.field} min={fobj.min} max={fobj.max}")
-
-                    # Call process_radar_to_cog with filters
-                    result = process_radar_to_cog(
-                        filepath=str(netcdf_path),
-                        product="PPI",
-                        field_requested=plot_field,
-                        elevation=sweep,
-                        filters=filter_objects if filter_objects else None,
-                        output_dir=temp_dir,
-                        volume=volume_info.get("volume_number"),
-                        colormap_overrides=colormap_overrides,
-                        vmin_overrides=vmin_overrides,
-                        vmax_overrides=vmax_overrides,
+                    field_data = get_field_data(radar, plot_field)
+                    grid_data = apply_geometry(
+                        self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                        field_data,
+                        additional_filters=[gf],
                     )
 
-                    if result and "image_url" in result:
-                        generated_file = Path(result["image_url"])
+                    # Generate PPI
+                    elevation_angle = radar.get_elevation(sweep)
+                    elevation_angle = float(np.unique(elevation_angle)[0])
+                    ppi = constant_elevation_ppi(
+                        grid_data,
+                        self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                        elevation_angle=elevation_angle,
+                        interpolation="linear",
+                    )
 
-                        if generated_file.exists():
-                            # Generate the proper filename using radarlib naming convention
-                            # Note: filtered=True means no "o" suffix
-                            output_dict = product_path_and_filename(
-                                radar, plot_field, sweep, round_filename=True, filtered=True, extension="tif"
-                            )
+                    # Save as COG using convenience function
+                    output_file = Path(temp_dir) / "ppi.cog"
+                    save_product_as_geotiff(
+                        ppi,
+                        self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                        float(radar.latitude["data"].data[0]),
+                        float(radar.longitude["data"].data[0]),
+                        output_file,
+                        product_type="PPI",
+                        cmap=cmap,
+                        vmin=vmin,
+                        vmax=vmax,
+                        as_cog=True,
+                        overview_factors=[2, 4, 8, 16],
+                        resampling_method="average",  # Better for intensity data
+                    )
 
-                            # Ceiled version path
-                            target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
-                            target_subdir.mkdir(parents=True, exist_ok=True)
-                            target_path = target_subdir / output_dict["ceiled"][1]
+                    if output_file.exists():
+                        # Generate the proper filename using radarlib naming convention
+                        output_dict = product_path_and_filename(
+                            radar, plot_field, sweep, round_filename=True, filtered=True, extension="tif"
+                        )
+                        # Ceiled version path
+                        target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
+                        target_subdir.mkdir(parents=True, exist_ok=True)
+                        target_path = target_subdir / output_dict["ceiled"][1]
 
-                            # Move file to target location
-                            import shutil
+                        shutil.move(str(output_file), str(target_path))
+                        logger.info(f"Generated filtered COG: {plot_field} sweep {sweep} -> {target_path.name}")
 
-                            shutil.move(str(generated_file), str(target_path))
-                            logger.info(f"Generated filtered COG: {plot_field} sweep {sweep} -> {target_path.name}")
+                        # Also create the "rounded" version if different from ceiled
+                        rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
+                        rounded_subdir.mkdir(parents=True, exist_ok=True)
+                        rounded_path = rounded_subdir / output_dict["rounded"][1]
 
-                            # Also create the "rounded" version if different from ceiled
-                            rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
-                            rounded_subdir.mkdir(parents=True, exist_ok=True)
-                            rounded_path = rounded_subdir / output_dict["rounded"][1]
+                        if target_path != rounded_path:
+                            shutil.copy2(target_path, rounded_path)
+                            logger.debug(f"Created rounded version: {rounded_path.name}")
 
-                            if target_path != rounded_path:
-                                shutil.copy2(target_path, rounded_path)
-                                logger.debug(f"Created rounded version: {rounded_path.name}")
-
-                            cog_generated = True
-
-                    # Cleanup temp directory
-                    import shutil
+                        cog_generated = True
 
                     shutil.rmtree(temp_dir, ignore_errors=True)
+                    logger.debug(f"Generated filtered COG for {plot_field} successfully.")
 
                 except Exception as e:
                     logger.error(f"Error generating filtered COG for {plot_field}: {e}")
@@ -647,15 +1019,10 @@ class ProductGenerationDaemon:
 
         import matplotlib.pyplot as plt
         import pyart
-        from pyart.config import get_field_name
 
-        from radarlib import config
         from radarlib.io.pyart.colmax import generate_colmax
         from radarlib.io.pyart.filters import filter_fields_grc1
-        from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
         from radarlib.io.pyart.radar_png_plotter import FieldPlotConfig, RadarPlotConfig, plot_ppi_field, save_ppi_png
-        from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
-        from radarlib.utils.names_utils import product_path_and_filename
 
         filename = str(netcdf_path)
         vol_types = self.config.volume_types
