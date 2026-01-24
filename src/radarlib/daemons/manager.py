@@ -67,6 +67,7 @@ class DaemonManagerConfig:
     enable_cleanup_daemon: bool = False  # Disabled by default for safety
     product_type: str = "image"
     add_colmax: bool = True
+    geometry: Optional[Dict] = None
     bufr_retention_days: int = 7
     netcdf_retention_days: int = 7
     cleanup_product_types: List[str] = field(default_factory=lambda: ["image"])
@@ -165,6 +166,7 @@ class DaemonManager:
             poll_interval=self.config.product_poll_interval,
             product_type=self.config.product_type,
             add_colmax=self.config.add_colmax,
+            geometry=self.config.geometry,
         )
         return ProductGenerationDaemon(product_config)
 
@@ -214,6 +216,13 @@ class DaemonManager:
         if self.config.enable_product_daemon:
             self.product_daemon = self._create_product_daemon()
             task = asyncio.create_task(self.product_daemon.run())
+
+            # Validate configuration for geotiff products
+            if self.config.product_type == "geotiff" and self.product_daemon.geometry is None:
+                logger.error("Geotiff product requires 'geometry' configuration; stopping daemons")
+                self.stop()
+                raise RuntimeError("Geotiff product generation requires 'geometry' that is not None.")
+
             self._tasks.append(("product", task))
             logger.info("Started product generation daemon")
 

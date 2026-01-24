@@ -15,8 +15,8 @@ from pathlib import Path
 from radarlib import config
 from radarlib.daemons import DaemonManager, DaemonManagerConfig
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 
 def example_basic_daemon_manager():
@@ -35,10 +35,15 @@ def example_basic_daemon_manager():
             "01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP"],
             "02": ["VRAD", "WRAD"],
         },
-        "0200": {"01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP", "CM"]},
+        # "0200": {"01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP", "CM"]},
     }
-
-    radar_name = "RMA3"
+    geometries = {
+        "0315": {
+            "01": {},
+            "02": {},
+        },
+    }
+    radar_name = "RMA2"
     base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))
 
     # Create manager configuration
@@ -64,6 +69,7 @@ def example_basic_daemon_manager():
         netcdf_retention_days=2 / 24,
         bufr_retention_days=2 / 24,
         cleanup_poll_interval=1800,
+        geometry=geometries,
     )
 
     # Create manager

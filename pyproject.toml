@@ -21,7 +21,8 @@ netcdf4 = "^1.7.0"
 pillow = "^10.0.0"
 scipy = "^1.14.0"
 matplotlib = "^3.9.0"
-radar-processor = { git = "https://github.com/jgmarti84/radar-processor.git", rev = "dev/match-radarlib-vmin-vmax-cmap" }
+pytz = "^2025.2"
+radar-processor = { git = "https://github.com/jgmarti84/radar-processor.git", rev = "main" }
 
 # dev deps using the new group API
 [tool.poetry.group.dev.dependencies]

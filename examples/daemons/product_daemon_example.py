@@ -34,8 +34,14 @@ def example_basic_product_daemon():
             "02": ["VRAD", "WRAD"],
         },
     }
+    geometry_types = {
+        "0315": {
+            "01": "data/geometry/RMA1/RMA1_0315_01_RES1500_TOA12000_FAC017_MR250_geometry.npz",
+            "02": "data/geometry/RMA1/RMA1_0315_02_RES1000_TOA12000_FAC022_MR400_geometry.npz",
+        }
+    }
 
-    radar_name = "RMA2"
+    radar_name = "RMA1"
     base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))
 
     daemon_config = ProductGenerationDaemonConfig(
@@ -48,6 +54,7 @@ def example_basic_product_daemon():
         max_concurrent_processing=2,  # Process 2 volumes at a time
         product_type="image",  # Generate PNG images
         add_colmax=True,  # Generate COLMAX field
+        geometry=geometry_types,
     )
 
     daemon = ProductGenerationDaemon(daemon_config)

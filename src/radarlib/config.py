@@ -23,7 +23,7 @@ from radarlib.resources import resolve_bufr_resources_path
 # When running as installed package, these fallback to reasonable defaults
 _this_file = Path(__file__).resolve()
 root_package = _this_file.parent
-root_project = Path.home().parent / "radarlib"
+root_project = Path.home().parent / "workspaces" / "radarlib"
 root_data = root_project / "data"
 root_products = root_project / "product_output"
 
@@ -47,6 +47,7 @@ DEFAULTS: Dict[str, Any] = {
     "ROOT_RADAR_FILES_PATH": os.path.join(root_data, "radares"),
     "ROOT_LOGS_PATH": os.path.join(root_project, "logs"),
     "ROOT_RADAR_PRODUCTS_PATH": root_products,
+    "ROOT_GATE_COORDS_PATH": os.path.join(root_data, "gate_coordinates"),
     "COLMAX_THRESHOLD": -3,
     "COLMAX_ELEV_LIMIT1": 0.65,
     "COLMAX_RHOHV_FILTER": True,
@@ -100,8 +101,21 @@ DEFAULTS: Dict[str, Any] = {
     "VMIN_WRAD": -2,
     "VMAX_WRAD": 6,
     "CMAP_WRAD": "grc_th",
-    "FIELDS_TO_PLOT": ["DBZH", "ZDR", "COLMAX", "RHOHV"],
-    "FILTERED_FIELDS_TO_PLOT": ["DBZH", "ZDR", "COLMAX", "RHOHV", "VRAD", "WRAD", "KDP"],
+    "FIELDS_TO_PLOT": [
+        "DBZH",
+        "ZDR",
+        "RHOHV",
+        "COLMAX",
+    ],  # COLMAX is treated differently in the COG context, left here for backwards compatibility with PNG products
+    "FILTERED_FIELDS_TO_PLOT": [
+        "DBZH",
+        "ZDR",
+        "COLMAX",
+        "RHOHV",
+        "VRAD",
+        "WRAD",
+        "KDP",
+    ],  # COLMAX is treated differently in the COG context, left here for backwards compatibility with PNG products
     "PNG_DPI": 72,
     "GRC_RHV_FILTER": True,
     "GRC_RHV_THRESHOLD": 0.55,
@@ -181,6 +195,7 @@ ROOT_CACHE_PATH: str = get("ROOT_CACHE_PATH")
 ROOT_RADAR_FILES_PATH: str = get("ROOT_RADAR_FILES_PATH")
 ROOT_RADAR_PRODUCTS_PATH: str = get("ROOT_RADAR_PRODUCTS_PATH")
 ROOT_LOGS_PATH: str = get("ROOT_LOGS_PATH")
+ROOT_GATE_COORDS_PATH: str = get("ROOT_GATE_COORDS_PATH")
 COLMAX_THRESHOLD: float = get("COLMAX_THRESHOLD")
 COLMAX_ELEV_LIMIT1: float = get("COLMAX_ELEV_LIMIT1")
 COLMAX_RHOHV_FILTER: bool = get("COLMAX_RHOHV_FILTER")
