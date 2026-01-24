@@ -46,11 +46,11 @@ class TestFilterFieldExcludingGatesBelow:
         )
 
         # Values at indices 0, 3 should be masked (source < 10)
-        assert radar.fields["DBZH"]["data"].mask[0, 0] is True
-        assert radar.fields["DBZH"]["data"].mask[0, 3] is True
+        assert radar.fields["DBZH"]["data"].mask[0, 0]
+        assert radar.fields["DBZH"]["data"].mask[0, 3]
         # Values at indices 1, 2, 4 should not be masked
-        assert radar.fields["DBZH"]["data"].mask[0, 1] is False
-        assert radar.fields["DBZH"]["data"].mask[0, 2] is False
+        assert not radar.fields["DBZH"]["data"].mask[0, 1]
+        assert not radar.fields["DBZH"]["data"].mask[0, 2]
 
     def test_creates_new_field_when_not_overwriting(self):
         """Should create a new field when overwrite_fields is False."""
@@ -134,11 +134,11 @@ class TestFilterFieldExcludingGatesAbove:
         )
 
         # Values at indices 2, 4 should be masked (source > 10)
-        assert radar.fields["DBZH"]["data"].mask[0, 2] is True
-        assert radar.fields["DBZH"]["data"].mask[0, 4] is True
+        assert radar.fields["DBZH"]["data"].mask[0, 2]
+        assert radar.fields["DBZH"]["data"].mask[0, 4]
         # Values at indices 0, 1, 3 should not be masked
-        assert radar.fields["DBZH"]["data"].mask[0, 0] is False
-        assert radar.fields["DBZH"]["data"].mask[0, 1] is False
+        assert not radar.fields["DBZH"]["data"].mask[0, 0]
+        assert not radar.fields["DBZH"]["data"].mask[0, 1]
 
     def test_creates_new_field_when_not_overwriting(self):
         """Should create a new field when overwrite_fields is False."""
@@ -180,9 +180,9 @@ class TestFilterFieldsFromMask:
         filter_fields_from_mask(radar, mask=mask, target_fields=["DBZH"], overwrite_fields=True)
 
         # Check that mask was applied
-        assert radar.fields["DBZH"]["data"].mask[0, 0] is True
-        assert radar.fields["DBZH"]["data"].mask[0, 1] is False
-        assert radar.fields["DBZH"]["data"].mask[0, 2] is True
+        assert radar.fields["DBZH"]["data"].mask[0, 0]
+        assert not radar.fields["DBZH"]["data"].mask[0, 1]
+        assert radar.fields["DBZH"]["data"].mask[0, 2]
 
     def test_creates_new_field_when_not_overwriting(self):
         """Should create a new field when overwrite_fields is False."""
@@ -234,8 +234,8 @@ class TestMaskFieldOutsideLimits:
         mask_field_outside_limits(radar, radio_inf=50, radio_ext=150, az_lim1=5, az_lim2=30, fields_to_mask=["DBZH"])
 
         # Check that values outside azimuth limits are masked
-        assert radar.fields["DBZH"]["data"].mask[0, 50] is True  # az=0 is outside [5, 30]
-        assert radar.fields["DBZH"]["data"].mask[35, 50] is True  # az=35 is outside [5, 30]
+        assert radar.fields["DBZH"]["data"].mask[0, 50]  # az=0 is outside [5, 30]
+        assert radar.fields["DBZH"]["data"].mask[35, 50]  # az=35 is outside [5, 30]
 
     def test_uses_default_limits_when_none(self):
         """Should use default limits when parameters are None."""
@@ -337,5 +337,5 @@ class TestIntegration:
         # Verify compound filtering
         # Index 0: RHOHV < 0.8 -> masked
         # Index 3: WRAD > 5 -> masked
-        assert radar.fields["DBZH"]["data"].mask[0, 0] is True
-        assert radar.fields["DBZH"]["data"].mask[0, 3] is True
+        assert radar.fields["DBZH"]["data"].mask[0, 0]
+        assert radar.fields["DBZH"]["data"].mask[0, 3]

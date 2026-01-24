@@ -114,6 +114,7 @@ class TestProcessingDaemon:
     @patch("radarlib.daemons.processing_daemon.SQLiteStateTracker")
     def test_init_creates_output_dir(self, mock_tracker, daemon_config):
         """Should create output directory on init."""
+        _ = ProcessingDaemon(daemon_config)
 
         assert daemon_config.local_netcdf_dir.exists()
 

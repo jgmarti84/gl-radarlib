@@ -50,7 +50,7 @@ class TestRadarFTPClientConnection:
         client.ftp = MagicMock()
         client.ftp.voidcmd.return_value = None
 
-        assert client.is_connected() is True
+        assert client.is_connected()
         client.ftp.voidcmd.assert_called_once_with("NOOP")
 
     def test_is_connected_returns_false_when_noop_fails(self):
@@ -59,7 +59,7 @@ class TestRadarFTPClientConnection:
         client.ftp = MagicMock()
         client.ftp.voidcmd.side_effect = EOFError("Connection lost")
 
-        assert client.is_connected() is False
+        assert not client.is_connected()
 
     @patch("radarlib.io.ftp.ftp_client.ftplib.FTP")
     def test_connect_creates_ftp_connection(self, mock_ftp_class):

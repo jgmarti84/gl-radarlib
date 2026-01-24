@@ -85,6 +85,7 @@ class TestProductGenerationDaemon:
     @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
     def test_init_creates_output_dir(self, mock_tracker, daemon_config):
         """Should create output directory on init."""
+        _ = ProductGenerationDaemon(daemon_config)
 
         assert daemon_config.local_product_dir.exists()
 
