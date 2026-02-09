@@ -10,6 +10,24 @@
             "justMyCode": false
         },
         {
+            "name": "Python: with args",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--host",
+                "200.16.116.24",
+                "--user",
+                "IMontamat",
+                "--password",
+                "1m0nt",
+                "--radar",
+                "RMA12"
+            ],
+            "justMyCode": false
+        },
+        {
             "name": "Python: Tests",
             "type": "debugpy",
             "request": "launch",
