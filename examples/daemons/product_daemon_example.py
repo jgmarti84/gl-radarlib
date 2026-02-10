@@ -34,12 +34,6 @@ def example_basic_product_daemon():
             "02": ["VRAD", "WRAD"],
         },
     }
-    geometry_types = {
-        "0315": {
-            "01": "data/geometry/RMA1/RMA1_0315_01_RES1500_TOA12000_FAC017_MR250_geometry.npz",
-            "02": "data/geometry/RMA1/RMA1_0315_02_RES1000_TOA12000_FAC022_MR400_geometry.npz",
-        }
-    }
 
     radar_name = "RMA1"
     base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))
@@ -54,7 +48,6 @@ def example_basic_product_daemon():
         max_concurrent_processing=2,  # Process 2 volumes at a time
         product_type="image",  # Generate PNG images
         add_colmax=True,  # Generate COLMAX field
-        geometry=geometry_types,
     )
 
     daemon = ProductGenerationDaemon(daemon_config)
@@ -87,113 +80,6 @@ def example_basic_product_daemon():
     print("=" * 60)
 
 
-def example_combined_pipeline():
-    """
-    Example: Run all three daemons together.
-
-    This shows how to run download, processing, and product generation daemons
-    concurrently to create a complete pipeline from FTP download to visualization.
-    """
-    print("=" * 60)
-    print("Combined Pipeline Example (Download + Processing + Products)")
-    print("=" * 60)
-
-    from radarlib.io.ftp import ContinuousDaemon, ContinuousDaemonConfig, ProcessingDaemon, ProcessingDaemonConfig
-
-    volume_types = {
-        "0315": {
-            "01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP"],
-            "02": ["VRAD", "WRAD"],
-        },
-    }
-
-    radar_name = "RMA1"
-    base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))
-
-    # Configure download daemon
-    download_config = ContinuousDaemonConfig(
-        host=config.FTP_HOST,
-        username=config.FTP_USER,
-        password=config.FTP_PASS,
-        remote_base_path="/L2",
-        radar_name=radar_name,
-        local_bufr_dir=base_path / "bufr",
-        state_db=base_path / "state.db",
-        start_date=datetime(2025, 11, 24, tzinfo=timezone.utc),
-        poll_interval=60,
-        vol_types=volume_types,
-    )
-
-    # Configure processing daemon
-    processing_config = ProcessingDaemonConfig(
-        local_bufr_dir=base_path / "bufr",
-        local_netcdf_dir=base_path / "netcdf",
-        state_db=base_path / "state.db",
-        volume_types=volume_types,
-        radar_name=radar_name,
-        poll_interval=30,
-    )
-
-    # Configure product generation daemon
-    product_config = ProductGenerationDaemonConfig(
-        local_netcdf_dir=base_path / "netcdf",
-        local_product_dir=base_path / "products",
-        state_db=base_path / "state.db",
-        volume_types=volume_types,
-        radar_name=radar_name,
-        poll_interval=30,
-        product_type="image",
-        add_colmax=True,
-    )
-
-    download_daemon = ContinuousDaemon(download_config)
-    processing_daemon = ProcessingDaemon(processing_config)
-    product_daemon = ProductGenerationDaemon(product_config)
-
-    async def run_all_daemons():
-        """Run all three daemons concurrently."""
-        print("\nStarting all daemons concurrently...")
-        print("  - Download daemon: monitoring FTP for new BUFR files")
-        print("  - Processing daemon: processing complete volumes to NetCDF")
-        print("  - Product daemon: generating visualization products from NetCDF files")
-        print("\nPress Ctrl+C to stop all daemons\n")
-        print("-" * 60)
-
-        tasks = [
-            asyncio.create_task(download_daemon.run_service()),
-            asyncio.create_task(processing_daemon.run()),
-            asyncio.create_task(product_daemon.run()),
-        ]
-
-        try:
-            await asyncio.gather(*tasks)
-        except asyncio.CancelledError:
-            print("\nAll daemons cancelled")
-
-    try:
-        asyncio.run(run_all_daemons())
-    except KeyboardInterrupt:
-        print("\nDaemons stopped by user")
-
-    # Show statistics from all daemons
-    download_stats = download_daemon.get_stats()
-    processing_stats = processing_daemon.get_stats()
-    product_stats = product_daemon.get_stats()
-
-    print("\n" + "=" * 60)
-    print("Download Daemon Statistics:")
-    print(f"  Total files downloaded: {download_stats['total_downloaded']}")
-
-    print("\nProcessing Daemon Statistics:")
-    print(f"  Volumes processed: {processing_stats['volumes_processed']}")
-    print(f"  Volumes failed: {processing_stats['volumes_failed']}")
-
-    print("\nProduct Generation Daemon Statistics:")
-    print(f"  Volumes processed: {product_stats['volumes_processed']}")
-    print(f"  Volumes failed: {product_stats['volumes_failed']}")
-    print("=" * 60)
-
-
 def example_check_product_status():
     """
     Example: Check product generation status.
@@ -205,7 +91,7 @@ def example_check_product_status():
     print("Product Generation Status Example")
     print("=" * 60)
 
-    from radarlib.io.ftp import SQLiteStateTracker
+    from radarlib.state import SQLiteStateTracker
 
     radar_name = "RMA1"
     db_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name, "state.db"))
@@ -272,7 +158,7 @@ def example_with_daemon_manager():
     print("Daemon Manager Example (All Three Daemons)")
     print("=" * 60)
 
-    from radarlib.io.ftp.daemon_manager import DaemonManager, DaemonManagerConfig
+    from radarlib.daemons import DaemonManager, DaemonManagerConfig
 
     volume_types = {
         "0315": {

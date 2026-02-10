@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 from pyart.config import get_field_name
@@ -54,7 +54,11 @@ class ProductGenerationDaemonConfig:
     product_type: str = "image"
     add_colmax: bool = True
     stuck_volume_timeout_minutes: int = 60
-    geometry: Optional[Dict[str, Dict[str, Any]]] = None
+    # geometry: Optional[Dict[str, Dict[str, Any]]] = None
+    geometry_res: float = 1200.0
+    geometry_toa: float = 12000.0
+    geometry_hfac: float = 0.017
+    geometry_min_radius: float = 250.0
 
 
 class ProductGenerationDaemon:
@@ -102,249 +106,130 @@ class ProductGenerationDaemon:
             "volumes_failed": 0,
         }
         # gemoetry for Geotiff generation
-        self.geometry = self.init_geometry(config.geometry)
+        # self.geometry = self.init_geometry(config.geometry)
+        self.geometry = self._init_geometry()
 
-    def init_geometry(
-        self, geometry: Optional[Dict[str, Dict[str, Any]]]
-    ) -> Optional[Dict[str, Dict[str, GridGeometry]]]:
+    def _init_geometry(self):
         """
         Initialize geometry structures from input dictionary.
 
         This method implements a cascading strategy to handle multiple input formats:
-        1. If entry is already a GridGeometry instance, use it directly
-        2. If entry is a string (filepath), load the GridGeometry from file
-        3. If entry is a dict with grid parameters, attempt to build filename and load,
-           or fall back to building new geometry from a sample radar NetCDF
-        4. Last resort: build geometry from a sample NetCDF file using provided parameters
-
-        Args:
-            geometry: Dictionary with structure matching volume_types:
-                     {strategy: {vol_num: (GridGeometry|str|dict)}}
-                     where dict can contain: grid_resolution, min_radius, toa, rfactor
+        1. If there is already a geometry file with the expected name based
+            on radar and params, load it
+        2. Check for gate coordinates file, if no file, then create it based on
+            a sample radar NetCDF fetched from ftp, then build the geometry with
+            corresponding params based on those gate coordinates
 
         Returns:
             Dictionary with structure {strategy: {vol_num: GridGeometry}} or None
 
         Raises:
-            AssertionError: If geometry structure doesn't match volume_types
             Exception: If all geometry initialization strategies fail
         """
-        if not geometry:
-            logger.warning("No geometry provided, COG product generation may fail.")
-            return None
 
-        # Validate geometry structure matches volume_types
         vol_types_keys = set(self.config.volume_types.keys())
-        assert (
-            set(geometry.keys()) == vol_types_keys
-        ), f"Geometry keys {set(geometry.keys())} do not match volume_types keys {vol_types_keys}"
 
         result_geometry: Dict[str, Dict[str, GridGeometry]] = {}
 
         for strategy in vol_types_keys:
             vol_nums_keys = set(self.config.volume_types[strategy].keys())
-            message = f"Geometry[{strategy}] keys {set(geometry[strategy].keys())}"
-            message += f" do not match volume_types[{strategy}] keys {vol_nums_keys}"
-            assert set(geometry[strategy].keys()) == vol_nums_keys, message
-
             result_geometry[strategy] = {}
 
             for vol_num in vol_nums_keys:
-                geom_entry = geometry[strategy][vol_num]
+                filename = (
+                    f"{self.config.radar_name}_{strategy}_{vol_num}_"
+                    f"RES{int(self.config.geometry_res)}_"
+                    f"TOA{int(self.config.geometry_toa)}_"
+                    f"FAC{int(self.config.geometry_hfac*1000):03d}_"
+                    f"MR{int(self.config.geometry_min_radius)}_geometry.npz"
+                )
+                file_path = os.path.join(config.ROOT_GEOMETRY_PATH, filename)
 
-                # Strategy 1: Already a GridGeometry instance
-                if isinstance(geom_entry, GridGeometry):
-                    logger.info(f"Found existing GridGeometry instance for {strategy}-{vol_num}")
-                    result_geometry[strategy][vol_num] = geom_entry
+                # Strategy 1: geometry file already exists - load geometry from file
+                try:
+                    loaded_geom = load_geometry(file_path)
+                    logger.info(f"Loaded geometry from file: {file_path}")
+                    result_geometry[strategy][vol_num] = loaded_geom
                     continue
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load geometry from {file_path}: {e}. " "Will attempt alternative strategies."
+                    )
 
-                # Strategy 2: String filepath - load geometry from file
-                if isinstance(geom_entry, str):
+                # Strategy 2: build geometry from gate coordinates file
+                try:
+                    gate_coords_filename = f"{self.config.radar_name}_{strategy}_{vol_num}_gate_coordinates.npz"
+                    gate_coords_file_path = os.path.join(config.ROOT_GATE_COORDS_PATH, gate_coords_filename)
+                    if Path(gate_coords_file_path).exists():
+                        logger.debug(f"Using gate coordinates file: {gate_coords_file_path}")
+                    else:
+                        from radarlib.utils.grid_utils import create_gate_coords_file
+
+                        created_coords_file_path = create_gate_coords_file(
+                            self.config.radar_name, strategy, vol_num, output_dir=config.ROOT_GATE_COORDS_PATH
+                        )
+                        msg = "Created gate coordinates file path does not match expected path. "
+                        msg += "Check create_gate_coords_file implementation."
+                        assert str(created_coords_file_path) == gate_coords_file_path, logger.warning(msg)
+                        gate_coords_file_path = str(created_coords_file_path)
+                        logger.info(f"Created gate coordinates file: {gate_coords_file_path}")
+
                     try:
-                        loaded_geom = load_geometry(geom_entry)
-                        logger.info(f"Loaded geometry from file: {geom_entry}")
-                        result_geometry[strategy][vol_num] = loaded_geom
-                        continue
+                        gate_coords = np.load(gate_coords_file_path)
+                        logger.info(f"Loaded gate coordinates from file: {gate_coords_file_path}")
+
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to load geometry from {geom_entry}: {e}. " "Will attempt alternative strategies."
+                        raise Exception(f"Failed to load gate coordinates from {gate_coords_file_path}: {e}")
+
+                    # Get gate coordinates
+                    gate_x = gate_coords["gate_x"]
+                    gate_y = gate_coords["gate_y"]
+                    gate_z = gate_coords["gate_z"]
+
+                    z_grid_limits = (0.0, self.config.geometry_toa)
+                    y_grid_limits = (gate_y.min(), gate_y.max())
+                    x_grid_limits = (gate_x.min(), gate_x.max())
+
+                    z_points = int(np.ceil(z_grid_limits[1] / self.config.geometry_res)) + 1
+                    y_points = int((y_grid_limits[1] - y_grid_limits[0]) / self.config.geometry_res)
+                    x_points = int((x_grid_limits[1] - x_grid_limits[0]) / self.config.geometry_res)
+
+                    grid_shape = (z_points, y_points, x_points)
+                    grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
+
+                    # Create temporary directory for intermediate processing
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        # Compute geometry
+                        logger.debug("Computing grid geometry...")
+                        geometry = compute_grid_geometry(
+                            gate_x,
+                            gate_y,
+                            gate_z,
+                            grid_shape,
+                            grid_limits,
+                            temp_dir=temp_dir,
+                            toa=self.config.geometry_toa,
+                            min_radius=self.config.geometry_min_radius,
+                            radar_altitude=0,
+                            beam_factor=self.config.geometry_hfac,
+                            n_workers=3,
                         )
 
-                # Strategy 3: Dictionary with parameters - attempt to build filename and load
-                if isinstance(geom_entry, dict):
-                    try:
-                        geom_file = self._build_geometry_filename_from_params(strategy, vol_num, geom_entry)
-                        if geom_file and geom_file.exists():
-                            loaded_geom = load_geometry(str(geom_file))
-                            logger.info(f"Loaded pre-built geometry from {geom_file}")
-                            result_geometry[strategy][vol_num] = loaded_geom
-                            continue
-                    except Exception as e:
-                        logger.debug(f"Failed to build/load geometry from parameters for {strategy}-{vol_num}: {e}")
+                    logger.info(f"Successfully built geometry for {self.config.radar_name} {strategy}-{vol_num}")
+                    os.makedirs(config.ROOT_GEOMETRY_PATH, exist_ok=True)
 
-                try:
-                    # search radar geometry folder for existing geometry files
-                    radar_geometry_path = Path(
-                        os.path.join(config.ROOT_RADAR_FILES_PATH, self.config.radar_name, "geometry")
-                    )
-                    geom_files = radar_geometry_path.glob(f"{self.config.radar_name}_{strategy}_{vol_num}_*.npz")
-                    geom_files = sorted(
-                        radar_geometry_path.glob(f"{self.config.radar_name}_{strategy}_{vol_num}_*.npz"),
-                        key=lambda p: p.name,
-                    )
-                    if geom_files:
-                        logger.info("Found existing geometry files, loading the first one.")
-                        loaded_geom = load_geometry(str(geom_files[0]))
-                        logger.info(f"Loaded geometry from {geom_files[0]}")
-                        result_geometry[strategy][vol_num] = loaded_geom
-                        continue
-                except Exception as e:
-                    logger.debug(f"Failed to load existing geometry file for {strategy}-{vol_num}: {e}")
-
-                # Strategy 4: Last resort - build geometry from gate coordinates file
-                try:
-                    built_geom = self._build_geometry_from_gate_coordinates(strategy, vol_num, geom_entry)
-                    logger.info(f"Built new geometry for {self.config.radar_name} {strategy}-{vol_num}")
-                    result_geometry[strategy][vol_num] = built_geom
-
+                    save_geometry(geometry, file_path)
+                    result_geometry[strategy][vol_num] = geometry
+                    continue
                 except Exception as e:
                     logger.error(
-                        f"Failed to build geometry for {strategy}-{vol_num}: {e}",
+                        f"Failed to build geometry for {self.config.radar_name} {strategy}-{vol_num}: {e}",
                         exc_info=True,
                     )
-                    raise Exception(
-                        f"Exhausted all strategies for geometry initialization " f"({strategy}-{vol_num}): {e}"
-                    ) from e
-
-        logger.info("Geometry initialization completed successfully")
+                    msg = "Exhausted all strategies for geometry initialization  "
+                    msg += f"{self.config.radar_name} ({strategy}-{vol_num}): {e}"
+                    raise Exception(msg) from e
         return result_geometry
-
-    def _build_geometry_filename_from_params(
-        self, strategy: str, vol_num: str, params: Dict[str, Any]
-    ) -> Optional[Path]:
-        """
-        Build a geometry filename from parameters and check if it exists.
-
-        Expected parameters:
-            - grid_resolution (int): Grid resolution in meters
-            - min_radius (float): Minimum radius in meters
-            - toa (float): Top of atmosphere height in meters
-            - rfactor (float): Beam factor (e.g., 0.017)
-
-        Returns:
-            Path to geometry file if it exists and can be constructed, None otherwise
-        """
-        try:
-            # Default geometry directory: data/geometry/{radar_name}
-            geometry_base_dir = Path("data") / "radares" / f"{self.config.radar_name}" / "geometry"
-
-            # Extract parameters
-            grid_res: Any = params.get("grid_resolution")
-            min_rad: Any = params.get("min_radius")
-            toa: Any = params.get("toa")
-            rfactor: Any = params.get("rfactor")
-
-            if not all([grid_res, min_rad, toa, rfactor]):
-                logger.debug(f"Missing parameters for geometry filename: {params}")
-                return None
-
-            # Build filename pattern: RADAR_STRATEGY_VOLNUM_RES{res}_TOA{toa}_FAC{rfactor}_MR{minrad}_geometry.npz
-            rfactor_int = int(str(rfactor).replace("0.", "")[:3])
-            filename = (
-                f"{self.config.radar_name}_{strategy}_{vol_num}_"
-                f"RES{int(grid_res)}_TOA{int(toa)}_FAC{rfactor_int:03d}_"
-                f"MR{int(min_rad)}_geometry.npz"
-            )
-            geometry_path = geometry_base_dir / filename
-
-            if geometry_path.exists():
-                logger.debug(f"Found geometry file: {geometry_path}")
-                return geometry_path
-
-            logger.debug(f"Geometry file does not exist: {geometry_path}")
-            return None
-
-        except Exception as e:
-            logger.debug(f"Error building geometry filename from params: {e}")
-            return None
-
-    def _build_geometry_from_gate_coordinates(self, strategy: str, vol_num: str, params: Any) -> GridGeometry:
-        """
-        Build a new GridGeometry from precomputed gate coordinates file.
-        """
-
-        # Extract parameters or use defaults
-        if isinstance(params, dict):
-            grid_resolution = params.get("grid_resolution", 1500)
-            min_radius = params.get("min_radius", 250.0)
-            toa = params.get("toa", 12000.0)
-            beam_factor = params.get("rfactor", 0.017)
-        else:
-            grid_resolution = 1500
-            min_radius = 250.0
-            toa = 12000.0
-            beam_factor = 0.017
-
-        logger.info(
-            f"Building geometry for {strategy}-{vol_num} with: "
-            f"resolution={grid_resolution}m, toa={toa}m, "
-            f"min_radius={min_radius}m, beam_factor={beam_factor}"
-        )
-
-        # Load a sample radar from NetCDF
-        try:
-            gate_coords_file = next(
-                Path(config.ROOT_GATE_COORDS_PATH).glob(f"{self.config.radar_name}_{strategy}_{vol_num}*.npz")
-            )
-            logger.debug(f"Using gate coordinates file: {gate_coords_file}")
-        except StopIteration:
-            raise FileNotFoundError(
-                f"No gate coordinates files found in {config.ROOT_GATE_COORDS_PATH} "
-                "to use as sample for geometry building"
-            )
-
-        # Get gate coordinates
-        gate_x = np.load(gate_coords_file)["gate_x"]
-        gate_y = np.load(gate_coords_file)["gate_y"]
-        gate_z = np.load(gate_coords_file)["gate_z"]
-
-        z_grid_limits = (0.0, toa)
-        y_grid_limits = (gate_y.min(), gate_y.max())
-        x_grid_limits = (gate_x.min(), gate_x.max())
-
-        z_points = int(np.ceil(z_grid_limits[1] / grid_resolution)) + 1
-        y_points = int((y_grid_limits[1] - y_grid_limits[0]) / grid_resolution)
-        x_points = int((x_grid_limits[1] - x_grid_limits[0]) / grid_resolution)
-
-        grid_shape = (z_points, y_points, x_points)
-        grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
-
-        # Create temporary directory for intermediate processing
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Compute geometry
-            logger.debug("Computing grid geometry...")
-            geometry = compute_grid_geometry(
-                gate_x,
-                gate_y,
-                gate_z,
-                grid_shape,
-                grid_limits,
-                temp_dir=temp_dir,
-                toa=toa,
-                min_radius=min_radius,
-                radar_altitude=0,
-                beam_factor=beam_factor,
-                n_workers=3,
-            )
-
-        logger.info(f"Successfully built geometry for {strategy}-{vol_num}")
-        radar_geometry_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, self.config.radar_name, "geometry"))
-        os.makedirs(radar_geometry_path, exist_ok=True)
-        filename_suffix = f"{self.config.radar_name}_{strategy}_{vol_num}_RES{grid_resolution}_TOA{toa}"
-        filename_suffix += "_FAC{beam_factor}_MR{min_radius}_geometry.npz"
-        geometry_filename = radar_geometry_path / filename_suffix
-        save_geometry(geometry, str(geometry_filename))
-        return geometry
 
     async def run(self) -> None:
         """

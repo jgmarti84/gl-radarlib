@@ -37,12 +37,12 @@ def example_basic_daemon_manager():
         },
         # "0200": {"01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP", "CM"]},
     }
-    geometries = {
-        "0315": {
-            "01": {},
-            "02": {},
-        },
-    }
+    # geometries = {
+    #     "0315": {
+    #         "01": {},
+    #         "02": {},
+    #     },
+    # }
     radar_name = "RMA2"
     base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))
 
@@ -69,7 +69,7 @@ def example_basic_daemon_manager():
         netcdf_retention_days=2 / 24,
         bufr_retention_days=2 / 24,
         cleanup_poll_interval=1800,
-        geometry=geometries,
+        # geometry=geometries,
     )
 
     # Create manager

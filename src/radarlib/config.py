@@ -48,6 +48,7 @@ DEFAULTS: Dict[str, Any] = {
     "ROOT_LOGS_PATH": os.path.join(root_project, "logs"),
     "ROOT_RADAR_PRODUCTS_PATH": root_products,
     "ROOT_GATE_COORDS_PATH": os.path.join(root_data, "gate_coordinates"),
+    "ROOT_GEOMETRY_PATH": os.path.join(root_data, "geometries"),
     "COLMAX_THRESHOLD": -3,
     "COLMAX_ELEV_LIMIT1": 0.65,
     "COLMAX_RHOHV_FILTER": True,
@@ -196,6 +197,7 @@ ROOT_RADAR_FILES_PATH: str = get("ROOT_RADAR_FILES_PATH")
 ROOT_RADAR_PRODUCTS_PATH: str = get("ROOT_RADAR_PRODUCTS_PATH")
 ROOT_LOGS_PATH: str = get("ROOT_LOGS_PATH")
 ROOT_GATE_COORDS_PATH: str = get("ROOT_GATE_COORDS_PATH")
+ROOT_GEOMETRY_PATH: str = get("ROOT_GEOMETRY_PATH")
 COLMAX_THRESHOLD: float = get("COLMAX_THRESHOLD")
 COLMAX_ELEV_LIMIT1: float = get("COLMAX_ELEV_LIMIT1")
 COLMAX_RHOHV_FILTER: bool = get("COLMAX_RHOHV_FILTER")
