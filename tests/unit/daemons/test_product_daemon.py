@@ -90,14 +90,25 @@ class TestProductGenerationDaemon:
     @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
     def test_init_creates_output_dir(self, mock_tracker, daemon_config):
         """Should create output directory on init."""
-        _ = ProductGenerationDaemon(daemon_config)
+        # avoid heavy geometry initialization that can require FTP
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            _ = ProductGenerationDaemon(daemon_config)
 
         assert daemon_config.local_product_dir.exists()
 
     @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
     def test_init_initializes_stats(self, mock_tracker, daemon_config):
         """Should initialize statistics counters."""
-        daemon = ProductGenerationDaemon(daemon_config)
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            daemon = ProductGenerationDaemon(daemon_config)
 
         assert daemon._stats["volumes_processed"] == 0
         assert daemon._stats["volumes_failed"] == 0
@@ -105,7 +116,12 @@ class TestProductGenerationDaemon:
     @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
     def test_init_sets_running_false(self, mock_tracker, daemon_config):
         """Should initialize _running to False."""
-        daemon = ProductGenerationDaemon(daemon_config)
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            daemon = ProductGenerationDaemon(daemon_config)
 
         assert daemon._running is False
 
@@ -171,7 +187,12 @@ class TestProductGenerationDaemonIntegration:
             radar_name="RMA1",
         )
 
-        daemon = ProductGenerationDaemon(config)
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            daemon = ProductGenerationDaemon(config)
 
         mock_tracker_class.assert_called_once_with(tmp_path / "state.db")
         assert daemon.state_tracker == mock_tracker
