@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from radarlib.daemons.product_daemon import ProductGenerationDaemon, ProductGenerationDaemonConfig
+from radarlib.daemons.product_daemon import ProductGenerationDaemonConfig
 
 
 class TestProductGenerationDaemonConfig:
@@ -210,5 +210,11 @@ class TestProductGenerationDaemonIntegration:
                 product_type=product_type,
             )
 
-            daemon = ProductGenerationDaemon(config)
+            from unittest.mock import patch as _patch
+
+            from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+            with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+                daemon = ProductGenerationDaemon(config)
+
             assert daemon.config.product_type == product_type
