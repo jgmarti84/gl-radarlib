@@ -54,12 +54,10 @@ class ProductGenerationDaemonConfig:
     product_type: str = "image"
     add_colmax: bool = True
     stuck_volume_timeout_minutes: int = 60
-    # geometry: Optional[Dict[str, Dict[str, Any]]] = None
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
-    # geometry_res: float = 1200.0
-    # geometry_toa: float = 12000.0
-    # geometry_hfac: float = 0.017
-    # geometry_min_radius: float = 250.0
+    ftp_host: Optional[str] = config.FTP_HOST
+    ftp_user: Optional[str] = config.FTP_USER
+    ftp_password: Optional[str] = config.FTP_PASS
 
     def __post_init__(self):
         # Validate product type
@@ -180,7 +178,13 @@ class ProductGenerationDaemon:
                         from radarlib.utils.grid_utils import create_gate_coords_file
 
                         created_coords_file_path = create_gate_coords_file(
-                            self.config.radar_name, strategy, vol_num, output_dir=config.ROOT_GATE_COORDS_PATH
+                            self.config.radar_name,
+                            strategy,
+                            vol_num,
+                            output_dir=config.ROOT_GATE_COORDS_PATH,
+                            ftp_host=self.config.ftp_host,
+                            ftp_user=self.config.ftp_user,
+                            ftp_pass=self.config.ftp_password,
                         )
                         msg = "Created gate coordinates file path does not match expected path. "
                         msg += "Check create_gate_coords_file implementation."
