@@ -8,7 +8,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from pyart.config import get_field_name
@@ -55,10 +55,16 @@ class ProductGenerationDaemonConfig:
     add_colmax: bool = True
     stuck_volume_timeout_minutes: int = 60
     # geometry: Optional[Dict[str, Dict[str, Any]]] = None
-    geometry_res: float = 1200.0
-    geometry_toa: float = 12000.0
-    geometry_hfac: float = 0.017
-    geometry_min_radius: float = 250.0
+    geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
+    # geometry_res: float = 1200.0
+    # geometry_toa: float = 12000.0
+    # geometry_hfac: float = 0.017
+    # geometry_min_radius: float = 250.0
+
+    def __post_init__(self):
+        # Validate product type
+        if self.geometry_types is None:
+            self.geometry_types = {}
 
 
 class ProductGenerationDaemon:
@@ -136,12 +142,16 @@ class ProductGenerationDaemon:
             result_geometry[strategy] = {}
 
             for vol_num in vol_nums_keys:
+                res = self.config.geometry_types.get(strategy, {}).get(vol_num, config.GEOMETRY_RES)
+                toa = self.config.geometry_types.get(strategy, {}).get(vol_num, config.GEOMETRY_TOA)
+                hfac = self.config.geometry_types.get(strategy, {}).get(vol_num, config.GEOMETRY_HFAC)
+                min_radius = self.config.geometry_types.get(strategy, {}).get(vol_num, config.GEOMETRY_MIN_RADIUS)
                 filename = (
                     f"{self.config.radar_name}_{strategy}_{vol_num}_"
-                    f"RES{int(self.config.geometry_res)}_"
-                    f"TOA{int(self.config.geometry_toa)}_"
-                    f"FAC{int(self.config.geometry_hfac*1000):03d}_"
-                    f"MR{int(self.config.geometry_min_radius)}_geometry.npz"
+                    f"RES{int(res)}_"
+                    f"TOA{int(toa)}_"
+                    f"FAC{int(hfac*1000):03d}_"
+                    f"MR{int(min_radius)}_geometry.npz"
                 )
                 file_path = os.path.join(config.ROOT_GEOMETRY_PATH, filename)
 
@@ -186,13 +196,13 @@ class ProductGenerationDaemon:
                     gate_y = gate_coords["gate_y"]
                     gate_z = gate_coords["gate_z"]
 
-                    z_grid_limits = (0.0, self.config.geometry_toa)
+                    z_grid_limits = (0.0, toa)
                     y_grid_limits = (gate_y.min(), gate_y.max())
                     x_grid_limits = (gate_x.min(), gate_x.max())
 
-                    z_points = int(np.ceil(z_grid_limits[1] / self.config.geometry_res)) + 1
-                    y_points = int((y_grid_limits[1] - y_grid_limits[0]) / self.config.geometry_res)
-                    x_points = int((x_grid_limits[1] - x_grid_limits[0]) / self.config.geometry_res)
+                    z_points = int(np.ceil(z_grid_limits[1] / res)) + 1
+                    y_points = int((y_grid_limits[1] - y_grid_limits[0]) / res)
+                    x_points = int((x_grid_limits[1] - x_grid_limits[0]) / res)
 
                     grid_shape = (z_points, y_points, x_points)
                     grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
@@ -208,10 +218,10 @@ class ProductGenerationDaemon:
                             grid_shape,
                             grid_limits,
                             temp_dir=temp_dir,
-                            toa=self.config.geometry_toa,
-                            min_radius=self.config.geometry_min_radius,
+                            toa=toa,
+                            min_radius=min_radius,
                             radar_altitude=0,
-                            beam_factor=self.config.geometry_hfac,
+                            beam_factor=hfac,
                             n_workers=3,
                         )
 

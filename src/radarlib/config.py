@@ -134,6 +134,10 @@ DEFAULTS: Dict[str, Any] = {
     "GRC_MEAN_FILTER": True,
     "GRC_MEAN_THRESHOLD": 0.85,
     "VOLUME_TYPES": default_volume_types,
+    "GEOMETRY_RES": 1200.0,
+    "GEOMETRY_TOA": 12000.0,
+    "GEOMETRY_HFAC": 0.017,
+    "GEOMETRY_MIN_RADIUS": 250.0,
 }
 
 _config: Dict[str, Any] = DEFAULTS.copy()
@@ -270,6 +274,10 @@ GRC_DESPECKLE_FILTER: bool = get("GRC_DESPECKLE_FILTER")
 GRC_MEAN_FILTER: bool = get("GRC_MEAN_FILTER")
 GRC_MEAN_THRESHOLD: float = get("GRC_MEAN_THRESHOLD")
 VOLUME_TYPES: Dict[str, Dict[str, list]] = get("VOLUME_TYPES")
+GEOMETRY_RES: float = get("GEOMETRY_RES")
+GEOMETRY_TOA: float = get("GEOMETRY_TOA")
+GEOMETRY_HFAC: float = get("GEOMETRY_HFAC")
+GEOMETRY_MIN_RADIUS: float = get("GEOMETRY_MIN_RADIUS")
 
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)
