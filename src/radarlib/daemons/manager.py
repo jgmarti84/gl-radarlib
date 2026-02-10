@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from radarlib.daemons.cleanup_daemon import CleanupDaemon, CleanupDaemonConfig
 from radarlib.daemons.download_daemon import DownloadDaemon, DownloadDaemonConfig
@@ -67,11 +67,7 @@ class DaemonManagerConfig:
     enable_cleanup_daemon: bool = False  # Disabled by default for safety
     product_type: str = "image"
     add_colmax: bool = True
-    # geometry: Optional[Dict] = None
-    geometry_res: float = 1200.0
-    geometry_toa: float = 12000.0
-    geometry_hfac: float = 0.017
-    geometry_min_radius: float = 250.0
+    geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
     bufr_retention_days: int = 7
     netcdf_retention_days: int = 7
     cleanup_product_types: List[str] = field(default_factory=lambda: ["image"])
@@ -170,11 +166,7 @@ class DaemonManager:
             poll_interval=self.config.product_poll_interval,
             product_type=self.config.product_type,
             add_colmax=self.config.add_colmax,
-            geometry_res=self.config.geometry_res,
-            geometry_toa=self.config.geometry_toa,
-            geometry_hfac=self.config.geometry_hfac,
-            geometry_min_radius=self.config.geometry_min_radius,
-            # geometry=self.config.geometry,
+            geometry_types=self.config.geometry_types,
         )
         return ProductGenerationDaemon(product_config)
 
