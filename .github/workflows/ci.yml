@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -39,8 +41,10 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Build devcontainer image
-        run: docker build -f .devcontainer/Dockerfile -t radarlib-dev:ci .
+        run: docker build --no-cache -f .devcontainer/Dockerfile -t radarlib-dev:ci .
       - name: Run unit tests inside container
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace radarlib-dev:ci bash -lc "pytest -q -m \"not integration\" --junitxml=/workspace/report-unit-devcontainer.xml"
@@ -56,8 +60,10 @@ jobs:
     if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true') || vars.RUN_INTEGRATION == 'true' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Build devcontainer image
-        run: docker build -f .devcontainer/Dockerfile -t radarlib-dev:ci .
+        run: docker build --no-cache -f .devcontainer/Dockerfile -t radarlib-dev:ci .
       - name: Run integration tests inside container
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace radarlib-dev:ci bash -lc "pytest -q -m integration --junitxml=/workspace/report-integration-devcontainer.xml"
