@@ -45,11 +45,8 @@ class TestProductGenerationDaemonConfig:
         assert config.add_colmax is True
         assert config.stuck_volume_timeout_minutes == 60
         # geometry has been replaced by geometry parameters; assert defaults exist
-        assert hasattr(config, "geometry_res")
-        assert config.geometry_res == 1200.0
-        assert config.geometry_toa == 12000.0
-        assert config.geometry_hfac == 0.017
-        assert config.geometry_min_radius == 250.0
+        assert hasattr(config, "geometry_types")
+        assert config.geometry_types == {}
 
     def test_init_custom_values(self, tmp_path):
         """Should accept custom values."""
