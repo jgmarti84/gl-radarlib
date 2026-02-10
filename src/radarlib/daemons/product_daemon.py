@@ -132,7 +132,12 @@ class ProductGenerationDaemon:
         Raises:
             Exception: If all geometry initialization strategies fail
         """
-
+        default_params_list = [
+            config.GEOMETRY_RES,
+            config.GEOMETRY_TOA,
+            config.GEOMETRY_HFAC,
+            config.GEOMETRY_MIN_RADIUS,
+        ]
         vol_types_keys = set(self.config.volume_types.keys())
 
         result_geometry: Dict[str, Dict[str, GridGeometry]] = {}
@@ -142,10 +147,9 @@ class ProductGenerationDaemon:
             result_geometry[strategy] = {}
 
             for vol_num in vol_nums_keys:
-                res = self.config.geometry_types.get(strategy, {}).get(vol_num, config.GEOMETRY_RES)
-                toa = self.config.geometry_types.get(strategy, {}).get(vol_num, config.GEOMETRY_TOA)
-                hfac = self.config.geometry_types.get(strategy, {}).get(vol_num, config.GEOMETRY_HFAC)
-                min_radius = self.config.geometry_types.get(strategy, {}).get(vol_num, config.GEOMETRY_MIN_RADIUS)
+                res, toa, hfac, min_radius = self.config.geometry_types.get(strategy, {}).get(
+                    vol_num, default_params_list
+                )
                 filename = (
                     f"{self.config.radar_name}_{strategy}_{vol_num}_"
                     f"RES{int(res)}_"
