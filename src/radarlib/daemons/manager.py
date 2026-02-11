@@ -167,6 +167,9 @@ class DaemonManager:
             product_type=self.config.product_type,
             add_colmax=self.config.add_colmax,
             geometry_types=self.config.geometry_types,
+            ftp_host=self.config.ftp_host,
+            ftp_user=self.config.ftp_user,
+            ftp_password=self.config.ftp_password,
         )
         return ProductGenerationDaemon(product_config)
 
