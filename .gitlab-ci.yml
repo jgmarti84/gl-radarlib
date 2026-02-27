@@ -15,9 +15,6 @@ cache:
 before_script:
   - python -V
   - pip install --upgrade pip
-  - git config --global url."https://oauth2:${CI_JOB_TOKEN}@gitlab.com".insteadOf "https://gitlab.com"
-  - git clone https://gitlab.com/radaresjgm/radar-processor.git /tmp/radar-processor
-  - pip install -e /tmp/radar-processor
 
 lint:
   stage: lint

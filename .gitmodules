@@ -1,0 +1,3 @@
+[submodule "radar-processor"]
+	path = radar-processor
+	url = https://gitlab.com/radaresjgm/radar-processor.git
