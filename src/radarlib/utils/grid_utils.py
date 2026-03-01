@@ -18,13 +18,13 @@ import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
-from radar_grid import get_gate_coordinates
 
 from radarlib.io.bufr.pyart_writer import bufr_paths_to_pyart
 from radarlib.io.ftp.ftp_client import RadarFTPClient
+from radarlib.radar_grid import get_gate_coordinates
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ def create_gate_coords_file(
     strategy_name: str,
     vol_nr: str,
     output_dir: str,
+    field_names: Optional[List[str]] = None,
     ftp_host: Optional[str] = None,
     ftp_user: Optional[str] = None,
     ftp_pass: Optional[str] = None,
@@ -44,7 +45,11 @@ def create_gate_coords_file(
     Steps:
     - connect to FTP (credentials from args or env)
     - search last `lookback_hours` hours for BUFR files matching the pattern
-      ``_*_{strategy_name}_{vol_nr}_*.BUFR`` for the given `radar_name`
+      ``_*_{strategy_name}_{vol_nr}_{field}_*.BUFR`` for the given `radar_name`
+    - if `field_names` is provided (e.g. ['VRAD', 'WRAD']), only BUFR files
+      for those specific fields are considered — this ensures the gate
+      coordinates match the scan geometry of the fields that will actually
+      be interpolated later
     - pick one random BUFR file from those found
     - download it to a temporary directory
     - convert it to a pyart Radar object and write a small NetCDF file
@@ -52,7 +57,28 @@ def create_gate_coords_file(
     - extract gate coordinates with `radar_grid.get_gate_coordinates`
     - save gate coordinates as `{radar_name}_{strategy_name}_{vol_nr}_gate_coordinates.npz`
 
-    Returns the path to the written .npz file.
+    Parameters
+    ----------
+    radar_name : str
+        Radar identifier (e.g. 'RMA1')
+    strategy_name : str
+        Strategy code (e.g. '0315')
+    vol_nr : str
+        Volume number (e.g. '01', '02')
+    output_dir : str
+        Directory to write the .npz file
+    field_names : list of str, optional
+        Restrict to BUFR files for these fields (e.g. ['VRAD', 'WRAD']).
+        If None, any field for the strategy/vol is accepted (legacy behavior).
+    ftp_host, ftp_user, ftp_pass : str, optional
+        FTP credentials. Falls back to env vars FTP_HOST/FTP_USER/FTP_PASS.
+    lookback_hours : int
+        How many hours back to search for BUFR files (default: 24).
+
+    Returns
+    -------
+    Path
+        Path to the written .npz file.
     """
     ftp_host = ftp_host or os.environ.get("FTP_HOST")
     ftp_user = ftp_user or os.environ.get("FTP_USER")
@@ -64,8 +90,24 @@ def create_gate_coords_file(
     dt_end = datetime.now(timezone.utc)
     dt_start = dt_end - timedelta(hours=lookback_hours)
 
-    # build filename regex
-    pattern = re.compile(rf"^.*_{re.escape(strategy_name)}_{re.escape(vol_nr)}_.*\.BUFR$", re.IGNORECASE)
+    # build filename regex — restrict to specific fields if provided
+    if field_names:
+        fields_alt = "|".join(re.escape(f) for f in field_names)
+        pattern = re.compile(
+            rf"^.*_{re.escape(strategy_name)}_{re.escape(vol_nr)}_({fields_alt})_.*\.BUFR$",
+            re.IGNORECASE,
+        )
+        logger.info(
+            "Searching for BUFR files matching fields: %s (strategy=%s, vol=%s)",
+            field_names,
+            strategy_name,
+            vol_nr,
+        )
+    else:
+        pattern = re.compile(
+            rf"^.*_{re.escape(strategy_name)}_{re.escape(vol_nr)}_.*\.BUFR$",
+            re.IGNORECASE,
+        )
 
     with RadarFTPClient(ftp_host, ftp_user, ftp_pass) as client:
         candidates = []

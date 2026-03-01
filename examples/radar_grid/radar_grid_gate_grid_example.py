@@ -3,7 +3,8 @@ from pathlib import Path
 
 import numpy as np
 import pyart
-from radar_grid import get_gate_coordinates
+
+from radarlib.radar_grid import get_gate_coordinates
 
 
 def main_gate_coords():

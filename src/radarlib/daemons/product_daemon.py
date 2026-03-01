@@ -12,10 +12,10 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from pyart.config import get_field_name
-from radar_grid import GridGeometry, compute_grid_geometry, load_geometry, save_geometry
 
 from radarlib import config
 from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
+from radarlib.radar_grid import GridGeometry, compute_grid_geometry, load_geometry, save_geometry
 from radarlib.state.sqlite_tracker import SQLiteStateTracker
 from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
 from radarlib.utils.names_utils import product_path_and_filename
@@ -177,11 +177,19 @@ class ProductGenerationDaemon:
                     else:
                         from radarlib.utils.grid_utils import create_gate_coords_file
 
+                        # Pass the field names from vol_types so the FTP search
+                        # only considers BUFR files for fields that will actually
+                        # be interpolated (e.g. ['VRAD', 'WRAD'] for vol 02).
+                        # This prevents downloading a BUFR with different scan
+                        # geometry than the fields used in product generation.
+                        vol_field_names = self.config.volume_types.get(strategy, {}).get(vol_num, [])
+
                         created_coords_file_path = create_gate_coords_file(
                             self.config.radar_name,
                             strategy,
                             vol_num,
                             output_dir=config.ROOT_GATE_COORDS_PATH,
+                            field_names=vol_field_names or None,
                             ftp_host=self.config.ftp_host,
                             ftp_user=self.config.ftp_user,
                             ftp_pass=self.config.ftp_password,
@@ -498,7 +506,7 @@ class ProductGenerationDaemon:
 
             # Get lowest sweep for PPI products
             sweep = get_lowest_nsweep(radar)
-            from radar_grid import (
+            from radarlib.radar_grid import (
                 GateFilter,
                 GridFilter,
                 apply_geometry,

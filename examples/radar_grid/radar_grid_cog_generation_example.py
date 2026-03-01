@@ -24,7 +24,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 import pyart
-from radar_grid import (
+
+from radarlib.radar_grid import (
     GridGeometry,
     apply_geometry,
     column_max,

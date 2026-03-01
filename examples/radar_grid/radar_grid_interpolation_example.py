@@ -2,7 +2,8 @@ import time
 
 import numpy as np
 import pyart
-from radar_grid import (
+
+from radarlib.radar_grid import (
     apply_geometry,
     apply_geometry_multi,
     get_available_fields,
@@ -10,7 +11,7 @@ from radar_grid import (
     get_radar_info,
     load_geometry,
 )
-from radar_grid.filters import GateFilter
+from radarlib.radar_grid.filters import GateFilter
 
 
 def main_nofilters():

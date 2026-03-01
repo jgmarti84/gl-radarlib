@@ -9,14 +9,22 @@ BUFR file processing to create a complete workflow:
 2. Process them with the BUFR decoder
 3. Track processed files to avoid reprocessing
 """
-
 import asyncio
+import os
 from pathlib import Path
 
 from radarlib import config
 from radarlib.daemons.legacy import FTPDaemon, FTPDaemonConfig
 from radarlib.io.ftp import FTPClient
 from radarlib.state import FileStateTracker
+
+# Configuration
+radar_name = "RMA1"
+FTP_HOST = config.FTP_HOST
+FTP_USER = config.FTP_USER
+FTP_PASSWORD = config.FTP_PASS
+REMOTE_DIR = f"/L2/{radar_name}/2025/11/18/12/0239"
+LOCAL_DIR = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name, "bufr"))
 
 
 def simple_download_and_process():
@@ -30,12 +38,12 @@ def simple_download_and_process():
     print("=" * 60)
 
     # Setup
-    client = FTPClient(host=config.FTP_HOST, user=config.FTP_USER, password=config.FTP_PASSWORD)
-    local_dir = Path("./bufr_files")
+    client = FTPClient(host=FTP_HOST, user=FTP_USER, password=FTP_PASSWORD)
+    local_dir = LOCAL_DIR
     local_dir.mkdir(parents=True, exist_ok=True)
 
     # Download files
-    remote_dir = "/L2/RMA1/2024/01/01/00/0019"
+    remote_dir = REMOTE_DIR
     print(f"\nListing files in {remote_dir}...")
 
     try:
@@ -127,12 +135,12 @@ def daemon_with_processing():
 
     # Configure daemon
     daemon_config = FTPDaemonConfig(
-        host=config.FTP_HOST,
-        username=config.FTP_USER,
-        password=config.FTP_PASSWORD,
-        remote_base_path="/L2/RMA1",
-        local_download_dir=Path("./processed_bufr"),
-        state_file=Path("./processing_state.json"),
+        host=FTP_HOST,
+        username=FTP_USER,
+        password=FTP_PASSWORD,
+        remote_base_path=f"/L2/{radar_name}",
+        local_download_dir=LOCAL_DIR,
+        state_file=Path(config.ROOT_RADAR_FILES_PATH) / radar_name / "state.db",
         poll_interval=60,
         max_concurrent_downloads=2,
     )
@@ -162,7 +170,7 @@ def batch_process_from_state():
     print("=" * 60)
 
     # Load state
-    state_file = Path("./daemon_state.json")
+    state_file = Path(config.ROOT_RADAR_FILES_PATH) / radar_name / "state.db"
     if not state_file.exists():
         print("\nNo state file found. Run the daemon first.")
         return
@@ -199,13 +207,13 @@ def selective_download():
 
     from radarlib.io.ftp.ftp import parse_ftp_path
 
-    client = FTPClient(host=config.FTP_HOST, user=config.FTP_USER, password=config.FTP_PASSWORD)
-    local_dir = Path("./selective_downloads")
+    client = FTPClient(host=FTP_HOST, user=FTP_USER, password=FTP_PASSWORD)
+    local_dir = LOCAL_DIR
     local_dir.mkdir(parents=True, exist_ok=True)
-    tracker = FileStateTracker(Path("./selective_state.json"))
+    tracker = FileStateTracker(Path(config.ROOT_RADAR_FILES_PATH) / radar_name / "state.db")
 
     # Target specific radar and field
-    target_radar = "RMA1"
+    target_radar = radar_name
     target_field = "DBZH"  # Reflectivity
     remote_dir = "/L2"
 

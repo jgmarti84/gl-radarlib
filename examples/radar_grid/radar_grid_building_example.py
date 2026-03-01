@@ -6,7 +6,7 @@ import numpy as np
 import pyart
 
 # Import our module
-from radar_grid import compute_grid_geometry, get_gate_coordinates, get_radar_info, save_geometry
+from radarlib.radar_grid import compute_grid_geometry, get_gate_coordinates, get_radar_info, save_geometry
 
 # Configurar logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

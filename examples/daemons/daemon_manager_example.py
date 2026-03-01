@@ -15,7 +15,8 @@ from pathlib import Path
 from radarlib import config
 from radarlib.daemons import DaemonManager, DaemonManagerConfig
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+logging.basicConfig(level=logging.DEBUG, format=log_format)
 logger = logging.getLogger(__name__)
 
 
@@ -35,16 +36,9 @@ def example_basic_daemon_manager():
             "01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP"],
             "02": ["VRAD", "WRAD"],
         },
-        # "0200": {"01": ["DBZH", "DBZV", "ZDR", "RHOHV", "PHIDP", "KDP", "CM"]},
     }
-    # geometries = {
-    #     "0315": {
-    #         "01": [1000, 12000, 0.017, 200],
-    #         "02": [1000, 12000, 0.06, 300],
-    #     },
-    # }
     geometries = None
-    radar_name = "RMA2"
+    radar_name = "RMA1"
     base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))
 
     # Create manager configuration
@@ -63,7 +57,6 @@ def example_basic_daemon_manager():
         enable_download_daemon=True,
         enable_processing_daemon=True,
         enable_product_daemon=True,
-        # product_dir=Path(os.path.join(config.ROOT_RADAR_PRODUCTS_PATH, radar_name)),
         product_type="geotiff",
         add_colmax=True,
         enable_cleanup_daemon=True,
@@ -97,12 +90,14 @@ def example_basic_daemon_manager():
     print(f"    Enabled: {status['download_daemon']['enabled']}")
     print(f"    Running: {status['download_daemon']['running']}")
     if status["download_daemon"]["stats"]:
-        print(f"    Files downloaded: {status['download_daemon']['stats']['total_downloaded']}")
+        status = status["download_daemon"]["stats"]["total_downloaded"]
+        print(f"    Files downloaded: {status}")
     print("\n  Processing daemon:")
     print(f"    Enabled: {status['processing_daemon']['enabled']}")
     print(f"    Running: {status['processing_daemon']['running']}")
     if status["processing_daemon"]["stats"]:
-        print(f"    Volumes processed: {status['processing_daemon']['stats']['volumes_processed']}")
+        status = status["processing_daemon"]["stats"]["volumes_processed"]
+        print(f"    Volumes processed: {status}")
     print("=" * 60)
 
 

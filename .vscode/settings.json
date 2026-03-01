@@ -22,5 +22,13 @@
         "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}"
     },
     "python-envs.defaultEnvManager": "ms-python.python:system",
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    "autopep8.args": [
+        "--max-line-length",
+        "88" // Change "88" to your desired line length
+    ],
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.autopep8",
+        "editor.formatOnSave": true
+    }
 }

@@ -1,6 +1,7 @@
 import numpy as np
 import pyart
-from radar_grid import (
+
+from radarlib.radar_grid import (
     apply_geometry,
     column_max,
     constant_altitude_ppi,

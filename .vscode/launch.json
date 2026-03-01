@@ -15,15 +15,21 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
+            // "args": [
+            //     "--host",
+            //     "200.16.116.24",
+            //     "--user",
+            //     "IMontamat",
+            //     "--password",
+            //     "1m0nt",
+            //     "--radar",
+            //     "RMA12"
+            // ],
             "args": [
-                "--host",
-                "200.16.116.24",
-                "--user",
-                "IMontamat",
-                "--password",
-                "1m0nt",
-                "--radar",
-                "RMA12"
+                "--netcdf",
+                "data/radares/RMA1/netcdf/RMA1_0315_02_20260227T235110Z.nc",
+                "--output",
+                "data/radares/RMA1/processed "
             ],
             "justMyCode": false
         },
