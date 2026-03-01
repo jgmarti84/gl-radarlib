@@ -13,6 +13,7 @@ cache:
     - .cache/pip/
 
 before_script:
+  - apt-get update && apt-get install -y --no-install-recommends libgdal-dev gdal-bin
   - python -V
   - pip install --upgrade pip
 
