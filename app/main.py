@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""
+Genpro25 - Radar Data Processing and Product Generation Service
+
+This service handles:
+- BUFR file processing
+- NetCDF product generation
+- Radar image creation
+"""
+import asyncio
+import logging
+import os
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
+
+import config
+
+from radarlib.daemons import DaemonManager, DaemonManagerConfig
+
+
+def main():
+    """
+    Main entry point for the Genpro25 radar data processing service.
+    """
+    radar_name = os.getenv("RADAR_NAME", "RMA2")
+
+    ################################################################
+    # LOGGING SETUP
+    # Ensure every LogRecord has a 'radar' attribute so "%(radar)s" in the format won't KeyError
+    _old_factory = logging.getLogRecordFactory()
+
+    def _record_factory(*args, **kwargs):
+        record = _old_factory(*args, **kwargs)
+        record.radar = radar_name
+        return record
+
+    logger = logging.getLogger(__name__)
+
+    # handlers
+    stream_handler = logging.StreamHandler()
+    # ensure log directory exists before creating a FileHandler to avoid "No such file or directory"
+    log_dir = Path(config.ROOT_LOGS_PATH) / radar_name  # type: ignore
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Rotate daily at midnight, keep 7 days of logs
+    timed_handler = TimedRotatingFileHandler(
+        filename=str(log_dir / "genpro25.log"),
+        when="midnight",  # When to rotate
+        interval=1,  # Rotate every 1 unit (day in this case)
+        backupCount=7,  # Keep 7 backup files
+        encoding="utf-8",
+        utc=True,  # Use local time (True for UTC)
+    )
+
+    logging.setLogRecordFactory(_record_factory)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(radar)s|%(levelname)s] %(module)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[stream_handler, timed_handler],
+    )
+    ################################################################
+
+    logger.info("=" * 60)
+    logger.info("Genpro25 Radar Data Processing Service Starting")
+    logger.info("=" * 60)
+
+    # Define volume types
+    volume_types = config.VOLUME_TYPES  # type: ignore
+    # geometry_config = {
+    #         "0315": {
+    #             "01": {"grid_resolution": 1000, "toa": 12000, "min_radius": 250, "rfactor": 0.017},
+    #             "02": {"grid_resolution": 1000, "toa": 12000, "min_radius": 250, "rfactor": 0.017},
+    #         }
+    #     }
+    base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))  # type: ignore
+
+    # Create manager configuration
+    manager_config = DaemonManagerConfig(
+        radar_name=radar_name,
+        base_path=base_path,
+        ftp_host=config.FTP_HOST,  # type: ignore
+        ftp_user=config.FTP_USER,  # type: ignore
+        ftp_password=config.FTP_PASS,  # type: ignore
+        ftp_base_path="/L2",
+        volume_types=volume_types,
+        # start_date=datetime(2025, 11, 25, 10, 0, 0, tzinfo=timezone.utc),
+        download_poll_interval=config.DOWNLOAD_POLL_INTERVAL,  # type: ignore
+        processing_poll_interval=config.PROCESSING_POLL_INTERVAL,  # type: ignore
+        product_poll_interval=config.PRODUCT_POLL_INTERVAL,  # type: ignore
+        enable_download_daemon=config.ENABLE_DOWNLOAD_DAEMON,  # type: ignore
+        enable_processing_daemon=config.ENABLE_PROCESSING_DAEMON,  # type: ignore
+        enable_product_daemon=config.ENABLE_PRODUCT_DAEMON,  # type: ignore
+        product_dir=Path(os.path.join(config.ROOT_RADAR_PRODUCTS_PATH, radar_name)),  # type: ignore
+        product_type=config.PRODUCT_TYPE,  # type: ignore
+        add_colmax=config.ADD_COLMAX,  # type: ignore
+        enable_cleanup_daemon=config.ENABLE_CLEANUP_DAEMON,  # type: ignore
+        netcdf_retention_days=config.NETCDF_RETENTION_DAYS,  # type: ignore
+        bufr_retention_days=config.BUFR_RETENTION_DAYS,  # type: ignore
+        cleanup_poll_interval=config.CLEANUP_POLL_INTERVAL,  # type: ignore
+        # geometry=geometry_config
+    )
+
+    # Create manager
+    manager = DaemonManager(manager_config)
+
+    logger.info("Starting daemon manager...")
+    logger.info("Both download and processing daemons will start")
+    logger.info("Press Ctrl+C to stop all daemons")
+
+    try:
+        asyncio.run(manager.start())
+    except KeyboardInterrupt:
+        logger.info("\n\nStopping daemons...")
+        manager.stop()
+        logger.info("All daemons stopped")
+
+    # Show final status
+    status = manager.get_status()
+    logger.info("\n" + "=" * 60)
+    logger.info("Final Status:")
+    logger.info(f"  Radar: {status['radar_code']}")
+    logger.info(f"  Base path: {status['base_path']}")
+    logger.info("\n  Download daemon:")
+    logger.info(f"    Enabled: {status['download_daemon']['enabled']}")
+    logger.info(f"    Running: {status['download_daemon']['running']}")
+    if status["download_daemon"]["stats"]:
+        logger.info(f"    Files downloaded: {status['download_daemon']['stats']['total_downloaded']}")
+    logger.info("\n  Processing daemon:")
+    logger.info(f"    Enabled: {status['processing_daemon']['enabled']}")
+    logger.info(f"    Running: {status['processing_daemon']['running']}")
+    if status["processing_daemon"]["stats"]:
+        logger.info(f"    Volumes processed: {status['processing_daemon']['stats']['volumes_processed']}")
+    logger.info("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,125 @@
+local:
+  COLMAX:
+    COLMAX_THRESHOLD: None
+    COLMAX_ELEV_LIMIT1: None
+    COLMAX_RHOHV_FILTER: None
+    COLMAX_RHOHV_UMBRAL: None
+    COLMAX_WRAD_FILTER: None
+    COLMAX_WRAD_UMBRAL: None
+    COLMAX_TDR_FILTER: None
+    COLMAX_TDR_UMBRAL: None
+  FTP:
+    FTP_HOST: "200.16.116.24"
+    FTP_USER: "IMontamat"
+    FTP_PASS: "1m0nt"
+  PNG_PLOTS:
+    PNG_DPI: None
+    FIELDS_TO_PLOT: None
+    FILTERED_FIELDS_TO_PLOT: None
+    NO_FILTERS:
+      REFL:
+        VMIN_REFL_NOFILTERS: None
+        VMAX_REFL_NOFILTERS: None
+        CMAP_REFL_NOFILTERS: None
+      RHOHV:
+        VMIN_RHOHV_NOFILTERS: None
+        VMAX_RHOHV_NOFILTERS: None
+        CMAP_RHOHV_NOFILTERS: None
+      PHIDP:
+        VMIN_PHIDP_NOFILTERS: None
+        VMAX_PHIDP_NOFILTERS: None
+        CMAP_PHIDP_NOFILTERS: None
+      KDP:
+        VMIN_KDP_NOFILTERS: None
+        VMAX_KDP_NOFILTERS: None
+        CMAP_KDP_NOFILTERS: None
+      ZDR:
+        VMIN_ZDR_NOFILTERS: None
+        VMAX_ZDR_NOFILTERS: None
+        CMAP_ZDR_NOFILTERS: None
+      VRAD:
+        VMIN_VRAD_NOFILTERS: None
+        VMAX_VRAD_NOFILTERS: None
+        CMAP_VRAD_NOFILTERS: None
+      WRAD:
+        VMIN_WRAD_NOFILTERS: None
+        VMAX_WRAD_NOFILTERS: None
+        CMAP_WRAD_NOFILTERS: None
+    FILTERS:
+      REFL:
+        VMIN_REFL: None
+        VMAX_REFL: None
+        CMAP_REFL: None
+      RHOHV:
+        VMIN_RHOHV: None
+        VMAX_RHOHV: None
+        CMAP_RHOHV: None
+      PHIDP:
+        VMIN_PHIDP: None
+        VMAX_PHIDP: None
+        CMAP_PHIDP: None
+      KDP:
+        VMIN_KDP: None
+        VMAX_KDP: None
+        CMAP_KDP: None
+      ZDR:
+        VMIN_ZDR: None
+        VMAX_ZDR: None
+        CMAP_ZDR: None
+      VRAD:
+        VMIN_VRAD: None
+        VMAX_VRAD: None
+        CMAP_VRAD: None
+      WRAD:
+        VMIN_WRAD: None
+        VMAX_WRAD: None
+        CMAP_WRAD: None
+  GRC_FILTER:
+    RHV:
+      GRC_RHV_FILTER: None
+      GRC_RHV_THRESHOLD: None
+    WRAD:
+      GRC_WRAD_FILTER: None
+      GRC_WRAD_THRESHOLD: None
+    REFL:
+      GRC_REFL_FILTER: None
+      GRC_REFL_THRESHOLD: None
+      GRC_REFL_FILTER2: None
+      GRC_REFL_THRESHOLD2: None
+    ZDR:
+      GRC_ZDR_FILTER: None
+      GRC_ZDR_THRESHOLD: None
+    CM:
+      GRC_CM_FILTER: None
+    RHOHV_THRESHOLD2:
+      GRC_RHOHV_THRESHOLD2: None
+    DESPECKLE:
+      GRC_DESPECKLE_FILTER: None
+    MEAN:
+      GRC_MEAN_FILTER: None
+      GRC_MEAN_THRESHOLD: None
+  VOLUME_TYPES:
+    "0315":
+      "01":
+        - DBZH
+        - DBZV
+        - ZDR
+        - RHOHV
+        - PHIDP
+        - KDP
+      "02":
+        - VRAD
+        - WRAD
+  DAEMON_PARAMS:
+    ENABLE_DOWNLOAD_DAEMON: True # Set to True to enable the download daemon
+    ENABLE_PROCESSING_DAEMON: True # Set to True to enable the processing daemon
+    ENABLE_PRODUCT_DAEMON: True # Set to True to enable the product generation daemon
+    ENABLE_CLEANUP_DAEMON: True # Set to True to enable the cleanup daemon
+    DOWNLOAD_POLL_INTERVAL: 60 # in seconds
+    PROCESSING_POLL_INTERVAL: 30 # in seconds
+    PRODUCT_POLL_INTERVAL: 30 # in seconds
+    CLEANUP_POLL_INTERVAL: 1800 # in seconds
+    PRODUCT_TYPE: "geotiff" # "image" or "geotiff"
+    ADD_COLMAX: True # Set to True to add Colmax products
+    NETCDF_RETENTION_DAYS: 0.08333333333333333 # in days
+    BUFR_RETENTION_DAYS: 0.08333333333333333 # in days

@@ -1,0 +1,3 @@
+services:
+  genpro25:
+    command: [ "tail", "-f", "/dev/null" ]

@@ -1,0 +1,27 @@
+{
+    "name": "Genpro25 Dev Container",
+    "dockerComposeFile": [
+        "../../docker-compose.yml",
+        "../../docker-compose.devcontainer.yml"
+    ],
+    "service": "genpro25",
+    "workspaceFolder": "/workspace",
+    "mounts": [
+        "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
+    ],
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "terminal.integrated.shell.linux": "/bin/bash"
+            },
+            "extensions": [
+                "ms-python.python",
+                "ms-azuretools.vscode-docker",
+                "qwtel.sqlite-viewer",
+                "GitHub.copilot"
+            ]
+        }
+    },
+    "remoteUser": "root"
+}

@@ -2,7 +2,7 @@
     "name": "RADARLIB Development Container",
     "build": {
         "dockerfile": "Dockerfile",
-        "context": ".."
+        "context": "../.."
     },
     "containerEnv": {
         "PYTHONUNBUFFERED": "1",
