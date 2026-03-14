@@ -1,10 +1,12 @@
 import logging
 import os
+import re
 import tempfile
 import time
 import zlib
 from contextlib import contextmanager
 from ctypes import CDLL, POINTER, Structure, c_char_p, c_double, c_int, cdll
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -33,6 +35,171 @@ class meta_t(Structure):
         ("radar", point_t),
         ("radar_height", c_double),
     ]
+
+
+class BUFRFilename:
+    """
+    Parser for BUFR filenames with metadata extraction.
+
+    BUFR Filename Format:
+        {radar_name}_{strategy}_{volume}_{field}_YYYYMMDDTHHMMSSZ.BUFR
+
+    Example:
+        RMA1_0315_01_DBZV_20251020T152828Z.BUFR
+        - Radar: RMA1
+        - Strategy: 0315
+        - Volume: 01
+        - Field: DBZV
+        - DateTime: 2025-10-20 15:28:28 UTC
+    """
+
+    # Regex pattern for BUFR filename parsing
+    PATTERN = re.compile(
+        r"^(?P<radar_name>[A-Z0-9]+)_"
+        r"(?P<strategy>\d+)_"
+        r"(?P<volume>\d+)_"
+        r"(?P<field>[A-Z0-9]+)_"
+        r"(?P<timestamp>\d{8}T\d{6}Z)"
+        r"\.BUFR$",
+        re.IGNORECASE,
+    )
+
+    def __init__(self, filename: str):
+        """
+        Parse a BUFR filename and extract metadata.
+
+        Args:
+            filename: BUFR filename to parse
+
+        Raises:
+            ValueError: If filename format is invalid
+
+        Example:
+            >>> parsed = BUFRFilename("RMA1_0315_01_DBZV_20251020T152828Z.BUFR")
+            >>> print(parsed.radar_name)  # "RMA1"
+            >>> print(parsed.datetime)     # datetime(2025, 10, 20, 15, 28, 28, tzinfo=timezone.utc)
+        """
+        match = self.PATTERN.match(filename)
+        if not match:
+            raise ValueError(f"Invalid BUFR filename format: {filename}")
+
+        self.filename = filename
+        self.radar_name = match.group("radar_name")
+        self.strategy = match.group("strategy")
+        self.volume = match.group("volume")
+        self.field = match.group("field")
+
+        # Parse ISO 8601 timestamp (YYYYMMDDTHHMMSSZ)
+        timestamp_str = match.group("timestamp")
+        self.datetime = datetime.strptime(timestamp_str, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+
+    def matches(
+        self, strategy: Optional[str] = None, volume_nr: Optional[int] = None, field: Optional[str] = None
+    ) -> bool:
+        """
+        Check if this file matches the given filters.
+
+        Args:
+            strategy: Strategy number to match (e.g., "0315")
+            volume_nr: Volume number to match (e.g., 1)
+            field: Field name to match (e.g., "DBZV")
+
+        Returns:
+            True if all provided filters match, False otherwise
+
+        Example:
+            >>> parsed = BUFRFilename("RMA1_0315_01_DBZV_20251020T152828Z.BUFR")
+            >>> parsed.matches(strategy="0315", field="DBZV")  # True
+            >>> parsed.matches(field="VRAD")  # False
+        """
+        if strategy is not None and self.strategy != strategy:
+            return False
+        if volume_nr is not None and self.volume != f"{volume_nr:02d}":
+            return False
+        if field is not None and self.field != field:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return (
+            f"BUFRFilename(radar={self.radar_name}, strategy={self.strategy}, "
+            f"volume={self.volume}, field={self.field}, datetime={self.datetime})"
+        )
+
+    def __str__(self) -> str:
+        return self.filename
+
+
+class BUFRFileInfo:
+    """
+    Container for BUFR file information and metadata.
+
+    Auto-parses valid BUFR filenames to extract metadata (radar, strategy, volume, field, datetime).
+
+    Attributes:
+        filename: Name of the BUFR file
+        remote_path: Full path on the FTP server
+        exists: Whether the file exists on the server
+        file_size: Size of the file in bytes (if available)
+        timestamp: File modification time (if available)
+        radar_name: Radar name extracted from filename (if valid)
+        strategy: Strategy number extracted from filename (if valid)
+        volume: Volume number extracted from filename (if valid)
+        field: Field name extracted from filename (if valid)
+        datetime: DateTime extracted from filename (if valid)
+    """
+
+    def __init__(
+        self,
+        filename: str,
+        remote_path: str,
+        exists: bool = False,
+        file_size: Optional[int] = None,
+        timestamp: Optional[datetime] = None,
+    ):
+        self.filename = filename
+        self.remote_path = remote_path
+        self.exists = exists
+        self.file_size = file_size
+        self.timestamp = timestamp
+
+        # Auto-parse BUFR filename metadata
+        self.radar_name: Optional[str] = None
+        self.strategy: Optional[str] = None
+        self.volume: Optional[str] = None
+        self.field: Optional[str] = None
+        self.datetime: Optional[datetime] = None
+
+        try:
+            parsed = BUFRFilename(filename)
+            self.radar_name = parsed.radar_name
+            self.strategy = parsed.strategy
+            self.volume = parsed.volume
+            self.field = parsed.field
+            self.datetime = parsed.datetime
+        except ValueError:
+            # Not a valid BUFR filename, metadata remains None
+            pass
+
+    def __repr__(self) -> str:
+        status = "✓" if self.exists else "✗"
+        size_str = f" ({self.file_size} bytes)" if self.file_size else ""
+        return f"BUFRFileInfo({status} {self.filename}{size_str})"
+
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for serialization."""
+        return {
+            "filename": self.filename,
+            "remote_path": self.remote_path,
+            "exists": self.exists,
+            "file_size": self.file_size,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "radar_name": self.radar_name,
+            "strategy": self.strategy,
+            "volume": self.volume,
+            "field": self.field,
+            "datetime": self.datetime.isoformat() if self.datetime else None,
+        }
 
 
 @contextmanager

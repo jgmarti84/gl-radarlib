@@ -193,6 +193,7 @@ class ProductGenerationDaemon:
                             ftp_host=self.config.ftp_host,
                             ftp_user=self.config.ftp_user,
                             ftp_pass=self.config.ftp_password,
+                            lookback_hours=config.GEOMETRY_BUFR_LOOKBACK_HOURS,
                         )
                         msg = "Created gate coordinates file path does not match expected path. "
                         msg += "Check create_gate_coords_file implementation."

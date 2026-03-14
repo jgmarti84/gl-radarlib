@@ -138,6 +138,7 @@ DEFAULTS: Dict[str, Any] = {
     "GEOMETRY_TOA": 12000.0,
     "GEOMETRY_HFAC": 0.017,
     "GEOMETRY_MIN_RADIUS": 250.0,
+    "GEOMETRY_BUFR_LOOKBACK_HOURS": 72,
 }
 
 _config: Dict[str, Any] = DEFAULTS.copy()
@@ -278,6 +279,7 @@ GEOMETRY_RES: float = get("GEOMETRY_RES")
 GEOMETRY_TOA: float = get("GEOMETRY_TOA")
 GEOMETRY_HFAC: float = get("GEOMETRY_HFAC")
 GEOMETRY_MIN_RADIUS: float = get("GEOMETRY_MIN_RADIUS")
+GEOMETRY_BUFR_LOOKBACK_HOURS: int = get("GEOMETRY_BUFR_LOOKBACK_HOURS")
 
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)

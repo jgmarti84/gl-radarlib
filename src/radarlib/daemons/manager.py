@@ -74,8 +74,15 @@ class DaemonManagerConfig:
 
     def __post_init__(self):
         """Post-initialization checks."""
+        if isinstance(self.start_date, str):
+            try:
+                self.start_date = datetime.fromisoformat(self.start_date)
+            except ValueError:
+                self.start_date = None
+
         if self.start_date and self.start_date.tzinfo is None:
             raise ValueError("start_date must be timezone-aware (UTC)")
+
         if self.start_date is None:
             self.start_date = datetime.now().replace(tzinfo=timezone.utc)
 

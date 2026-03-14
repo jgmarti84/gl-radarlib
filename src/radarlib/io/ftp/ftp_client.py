@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generator, List, Optional, Tuple
 
+from radarlib.io.bufr.bufr import BUFRFileInfo, BUFRFilename
 from radarlib.utils.names_utils import build_vol_types_regex
 
 logger = logging.getLogger(__name__)
@@ -146,6 +147,79 @@ class RadarFTPClient:
             return local_path
         except ftplib.all_errors as e:
             raise FTPError(f"Error downloading {remote_path}: {e}")
+
+    def file_exists(self, remote_path: str) -> bool:
+        """
+        Check if a file exists on the FTP server.
+
+        Args:
+            remote_path: Full path to remote file
+
+        Returns:
+            True if file exists, False otherwise
+        """
+        self._ensure_connection()
+
+        remote_path_obj = Path(remote_path)
+        remote_dir = str(remote_path_obj.parent)
+        remote_filename = remote_path_obj.name
+
+        try:
+            files = self.list_dir(remote_dir)
+            return remote_filename in files
+        except ftplib.all_errors:
+            return False
+        except ConnectionError:
+            return False
+        except FTPError:
+            return False
+
+    def find_last_bufr_file(
+        self,
+        radar: str,
+        strategy: Optional[str] = None,
+        volume_nr: Optional[int] = None,
+        field: Optional[str] = None,
+    ) -> Optional[BUFRFileInfo]:
+        """
+        Encuentra el último archivo BUFR para un radar dado, con opciones de filtrado.
+        - strategy: filtra por estrategia de radar si se proporciona.
+        - volume_nr: filtra por número de volumen si se proporciona.
+        - field: filtra por campo específico si se proporciona.
+        """
+
+        base_path = f"/{self.base_dir}/{radar}"
+        try:
+            years = sorted(self.list_dir(base_path), reverse=True)
+            for y in years:
+                year_path = f"{base_path}/{y}"
+                months = sorted(self.list_dir(year_path), reverse=True)
+                for m in months:
+                    month_path = f"{year_path}/{m}"
+                    days = sorted(self.list_dir(month_path), reverse=True)
+                    for d in days:
+                        day_path = f"{month_path}/{d}"
+                        hours = sorted(self.list_dir(day_path), reverse=True)
+                        for h in hours:
+                            hour_path = f"{day_path}/{h}"
+                            minutes = sorted(self.list_dir(hour_path), reverse=True)
+                            for ms in minutes:
+                                minute_path = f"{hour_path}/{ms}"
+                                files = self.list_dir(minute_path)
+                                for fname in sorted(files, reverse=True):
+                                    bufr_file = BUFRFilename(fname)
+                                    if strategy and strategy != bufr_file.strategy:
+                                        continue
+                                    if volume_nr and volume_nr != bufr_file.volume:
+                                        continue
+                                    if field and field != bufr_file.field:
+                                        continue
+                                    # full_remote = Path(f"{minute_path}/{fname}")
+                                    return BUFRFileInfo(fname, minute_path, True, None, None)
+                                    # return BUFRFileInfo.from_filename(fname, full_remote.as_posix())
+        except FTPError as e:
+            logger.error(f"Error finding last BUFR file for radar {radar}: {e}")
+            return None
 
     # ----------------------
     # Recursive traversal for radar BUFR files
@@ -314,4 +388,206 @@ class RadarFTPClientAsync(RadarFTPClient):
     async def download_files_parallel(self, files: List[Tuple[Path, Path]]) -> List[Path]:
         """Download multiple files asynchronously in parallel."""
         tasks = [asyncio.create_task(self.download_file_async(remote, local)) for remote, local in files]
+        return await asyncio.gather(*tasks, return_exceptions=False)
+
+    def _list_dir_with_fresh_connection(self, remote_path: str) -> List[str]:
+        """
+        List directory contents using a fresh FTP connection.
+        This prevents thread safety issues when called from multiple threads.
+
+        Args:
+            remote_path: Remote directory path
+
+        Returns:
+            List of items in directory, empty list on error
+        """
+        try:
+            with ftplib.FTP(self.host, timeout=self.timeout) as ftp:
+                ftp.login(self.user, self.password)
+                ftp.cwd(remote_path)
+                return ftp.nlst()
+        except ftplib.all_errors as e:
+            logger.debug(f"Error listing {remote_path}: {e}")
+            return []
+        except Exception as e:
+            logger.debug(f"Unexpected error listing {remote_path}: {e}")
+            return []
+
+    def _check_file_exists_with_fresh_connection(self, remote_path: str) -> bool:
+        """
+        Check if a file exists on the FTP server using a fresh connection.
+        Each call creates its own FTP connection to avoid thread safety issues.
+
+        Args:
+            remote_path: Full path to remote file
+
+        Returns:
+            True if file exists, False otherwise
+        """
+        try:
+            with ftplib.FTP(self.host, timeout=self.timeout) as ftp:
+                ftp.login(self.user, self.password)
+                remote_path_obj = Path(remote_path)
+                remote_dir = str(remote_path_obj.parent)
+                remote_filename = remote_path_obj.name
+                ftp.cwd(remote_dir)
+                files = ftp.nlst()
+                return remote_filename in files
+        except ftplib.all_errors:
+            logger.debug(f"File existence check failed for {remote_path}")
+            return False
+        except Exception as e:
+            logger.debug(f"Unexpected error checking file existence: {e}")
+            return False
+
+    def _find_last_bufr_file_with_fresh_connection(
+        self,
+        radar: str,
+        strategy: Optional[str] = None,
+        volume_nr: Optional[int] = None,
+        field: Optional[str] = None,
+    ) -> Optional[BUFRFileInfo]:
+        """
+        Find the last BUFR file for a radar using fresh FTP connections.
+        Each directory listing creates its own connection to avoid thread safety issues.
+
+        Args:
+            radar: Radar name
+            strategy: Optional filter by strategy number
+            volume_nr: Optional filter by volume number
+            field: Optional filter by field name
+
+        Returns:
+            BUFRFileInfo if found, None otherwise
+        """
+        base_path = f"/{self.base_dir}/{radar}"
+        try:
+            years = sorted(self._list_dir_with_fresh_connection(base_path), reverse=True)
+            for y in years:
+                year_path = f"{base_path}/{y}"
+                months = sorted(self._list_dir_with_fresh_connection(year_path), reverse=True)
+                for m in months:
+                    month_path = f"{year_path}/{m}"
+                    days = sorted(self._list_dir_with_fresh_connection(month_path), reverse=True)
+                    for d in days:
+                        day_path = f"{month_path}/{d}"
+                        hours = sorted(self._list_dir_with_fresh_connection(day_path), reverse=True)
+                        for h in hours:
+                            hour_path = f"{day_path}/{h}"
+                            minutes = sorted(self._list_dir_with_fresh_connection(hour_path), reverse=True)
+                            for ms in minutes:
+                                minute_path = f"{hour_path}/{ms}"
+                                files = self._list_dir_with_fresh_connection(minute_path)
+                                for fname in sorted(files, reverse=True):
+                                    bufr_file = BUFRFilename(fname)
+                                    if strategy and strategy != bufr_file.strategy:
+                                        continue
+                                    if volume_nr and volume_nr != bufr_file.volume:
+                                        continue
+                                    if field and field != bufr_file.field:
+                                        continue
+                                    return BUFRFileInfo(fname, minute_path, True, None, None)
+        except Exception as e:
+            logger.error(f"Error finding last BUFR file for radar {radar}: {e}")
+            return None
+        return None
+
+    async def files_exist_parallel(self, remote_paths: List[str]) -> List[Tuple[str, bool]]:
+        """
+        Check if multiple files exist on the FTP server in parallel.
+
+        Uses the semaphore to limit concurrent FTP operations. Each check uses a fresh
+        FTP connection to avoid thread safety issues with shared connections.
+
+        Args:
+            remote_paths: List of remote file paths to check
+
+        Returns:
+            List of tuples (remote_path, exists) indicating existence of each file
+
+        Example:
+            >>> import asyncio
+            >>>
+            >>> async def check_multiple_files():
+            ...     async with RadarFTPClientAsync('ftp.example.com', 'user', 'pass') as client:
+            ...         files_to_check = [
+            ...             '/L2/RMA1/2025/10/20/15/3045/RMA1_0315_01_DBZV_20251020T153045Z.BUFR',
+            ...             '/L2/RMA1/2025/10/20/15/3046/RMA1_0315_01_DBZV_20251020T153046Z.BUFR',
+            ...             '/L2/RMA1/2025/10/20/15/3047/RMA1_0315_01_DBZV_20251020T153047Z.BUFR',
+            ...         ]
+            ...         results = await client.files_exist_parallel(files_to_check)
+            ...         for path, exists in results:
+            ...             status = '✓' if exists else '✗'
+            ...             print(f'{status} {path}')
+            ...
+            >>> # Run the async function
+            >>> asyncio.run(check_multiple_files())
+        """
+
+        async def _check_file_exists(remote_path: str) -> Tuple[str, bool]:
+            """Check if a single file exists using the semaphore and fresh connection."""
+            async with self._semaphore:
+                exists = await asyncio.to_thread(self._check_file_exists_with_fresh_connection, remote_path)
+                return (remote_path, exists)
+
+        tasks = [asyncio.create_task(_check_file_exists(path)) for path in remote_paths]
+        return await asyncio.gather(*tasks, return_exceptions=False)
+
+    async def find_last_bufr_files_parallel(
+        self,
+        radars: List[str],
+        strategy: Optional[str] = None,
+        volume_nr: Optional[int] = None,
+        field: Optional[str] = None,
+    ) -> List[Tuple[str, Optional[BUFRFileInfo]]]:
+        """
+        Find the last BUFR file for multiple radars in parallel.
+
+        Uses the semaphore to limit concurrent FTP operations. Each search uses fresh
+        FTP connections to avoid thread safety issues with shared connections.
+        The same strategy, volume_nr, and field filters are applied to all radars.
+
+        Args:
+            radars: List of radar names to check (e.g., ['RMA1', 'RMA2', 'RMA3'])
+            strategy: Optional filter by strategy number (applied to all radars)
+            volume_nr: Optional filter by volume number (applied to all radars)
+            field: Optional filter by field name (applied to all radars)
+
+        Returns:
+            List of tuples (radar_name, BUFRFileInfo or None) for each radar
+
+        Example:
+            >>> import asyncio
+            >>>
+            >>> async def find_latest_files_for_multiple_radars():
+            ...     async with RadarFTPClientAsync('ftp.example.com', 'user', 'pass') as client:
+            ...         radars = ['RMA1', 'RMA2', 'RMA3']
+            ...         results = await client.find_last_bufr_files_parallel(
+            ...             radars=radars,
+            ...             strategy='0315',
+            ...             field='DBZV'
+            ...         )
+            ...         for radar, file_info in results:
+            ...             if file_info:
+            ...                 print(f'{radar}: {file_info.filename} at {file_info.datetime}')
+            ...             else:
+            ...                 print(f'{radar}: No file found')
+            ...
+            >>> # Run the async function
+            >>> asyncio.run(find_latest_files_for_multiple_radars())
+        """
+
+        async def _find_last_file(radar: str) -> Tuple[str, Optional[BUFRFileInfo]]:
+            """Find last BUFR file for a single radar using semaphore and fresh connection."""
+            async with self._semaphore:
+                file_info = await asyncio.to_thread(
+                    self._find_last_bufr_file_with_fresh_connection,
+                    radar,
+                    strategy,
+                    volume_nr,
+                    field,
+                )
+                return (radar, file_info)
+
+        tasks = [asyncio.create_task(_find_last_file(radar)) for radar in radars]
         return await asyncio.gather(*tasks, return_exceptions=False)

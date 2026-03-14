@@ -38,7 +38,7 @@ def create_gate_coords_file(
     ftp_host: Optional[str] = None,
     ftp_user: Optional[str] = None,
     ftp_pass: Optional[str] = None,
-    lookback_hours: int = 24,
+    lookback_hours: int = 72,
 ):
     """Fetch one random BUFR file and save gate coordinates as compressed .npz.
 
