@@ -3,7 +3,11 @@
 #
 # Script para generar documentación PDF de radarlib
 #
-# Uso: ./generate_pdf.sh
+# Uso:
+#   ./generate_pdf.sh          # genera ambas versiones (EN + ES)
+#   ./generate_pdf.sh en       # genera solo la versión en inglés
+#   ./generate_pdf.sh es       # genera solo la versión en español (secciones separadas)
+#   ./generate_pdf.sh es-single # genera solo la versión en español (README.es.md)
 #
 # Requisitos:
 #   - pandoc (apt install pandoc)
@@ -15,115 +19,183 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOCS_DIR="$SCRIPT_DIR/es"
-OUTPUT_PDF="$DOCS_DIR/radarlib_documentacion.pdf"
-OUTPUT_HTML="$DOCS_DIR/radarlib_documentacion.html"
+LANG_ARG="${1:-all}"
+VERSION="v0.1.0"
 
-echo "================================================"
-echo "  Generador de Documentación PDF - radarlib    "
-echo "================================================"
-echo ""
-
-# Verificar que existe el directorio de documentación
-if [ ! -d "$DOCS_DIR" ]; then
-    echo "Error: Directorio de documentación no encontrado: $DOCS_DIR"
-    exit 1
-fi
-
-# Lista ordenada de archivos Markdown
-MD_FILES=(
-    "$DOCS_DIR/01_introduccion.md"
-    "$DOCS_DIR/02_instalacion.md"
-    "$DOCS_DIR/03_configuracion.md"
-    "$DOCS_DIR/04_arquitectura_daemons.md"
-    "$DOCS_DIR/05_modulos_principales.md"
-    "$DOCS_DIR/06_guia_integracion.md"
-    "$DOCS_DIR/07_referencia_api.md"
-    "$DOCS_DIR/08_ejemplos_avanzados.md"
-)
-
-# Verificar que existen todos los archivos
-for file in "${MD_FILES[@]}"; do
-    if [ ! -f "$file" ]; then
-        echo "Advertencia: Archivo no encontrado: $file"
+# ─── Helper: detect best available font ──────────────────────────────────────
+best_font() {
+    local preferred="$1"
+    local fallback="$2"
+    # Use exact family-name match (colon-delimited fc-list output) to avoid
+    # substring false-positives like "DejaVu Serif" matching "DejaVu Serif Condensed"
+    if fc-list 2>/dev/null | grep -E "(^|:) *${preferred} *(:|$)" -q; then
+        echo "$preferred"
+    else
+        echo "$fallback"
     fi
-done
+}
 
-# Verificar si pandoc está instalado
+# ─── Helper: generate PDF or HTML fallback ───────────────────────────────────
+generate_doc() {
+    local output_pdf="$1"
+    local output_html="$2"
+    local lang_code="$3"      # e.g. "en" or "es-419"
+    local title="$4"
+    shift 4
+    local md_files=("$@")
+
+    echo "  → Archivos de entrada:"
+    for f in "${md_files[@]}"; do
+        if [ -f "$f" ]; then
+            echo "      $f"
+        else
+            echo "      [FALTANTE] $f"
+        fi
+    done
+    echo ""
+
+    if command -v xelatex &> /dev/null; then
+        local main_font mono_font
+        main_font="$(best_font "DejaVu Serif" "Liberation Serif")"
+        mono_font="$(best_font "DejaVu Sans Mono" "Liberation Mono")"
+
+        pandoc "${md_files[@]}" \
+            -o "$output_pdf" \
+            --from markdown \
+            --toc \
+            --toc-depth=3 \
+            -V geometry:margin=1in \
+            -V fontsize=11pt \
+            -V lang="$lang_code" \
+            -V mainfont="$main_font" \
+            -V monofont="$mono_font" \
+            -V documentclass=report \
+            -V colorlinks=true \
+            -V linkcolor=blue \
+            -V urlcolor=blue \
+            --pdf-engine=xelatex \
+            --highlight-style=tango \
+            --metadata title="$title" \
+            --metadata author="Grupo Radar Córdoba (GRC)" \
+            --metadata date="$VERSION"
+
+        echo "  ✅ PDF generado: $output_pdf"
+    else
+        echo "  ⚠️  XeLaTeX no disponible — generando HTML en su lugar..."
+
+        pandoc "${md_files[@]}" \
+            -o "$output_html" \
+            --from markdown \
+            --to html5 \
+            --toc \
+            --toc-depth=3 \
+            --standalone \
+            --highlight-style=tango \
+            --metadata title="$title" \
+            --metadata author="Grupo Radar Córdoba (GRC)" \
+            --metadata date="$VERSION" \
+            -c "https://cdn.simplecss.org/simple.min.css"
+
+        echo "  ✅ HTML generado: $output_html"
+        echo "  Para generar PDF instale: sudo apt install texlive-xetex texlive-lang-spanish texlive-fonts-recommended"
+    fi
+}
+
+# ─── Verify pandoc ────────────────────────────────────────────────────────────
 if ! command -v pandoc &> /dev/null; then
     echo "Error: pandoc no está instalado."
     echo ""
-    echo "Para instalar en Ubuntu/Debian:"
-    echo "  sudo apt install pandoc"
-    echo ""
-    echo "Para instalar en macOS:"
-    echo "  brew install pandoc"
-    echo ""
+    echo "Para instalar en Ubuntu/Debian:  sudo apt install pandoc"
+    echo "Para instalar en macOS:          brew install pandoc"
     exit 1
 fi
 
-# Intentar generar PDF
-echo "Generando documentación PDF..."
+echo "========================================================"
+echo "   Generador de Documentación PDF/HTML — radarlib      "
+echo "========================================================"
 echo ""
 
-if command -v xelatex &> /dev/null; then
-    # Detect available fonts for better compatibility
-    MAIN_FONT="DejaVu Serif"
-    MONO_FONT="DejaVu Sans Mono"
+# ─── English version (docs/README.md → docs/radarlib_documentation.pdf) ──────
+generate_en() {
+    local en_src="$SCRIPT_DIR/README.md"
+    local out_pdf="$SCRIPT_DIR/radarlib_documentation.pdf"
+    local out_html="$SCRIPT_DIR/radarlib_documentation.html"
 
-    # Check if DejaVu fonts are available, fallback to system fonts if not
-    if ! fc-list | grep -q "DejaVu Serif" 2>/dev/null; then
-        MAIN_FONT="Liberation Serif"
+    echo "[ EN ] Generando documentación en inglés..."
+    if [ ! -f "$en_src" ]; then
+        echo "  Error: $en_src no encontrado."
+        return 1
     fi
-    if ! fc-list | grep -q "DejaVu Sans Mono" 2>/dev/null; then
-        MONO_FONT="Liberation Mono"
+    generate_doc "$out_pdf" "$out_html" "en" "radarlib Documentation" "$en_src"
+}
+
+# ─── Spanish single-file version (docs/README.es.md → docs/radarlib_documentacion_es.pdf) ──
+generate_es_single() {
+    local es_src="$SCRIPT_DIR/README.es.md"
+    local out_pdf="$SCRIPT_DIR/radarlib_documentacion_es.pdf"
+    local out_html="$SCRIPT_DIR/radarlib_documentacion_es.html"
+
+    echo "[ ES ] Generando documentación en español (archivo único)..."
+    if [ ! -f "$es_src" ]; then
+        echo "  Error: $es_src no encontrado."
+        return 1
     fi
+    generate_doc "$out_pdf" "$out_html" "es-419" "Documentación de radarlib" "$es_src"
+}
 
-    # Use XeLaTeX for better Unicode support
-    pandoc "${MD_FILES[@]}" \
-        -o "$OUTPUT_PDF" \
-        --from markdown \
-        --toc \
-        --toc-depth=3 \
-        -V geometry:margin=1in \
-        -V fontsize=11pt \
-        -V lang=es-419 \
-        -V mainfont="$MAIN_FONT" \
-        -V monofont="$MONO_FONT" \
-        -V documentclass=report \
-        -V colorlinks=true \
-        -V linkcolor=blue \
-        -V urlcolor=blue \
-        --pdf-engine=xelatex \
-        --highlight-style=tango \
-        --metadata title="Documentación de radarlib" \
-        --metadata author="Grupo Radar Córdoba (GRC)" \
-        --metadata date="v0.1.0"
+# ─── Spanish multi-file version (docs/es/*.md → docs/es/radarlib_documentacion.pdf) ──
+generate_es_multi() {
+    local es_dir="$SCRIPT_DIR/es"
+    local out_pdf="$es_dir/radarlib_documentacion.pdf"
+    local out_html="$es_dir/radarlib_documentacion.html"
 
-    echo "✅ PDF generado exitosamente: $OUTPUT_PDF"
-else
-    echo "⚠️ XeLaTeX no está instalado. Generando HTML en su lugar..."
-    echo ""
+    local md_files=(
+        "$es_dir/01_introduccion.md"
+        "$es_dir/02_instalacion.md"
+        "$es_dir/03_configuracion.md"
+        "$es_dir/04_arquitectura_daemons.md"
+        "$es_dir/05_modulos_principales.md"
+        "$es_dir/06_guia_integracion.md"
+        "$es_dir/07_referencia_api.md"
+        "$es_dir/08_ejemplos_avanzados.md"
+    )
 
-    # Generar HTML como alternativa
-    pandoc "${MD_FILES[@]}" \
-        -o "$OUTPUT_HTML" \
-        --from markdown \
-        --to html5 \
-        --toc \
-        --toc-depth=3 \
-        --standalone \
-        --highlight-style=tango \
-        --metadata title="Documentación de radarlib" \
-        --metadata author="Grupo Radar Córdoba (GRC)" \
-        --metadata date="v0.1.0" \
-        -c "https://cdn.simplecss.org/simple.min.css"
+    echo "[ ES ] Generando documentación en español (secciones separadas)..."
+    if [ ! -d "$es_dir" ]; then
+        echo "  Error: directorio $es_dir no encontrado."
+        return 1
+    fi
+    generate_doc "$out_pdf" "$out_html" "es-419" "Documentación de radarlib" "${md_files[@]}"
+}
 
-    echo "✅ HTML generado: $OUTPUT_HTML"
-    echo ""
-    echo "Para generar PDF, instale XeLaTeX:"
-    echo "  sudo apt install texlive-xetex texlive-lang-spanish texlive-fonts-recommended"
-fi
+# ─── Dispatch ─────────────────────────────────────────────────────────────────
+case "$LANG_ARG" in
+    en)
+        generate_en
+        ;;
+    es)
+        generate_es_multi
+        ;;
+    es-single)
+        generate_es_single
+        ;;
+    all)
+        generate_en
+        echo ""
+        generate_es_single
+        echo ""
+        generate_es_multi
+        ;;
+    *)
+        echo "Argumento no reconocido: '$LANG_ARG'"
+        echo "Uso: $0 [en|es|es-single|all]"
+        echo "  en        — documentación en inglés (docs/README.md)"
+        echo "  es-single — documentación en español, archivo único (docs/README.es.md)"
+        echo "  es        — documentación en español, secciones separadas (docs/es/*.md)"
+        echo "  all       — todas las versiones (valor por defecto)"
+        exit 1
+        ;;
+esac
 
 echo ""
 echo "Proceso completado."
