@@ -17,54 +17,56 @@ services:
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
+      ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
     command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
     restart: unless-stopped
+  # genpro25-1:
+  #   build:
+  #     context: .
+  #     dockerfile: ./app/Dockerfile
+  #   container_name: genpro25-1
+  #   volumes:
+  #     - ../product_output:/workspace/app/product_output
+  #     - ../logs:/workspace/app/logs
+  #     - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+  #   environment:
+  #     RADAR_NAME: "RMA1"
+  #     GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+  #     ROOT_CACHE_PATH: "/workspace/app/cache"
+  #     ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+  #     ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+  #     ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+  #     ROOT_LOGS_PATH: "/workspace/app/logs"
+  #     ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+  #     PYTHONDONTWRITEBYTECODE: "1"
+  #     PYTHONUNBUFFERED: "1"
+  #   working_dir: /workspace/app
+  #   command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+  #   restart: unless-stopped
 
-  genpro25-1:
-    build:
-      context: .
-      dockerfile: ./app/Dockerfile
-    container_name: genpro25-1
-    volumes:
-      - ../product_output:/workspace/app/product_output
-      - ../logs:/workspace/app/logs
-      - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
-    environment:
-      RADAR_NAME: "RMA1"
-      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
-      ROOT_CACHE_PATH: "/workspace/app/cache"
-      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
-      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
-      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
-      ROOT_LOGS_PATH: "/workspace/app/logs"
-      PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONUNBUFFERED: "1"
-    working_dir: /workspace/app
-    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
-    restart: unless-stopped
-
-  genpro25-2:
-    build:
-      context: .
-      dockerfile: ./app/Dockerfile
-    container_name: genpro25-2
-    volumes:
-      - ../product_output:/workspace/app/product_output
-      - ../logs:/workspace/app/logs
-      - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
-    environment:
-      RADAR_NAME: "RMA3"
-      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
-      ROOT_CACHE_PATH: "/workspace/app/cache"
-      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
-      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
-      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
-      ROOT_LOGS_PATH: "/workspace/app/logs"
-      PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONUNBUFFERED: "1"
-    working_dir: /workspace/app
-    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
-    restart: unless-stopped
+  # genpro25-2:
+  #   build:
+  #     context: .
+  #     dockerfile: ./app/Dockerfile
+  #   container_name: genpro25-2
+  #   volumes:
+  #     - ../product_output:/workspace/app/product_output
+  #     - ../logs:/workspace/app/logs
+  #     - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+  #   environment:
+  #     RADAR_NAME: "RMA11"
+  #     GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+  #     ROOT_CACHE_PATH: "/workspace/app/cache"
+  #     ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+  #     ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+  #     ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+  #     ROOT_LOGS_PATH: "/workspace/app/logs"
+  #     ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+  #     PYTHONDONTWRITEBYTECODE: "1"
+  #     PYTHONUNBUFFERED: "1"
+  #   working_dir: /workspace/app
+  #   command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+  #   restart: unless-stopped

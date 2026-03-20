@@ -771,6 +771,19 @@ class SQLiteStateTracker:
         row = cursor.fetchone()
         return row[0] if row else None
 
+    def get_incomplete_volumes(self) -> List[Dict]:
+        """ """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT * FROM volume_processing
+            WHERE is_complete = 0
+            """
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_unprocessed_volumes(self) -> List[Dict]:
         """
         Get all volumes that haven't been processed yet (both complete and incomplete).
@@ -1249,6 +1262,36 @@ class SQLiteStateTracker:
             )
 
         return [dict(row) for row in cursor.fetchall()]
+
+    def get_incomplete_volumes_fields(self, volume_info) -> List[Dict]:
+        """ """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT filename, local_path, remote_path, file_size, field_type FROM downloads
+            WHERE radar_name = ? AND strategy = ? AND vol_nr = ?
+            AND observation_datetime = ? AND status = 'completed'
+        """,
+            (
+                volume_info["radar_name"],
+                volume_info["strategy"],
+                volume_info["vol_nr"],
+                volume_info["observation_datetime"],
+            ),
+        )
+
+        return [
+            {
+                "filename": row[0],
+                "local_path": row[1],
+                "remote_path": row[2],
+                "file_size": row[3],
+                "field_type": row[4],
+            }
+            for row in cursor.fetchall()
+        ]
 
     def mark_bufr_cleanup_status(self, filename: str, cleanup_status: str, error_message: Optional[str] = None) -> bool:
         """

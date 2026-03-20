@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from radarlib import config
+from radarlib.io.ftp import RadarFTPClientAsync
 from radarlib.state.sqlite_tracker import SQLiteStateTracker
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,9 @@ class ProcessingDaemonConfig:
     incomplete_timeout_hours: int = 24
     stuck_volume_timeout_minutes: int = 60
     start_date: Optional[datetime] = None
+    ftp_host: Optional[str] = config.FTP_HOST
+    ftp_user: Optional[str] = config.FTP_USER
+    ftp_password: Optional[str] = config.FTP_PASS
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -133,6 +138,9 @@ class ProcessingDaemon:
                     # Check for and reset stuck volumes
                     await self._check_and_reset_stuck_volumes()
 
+                    # Retry incomplete volumes if enabled
+                    await self._retry_incomplete_volumes()
+
                     # Update volume completion status
                     await self._check_volume_completeness()
 
@@ -166,6 +174,72 @@ class ProcessingDaemon:
         """Stop the daemon gracefully."""
         self._running = False
         logger.info("Daemon stop requested")
+
+    async def _retry_incomplete_volumes(self) -> None:
+        try:
+            incomplete_volumes = self.state_tracker.get_incomplete_volumes()
+            for inc_vol in incomplete_volumes:
+
+                fields_downloaded = self.state_tracker.get_incomplete_volumes_fields(inc_vol)
+
+                fields_to_download = list(
+                    set(inc_vol["expected_fields"].split(",")) - set([f["field_type"] for f in fields_downloaded])
+                )
+                remote_dir = str(Path(fields_downloaded[0]["remote_path"]).parent)
+                local_dir = Path(fields_downloaded[0]["local_path"]).parent
+
+                with RadarFTPClientAsync(
+                    self.config.ftp_host, self.config.ftp_user, self.config.ftp_password
+                ) as client:
+                    for field in fields_to_download:
+                        file_name = (
+                            Path(fields_downloaded[0]["remote_path"]).stem.replace(
+                                fields_downloaded[0]["field_type"], field
+                            )
+                            + ".BUFR"
+                        )
+                        remote_path = str(Path(remote_dir) / file_name)
+                        local_path = local_dir / file_name
+                        logger.info(
+                            f"Retrying download of missing field '{file_name}' "
+                            f"for incomplete volume {inc_vol['volume_id']}"
+                        )
+                        client.download_file(remote_path, local_path)
+
+                        # After downloading, we should update the state tracker with the new file information
+                        checksum = None
+                        file_size = local_path.stat().st_size
+
+                        self.state_tracker.mark_downloaded(
+                            file_name,
+                            str(remote_path),
+                            str(local_path),
+                            file_size=file_size,
+                            checksum=checksum,
+                            radar_name=self.config.radar_name,
+                            strategy=inc_vol["strategy"],
+                            vol_nr=inc_vol["vol_nr"],
+                            field_type=field,
+                            observation_datetime=inc_vol["observation_datetime"],
+                        )
+                        logger.info(f"[{self.config.radar_name}] Downloaded {file_name}")
+
+                conn = self.state_tracker._get_connection()
+                cursor = conn.cursor()
+
+                now = datetime.now(timezone.utc).isoformat()
+                cursor.execute(
+                    """
+                    UPDATE volume_processing
+                    SET status = 'pending', is_complete = 1, updated_at = ?
+                    WHERE volume_id = ?
+                    """,
+                    (now, inc_vol["volume_id"]),
+                )
+                conn.commit()
+
+        except Exception as e:
+            logger.error(f"Error retrying incomplete volumes: {e}", exc_info=True)
 
     async def _check_and_reset_stuck_volumes(self) -> None:
         """

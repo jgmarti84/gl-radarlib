@@ -27,11 +27,15 @@ best_font() {
     local preferred="$1"
     local fallback="$2"
     # Use exact family-name match (colon-delimited fc-list output) to avoid
-    # substring false-positives like "DejaVu Serif" matching "DejaVu Serif Condensed"
+    # substring false-positives like "DejaVu Serif" matching "DejaVu Serif Condensed".
+    # Return empty if neither preferred nor fallback are detected so the caller
+    # can avoid passing a non-existent font to fontspec (which causes errors).
     if fc-list 2>/dev/null | grep -E "(^|:) *${preferred} *(:|$)" -q; then
         echo "$preferred"
-    else
+    elif [ -n "$fallback" ] && fc-list 2>/dev/null | grep -E "(^|:) *${fallback} *(:|$)" -q; then
         echo "$fallback"
+    else
+        echo ""
     fi
 }
 
@@ -56,28 +60,40 @@ generate_doc() {
 
     if command -v xelatex &> /dev/null; then
         local main_font mono_font
-        main_font="$(best_font "DejaVu Serif" "Liberation Serif")"
-        mono_font="$(best_font "DejaVu Sans Mono" "Liberation Mono")"
+        main_font="$(best_font "DejaVu Serif" "Latin Modern Roman")"
+        mono_font="$(best_font "DejaVu Sans Mono" "Latin Modern Mono")"
 
-        pandoc "${md_files[@]}" \
-            -o "$output_pdf" \
-            --from markdown \
-            --toc \
-            --toc-depth=3 \
-            -V geometry:margin=1in \
-            -V fontsize=11pt \
-            -V lang="$lang_code" \
-            -V mainfont="$main_font" \
-            -V monofont="$mono_font" \
-            -V documentclass=report \
-            -V colorlinks=true \
-            -V linkcolor=blue \
-            -V urlcolor=blue \
-            --pdf-engine=xelatex \
-            --highlight-style=tango \
-            --metadata title="$title" \
-            --metadata author="Grupo Radar Córdoba (GRC)" \
+        # Build pandoc argument array and only include font settings when
+        # the fonts were actually detected. This prevents fontspec errors from
+        # XeLaTeX when a requested font isn't available on the system.
+        pandoc_args=(
+            "${md_files[@]}"
+            -o "$output_pdf"
+            --from markdown
+            --toc
+            --toc-depth=3
+            -V geometry:margin=1in
+            -V fontsize=11pt
+            -V lang="$lang_code"
+            -V documentclass=report
+            -V colorlinks=true
+            -V linkcolor=blue
+            -V urlcolor=blue
+            --pdf-engine=xelatex
+            --highlight-style=tango
+            --metadata title="$title"
+            --metadata author="Grupo Radar Córdoba (GRC)"
             --metadata date="$VERSION"
+        )
+
+        if [ -n "$main_font" ]; then
+            pandoc_args+=( -V mainfont="$main_font" )
+        fi
+        if [ -n "$mono_font" ]; then
+            pandoc_args+=( -V monofont="$mono_font" )
+        fi
+
+        pandoc "${pandoc_args[@]}"
 
         echo "  ✅ PDF generado: $output_pdf"
     else

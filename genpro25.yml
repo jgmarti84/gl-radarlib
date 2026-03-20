@@ -112,7 +112,7 @@ local:
         - WRAD
   DAEMON_PARAMS:
     GEOMETRY_BUFR_LOOKBACK_HOURS: 72
-    START_DATE: "2026-03-10T00:00:00Z" # ISO format
+    START_DATE: None # ISO format or None
     ENABLE_DOWNLOAD_DAEMON: True # Set to True to enable the download daemon
     ENABLE_PROCESSING_DAEMON: True # Set to True to enable the processing daemon
     ENABLE_PRODUCT_DAEMON: True # Set to True to enable the product generation daemon
