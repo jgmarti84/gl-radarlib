@@ -44,7 +44,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Build devcontainer image
-        run: docker build --no-cache -f .devcontainer/Dockerfile -t radarlib-dev:ci .
+        run: docker build --no-cache -f .devcontainer/radarlib/Dockerfile -t radarlib-dev:ci .
       - name: Run unit tests inside container
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace radarlib-dev:ci bash -lc "pytest -q -m \"not integration\" --junitxml=/workspace/report-unit-devcontainer.xml"

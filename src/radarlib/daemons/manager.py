@@ -159,6 +159,9 @@ class DaemonManager:
             volume_types=self.config.volume_types,
             radar_name=self.config.radar_name,
             poll_interval=self.config.processing_poll_interval,
+            ftp_host=self.config.ftp_host,
+            ftp_user=self.config.ftp_user,
+            ftp_password=self.config.ftp_password,
         )
         return ProcessingDaemon(processing_config)
 
