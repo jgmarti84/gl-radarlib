@@ -74,8 +74,15 @@ class DaemonManagerConfig:
 
     def __post_init__(self):
         """Post-initialization checks."""
+        if isinstance(self.start_date, str):
+            try:
+                self.start_date = datetime.fromisoformat(self.start_date)
+            except ValueError:
+                self.start_date = None
+
         if self.start_date and self.start_date.tzinfo is None:
             raise ValueError("start_date must be timezone-aware (UTC)")
+
         if self.start_date is None:
             self.start_date = datetime.now().replace(tzinfo=timezone.utc)
 
@@ -152,6 +159,9 @@ class DaemonManager:
             volume_types=self.config.volume_types,
             radar_name=self.config.radar_name,
             poll_interval=self.config.processing_poll_interval,
+            ftp_host=self.config.ftp_host,
+            ftp_user=self.config.ftp_user,
+            ftp_password=self.config.ftp_password,
         )
         return ProcessingDaemon(processing_config)
 

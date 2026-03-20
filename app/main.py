@@ -68,12 +68,7 @@ def main():
 
     # Define volume types
     volume_types = config.VOLUME_TYPES  # type: ignore
-    # geometry_config = {
-    #         "0315": {
-    #             "01": {"grid_resolution": 1000, "toa": 12000, "min_radius": 250, "rfactor": 0.017},
-    #             "02": {"grid_resolution": 1000, "toa": 12000, "min_radius": 250, "rfactor": 0.017},
-    #         }
-    #     }
+
     base_path = Path(os.path.join(config.ROOT_RADAR_FILES_PATH, radar_name))  # type: ignore
 
     # Create manager configuration
@@ -85,7 +80,7 @@ def main():
         ftp_password=config.FTP_PASS,  # type: ignore
         ftp_base_path="/L2",
         volume_types=volume_types,
-        # start_date=datetime(2025, 11, 25, 10, 0, 0, tzinfo=timezone.utc),
+        start_date=config.START_DATE,
         download_poll_interval=config.DOWNLOAD_POLL_INTERVAL,  # type: ignore
         processing_poll_interval=config.PROCESSING_POLL_INTERVAL,  # type: ignore
         product_poll_interval=config.PRODUCT_POLL_INTERVAL,  # type: ignore
@@ -99,7 +94,6 @@ def main():
         netcdf_retention_days=config.NETCDF_RETENTION_DAYS,  # type: ignore
         bufr_retention_days=config.BUFR_RETENTION_DAYS,  # type: ignore
         cleanup_poll_interval=config.CLEANUP_POLL_INTERVAL,  # type: ignore
-        # geometry=geometry_config
     )
 
     # Create manager
