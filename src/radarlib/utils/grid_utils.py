@@ -25,6 +25,7 @@ import numpy as np
 from radarlib.io.bufr.pyart_writer import bufr_paths_to_pyart
 from radarlib.io.ftp.ftp_client import RadarFTPClient
 from radarlib.radar_grid import get_gate_coordinates
+from radarlib.radar_grid.utils import infer_blind_range_m
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,21 @@ def create_gate_coords_file(
             gate_x, gate_y, gate_z = get_gate_coordinates(radar)
             out_fname = f"{radar_name}_{strategy_name}_{vol_nr}_gate_coordinates.npz"
             out_path = out / out_fname
-            np.savez_compressed(out_path, gate_x=gate_x, gate_y=gate_y, gate_z=gate_z)
+
+            # blind range
+            blind_range_m = infer_blind_range_m(radar)
+
+            # Extraer elevación mínima para below-beam mask
+            lowest_elev_deg = float(np.min(radar.fixed_angle["data"]))
+
+            np.savez_compressed(
+                out_path,
+                gate_x=gate_x,
+                gate_y=gate_y,
+                gate_z=gate_z,
+                blind_range_m=blind_range_m,
+                lowest_elev_deg=lowest_elev_deg,
+            )
 
             logger.info("Wrote gate coordinates to %s", out_path)
             return out_path

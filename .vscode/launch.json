@@ -7,7 +7,11 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": false,
+            "env": {
+                "ROI_PARAMS_VOL01": "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}",
+                "ROI_PARAMS_VOL02": "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}",
+            }
         },
         {
             "name": "Python: with args",

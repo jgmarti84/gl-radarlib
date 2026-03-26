@@ -106,15 +106,15 @@ DEFAULTS: Dict[str, Any] = {
         "DBZH",
         "ZDR",
         "RHOHV",
+        "VRAD",
+        "WRAD",
+        "KDP",
         "COLMAX",
     ],  # COLMAX is treated differently in the COG context, left here for backwards compatibility with PNG products
     "FILTERED_FIELDS_TO_PLOT": [
         "DBZH",
         "ZDR",
         "COLMAX",
-        "RHOHV",
-        "VRAD",
-        "WRAD",
         "KDP",
     ],  # COLMAX is treated differently in the COG context, left here for backwards compatibility with PNG products
     "PNG_DPI": 72,
@@ -134,10 +134,15 @@ DEFAULTS: Dict[str, Any] = {
     "GRC_MEAN_FILTER": True,
     "GRC_MEAN_THRESHOLD": 0.85,
     "VOLUME_TYPES": default_volume_types,
-    "GEOMETRY_RES": 1200.0,
-    "GEOMETRY_TOA": 12000.0,
-    "GEOMETRY_HFAC": 0.017,
-    "GEOMETRY_MIN_RADIUS": 250.0,
+    "GEOMETRY_RES_XY": 1000.0,
+    "GEOMETRY_RES_Z": 600,
+    "GEOMETRY_TOA": 15000.0,
+    "GEOMETRY_HFAC": 1.02,
+    "GEOMETRY_NB": 1.45,
+    "GEOMETRY_BSP": 1.2,
+    "GEOMETRY_MIN_RADIUS": 900.0,
+    "MAX_NEIGHBORS": 1,
+    "WEIGHT_FUNCTION": "nearest",
     "GEOMETRY_BUFR_LOOKBACK_HOURS": 72,
 }
 
@@ -275,16 +280,21 @@ GRC_DESPECKLE_FILTER: bool = get("GRC_DESPECKLE_FILTER")
 GRC_MEAN_FILTER: bool = get("GRC_MEAN_FILTER")
 GRC_MEAN_THRESHOLD: float = get("GRC_MEAN_THRESHOLD")
 VOLUME_TYPES: Dict[str, Dict[str, list]] = get("VOLUME_TYPES")
-GEOMETRY_RES: float = get("GEOMETRY_RES")
+GEOMETRY_RES_XY: float = get("GEOMETRY_RES_XY")
+GEOMETRY_RES_Z: float = get("GEOMETRY_RES_Z")
 GEOMETRY_TOA: float = get("GEOMETRY_TOA")
 GEOMETRY_HFAC: float = get("GEOMETRY_HFAC")
+GEOMETRY_NB: float = get("GEOMETRY_NB")
+GEOMETRY_BSP: float = get("GEOMETRY_BSP")
 GEOMETRY_MIN_RADIUS: float = get("GEOMETRY_MIN_RADIUS")
+MAX_NEIGHBORS: int = get("MAX_NEIGHBORS")
+WEIGHT_FUNCTION: str = get("WEIGHT_FUNCTION")
 GEOMETRY_BUFR_LOOKBACK_HOURS: int = get("GEOMETRY_BUFR_LOOKBACK_HOURS")
-
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)
 # Format: RADAR_VOLCODE_VOLNR_FIELD_TIMESTAMP.BUFR
 _BUFR_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_([A-Z]{2,10})_(\d{8}T\d{6}Z)\.BUFR$", re.IGNORECASE)
+_NETCDF_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_(\d{8}T\d{6}Z)\.nc$", re.IGNORECASE)
 
 
 def reload(path: Optional[str] = None) -> None:
