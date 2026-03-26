@@ -2,6 +2,7 @@
 """Product generation daemon for monitoring and generating visualization products from processed NetCDF volumes."""
 import asyncio
 import gc
+import json
 import logging
 import os
 import shutil
@@ -15,7 +16,16 @@ from pyart.config import get_field_name
 
 from radarlib import config
 from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
-from radarlib.radar_grid import GridGeometry, compute_grid_geometry, load_geometry, save_geometry
+from radarlib.radar_grid import (
+    GridGeometry,
+    build_geometry_filename,
+    compute_grid_geometry,
+    load_geometry,
+    save_geometry,
+)
+from radarlib.radar_grid.utils import calculate_grid_points
+
+# from radarlib.radar_processing.grid_geometry import calculate_grid_points
 from radarlib.state.sqlite_tracker import SQLiteStateTracker
 from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
 from radarlib.utils.names_utils import product_path_and_filename
@@ -130,12 +140,18 @@ class ProductGenerationDaemon:
         Raises:
             Exception: If all geometry initialization strategies fail
         """
-        default_params_list = [
-            config.GEOMETRY_RES,
-            config.GEOMETRY_TOA,
-            config.GEOMETRY_HFAC,
-            config.GEOMETRY_MIN_RADIUS,
-        ]
+        default_roi_params = {
+            "res_xy": config.GEOMETRY_RES_XY,
+            "res_z": config.GEOMETRY_RES_Z,
+            "toa": config.GEOMETRY_TOA,
+            "hfac": config.GEOMETRY_HFAC,
+            "nb": config.GEOMETRY_NB,
+            "bsp": config.GEOMETRY_BSP,
+            "min_radius": config.GEOMETRY_MIN_RADIUS,
+            "max_neighbors": config.MAX_NEIGHBORS,
+            "weight_function": config.WEIGHT_FUNCTION,
+        }
+
         vol_types_keys = set(self.config.volume_types.keys())
 
         result_geometry: Dict[str, Dict[str, GridGeometry]] = {}
@@ -145,17 +161,37 @@ class ProductGenerationDaemon:
             result_geometry[strategy] = {}
 
             for vol_num in vol_nums_keys:
-                res, toa, hfac, min_radius = self.config.geometry_types.get(strategy, {}).get(
-                    vol_num, default_params_list
-                )
-                filename = (
-                    f"{self.config.radar_name}_{strategy}_{vol_num}_"
-                    f"RES{int(res)}_"
-                    f"TOA{int(toa)}_"
-                    f"FAC{int(hfac*1000):03d}_"
-                    f"MR{int(min_radius)}_geometry.npz"
-                )
-                file_path = os.path.join(config.ROOT_GEOMETRY_PATH, filename)
+                try:
+                    roi_params = dict(
+                        default_roi_params, **json.loads(os.environ.get(f"ROI_PARAMS_VOL{vol_num}", "{}"))
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to parse ROI_PARAMS_VOL{vol_num} "
+                        f"from environment variable: {e}. Using default parameters."
+                    )
+                    roi_params = default_roi_params
+
+                # Attach build parameters as metadata so the file is self-describing
+                geometry_metadata = {
+                    "radar_name": self.config.radar_name,
+                    "strategy": strategy,
+                    "volume_nr": vol_num,
+                    "grid_resolution_xy": roi_params["res_xy"],
+                    "grid_resolution_z": roi_params["res_z"],
+                    "toa": roi_params["toa"],
+                    "h_factor": roi_params["hfac"],
+                    "min_radius": roi_params["min_radius"],
+                    "max_neighbors": roi_params["max_neighbors"],
+                    "nb": roi_params["nb"],
+                    "bsp": roi_params["bsp"],
+                    "weighting": roi_params["weight_function"],
+                }
+
+                # Derive the canonical filename from the build parameters
+                file_name = build_geometry_filename(geometry_metadata)
+                file_name = f"{file_name}.npz"
+                file_path = os.path.join(config.ROOT_GEOMETRY_PATH, file_name)
 
                 # Strategy 1: geometry file already exists - load geometry from file
                 try:
@@ -212,13 +248,16 @@ class ProductGenerationDaemon:
                     gate_y = gate_coords["gate_y"]
                     gate_z = gate_coords["gate_z"]
 
-                    z_grid_limits = (0.0, toa)
+                    z_grid_limits = (0.0, roi_params["toa"])
                     y_grid_limits = (gate_y.min(), gate_y.max())
                     x_grid_limits = (gate_x.min(), gate_x.max())
 
-                    z_points = int(np.ceil(z_grid_limits[1] / res)) + 1
-                    y_points = int((y_grid_limits[1] - y_grid_limits[0]) / res)
-                    x_points = int((x_grid_limits[1] - x_grid_limits[0]) / res)
+                    # z_points = int(np.ceil(z_grid_limits[1] / roi_params["res_z"])) + 1
+                    # y_points = int((y_grid_limits[1] - y_grid_limits[0]) / roi_params["res_xy"])
+                    # x_points = int((x_grid_limits[1] - x_grid_limits[0]) / roi_params["res_xy"])
+                    z_points, y_points, x_points = calculate_grid_points(
+                        z_grid_limits, y_grid_limits, x_grid_limits, roi_params["res_xy"], roi_params["res_z"]
+                    )
 
                     grid_shape = (z_points, y_points, x_points)
                     grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
@@ -234,11 +273,17 @@ class ProductGenerationDaemon:
                             grid_shape,
                             grid_limits,
                             temp_dir=temp_dir,
-                            toa=toa,
-                            min_radius=min_radius,
+                            toa=roi_params["toa"],
+                            min_radius=roi_params["min_radius"],
                             radar_altitude=0,
-                            beam_factor=hfac,
-                            n_workers=3,
+                            h_factor=roi_params["hfac"],
+                            nb=roi_params["nb"],
+                            bsp=roi_params["bsp"],
+                            weighting=roi_params["weight_function"],
+                            max_neighbors=roi_params["max_neighbors"],
+                            blind_range_m=gate_coords.get("blind_range_m", None),
+                            lowest_elev_deg=gate_coords.get("lowest_elev_deg", None),
+                            n_workers=8,
                         )
 
                     logger.info(f"Successfully built geometry for {self.config.radar_name} {strategy}-{vol_num}")

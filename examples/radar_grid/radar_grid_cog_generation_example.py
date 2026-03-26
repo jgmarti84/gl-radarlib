@@ -42,8 +42,9 @@ from radarlib.radar_grid import (
 # ============================================================================
 # CONFIGURATION - Update these paths to match your environment
 # ============================================================================
-DEFAULT_RADAR_FILE = "data/radares/RMA1/netcdf/RMA1_0315_01_20251208T191648Z.nc"
-DEFAULT_GEOMETRY_FILE = "data/geometry/RMA1/RMA1_0315_01_RES1500_TOA12000_FAC017_MR250_geometry.npz"
+DEFAULT_RADAR_FILE = "./app/data/radares/RMA1/netcdf/RMA1_0315_01_20260318T141818Z.nc"
+geometry_file = "RMA1_0315_01_RES1000x600_TOA15000_HF1p1000_MR900_MN1_NB1p30_BSP1p40_nearest_geometry.npz"
+DEFAULT_GEOMETRY_FILE = f"/workspaces/radarlib/data/geometry/RMA1/{geometry_file}"
 DEFAULT_OUTPUT_DIR = "outputs/radar_grid/geotiff_generation"  # Change to your preferred output directory
 # ============================================================================
 
@@ -80,7 +81,7 @@ def load_test_data(
     return radar, geometry, radar_lat, radar_lon
 
 
-def example_1_basic_cappi_geotiff():
+def example_1_basic_cappi_geotiff(file_suffix: Optional[str] = None):
     """
     Example 1: Create a basic CAPPI and save as GeoTIFF
     """
@@ -88,6 +89,10 @@ def example_1_basic_cappi_geotiff():
     print("EXAMPLE 1: Basic CAPPI to GeoTIFF")
     print("=" * 60)
 
+    if file_suffix is None:
+        file_suffix = ""
+    else:
+        file_suffix = f"_{file_suffix}"
     # Load test data
     radar, geometry, radar_lat, radar_lon = load_test_data()
     if radar is None:
@@ -106,7 +111,7 @@ def example_1_basic_cappi_geotiff():
     print(f"CAPPI value range: [{np.nanmin(cappi):.2f}, {np.nanmax(cappi):.2f}] dBZ")
 
     # Save as GeoTIFF (standard, not COG)
-    output_file = Path(DEFAULT_OUTPUT_DIR) / "cappi_3km.tif"
+    output_file = Path(DEFAULT_OUTPUT_DIR) / f"cappi_3km{file_suffix}.tif"
     os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
     create_geotiff(
         cappi,
@@ -123,13 +128,18 @@ def example_1_basic_cappi_geotiff():
     print()
 
 
-def example_2_cappi_as_cog():
+def example_2_cappi_as_cog(file_suffix: Optional[str] = None):
     """
     Example 2: Create CAPPI as Cloud-Optimized GeoTIFF with overviews
     """
     print("=" * 60)
     print("EXAMPLE 2: CAPPI as Cloud-Optimized GeoTIFF")
     print("=" * 60)
+
+    if file_suffix is None:
+        file_suffix = ""
+    else:
+        file_suffix = f"_{file_suffix}"
 
     # Load test data
     radar, geometry, radar_lat, radar_lon = load_test_data()
@@ -143,7 +153,7 @@ def example_2_cappi_as_cog():
     cappi = constant_altitude_ppi(grid_dbzh, geometry, altitude=1500.0)
 
     # Save as COG with overviews
-    output_file = Path(DEFAULT_OUTPUT_DIR) / "cappi_1.5km.cog"
+    output_file = Path(DEFAULT_OUTPUT_DIR) / f"cappi_1.5km{file_suffix}.cog"
     create_cog(
         cappi,
         geometry,
@@ -161,13 +171,18 @@ def example_2_cappi_as_cog():
     print()
 
 
-def example_3_ppi_geotiff():
+def example_3_ppi_geotiff(file_suffix: Optional[str] = None):
     """
     Example 3: Create PPI (constant elevation) and save as GeoTIFF
     """
     print("=" * 60)
     print("EXAMPLE 3: PPI to GeoTIFF")
     print("=" * 60)
+
+    if file_suffix is None:
+        file_suffix = ""
+    else:
+        file_suffix = f"_{file_suffix}"
 
     # Load test data
     radar, geometry, radar_lat, radar_lon = load_test_data()
@@ -183,7 +198,7 @@ def example_3_ppi_geotiff():
     print(f"PPI value range: [{np.nanmin(ppi):.2f}, {np.nanmax(ppi):.2f}] dBZ")
 
     # Save as COG using convenience function
-    output_file = Path(DEFAULT_OUTPUT_DIR) / "ppi_1deg.cog"
+    output_file = Path(DEFAULT_OUTPUT_DIR) / f"ppi_1deg{file_suffix}.cog"
     save_product_as_geotiff(
         ppi,
         geometry,
@@ -202,13 +217,18 @@ def example_3_ppi_geotiff():
     print()
 
 
-def example_4_colmax_geotiff():
+def example_4_colmax_geotiff(file_suffix: Optional[str] = None):
     """
     Example 4: Create COLMAX (column maximum) and save as GeoTIFF
     """
     print("=" * 60)
     print("EXAMPLE 4: COLMAX to GeoTIFF")
     print("=" * 60)
+
+    if file_suffix is None:
+        file_suffix = ""
+    else:
+        file_suffix = f"_{file_suffix}"
 
     # Load test data
     radar, geometry, radar_lat, radar_lon = load_test_data()
@@ -224,7 +244,7 @@ def example_4_colmax_geotiff():
     print(f"COLMAX value range: [{np.nanmin(colmax):.2f}, {np.nanmax(colmax):.2f}] dBZ")
 
     # Save as COG with custom colormap
-    output_file = Path(DEFAULT_OUTPUT_DIR) / "colmax.cog"
+    output_file = Path(DEFAULT_OUTPUT_DIR) / f"colmax{file_suffix}.cog"
     save_product_as_geotiff(
         colmax,
         geometry,
@@ -244,13 +264,18 @@ def example_4_colmax_geotiff():
     print()
 
 
-def example_5_wgs84_projection():
+def example_5_wgs84_projection(file_suffix: Optional[str] = None):
     """
     Example 5: Save product in WGS84 instead of Web Mercator
     """
     print("=" * 60)
     print("EXAMPLE 5: GeoTIFF with WGS84 projection")
     print("=" * 60)
+
+    if file_suffix is None:
+        file_suffix = ""
+    else:
+        file_suffix = f"_{file_suffix}"
 
     # Load test data
     radar, geometry, radar_lat, radar_lon = load_test_data()
@@ -263,7 +288,8 @@ def example_5_wgs84_projection():
     cappi = constant_altitude_ppi(grid_dbzh, geometry, altitude=1500.0)
 
     # Save with WGS84 projection (EPSG:4326)
-    output_file = Path(DEFAULT_OUTPUT_DIR) / "cappi_1.5km_wgs84.cog"
+    output_file = Path(DEFAULT_OUTPUT_DIR) / f"cappi_1.5km_wgs84{file_suffix}.cog"
+    Path(DEFAULT_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     save_product_as_geotiff(
         cappi,
         geometry,
@@ -281,13 +307,18 @@ def example_5_wgs84_projection():
     print()
 
 
-def example_6_multiple_altitudes():
+def example_6_multiple_altitudes(file_suffix: Optional[str] = None):
     """
     Example 6: Generate CAPPIs at multiple altitudes
     """
     print("=" * 60)
     print("EXAMPLE 6: Multiple CAPPI altitudes")
     print("=" * 60)
+
+    if file_suffix is None:
+        file_suffix = ""
+    else:
+        file_suffix = f"_{file_suffix}"
 
     # Load test data
     radar, geometry, radar_lat, radar_lon = load_test_data()
@@ -307,7 +338,7 @@ def example_6_multiple_altitudes():
             print(f"  Skipping {altitude}m: all NaN")
             continue
 
-        output_file = Path(DEFAULT_OUTPUT_DIR) / f"cappi_{altitude}m.cog"
+        output_file = Path(DEFAULT_OUTPUT_DIR) / f"cappi_{altitude}m{file_suffix}.cog"
         save_product_as_geotiff(
             cappi,
             geometry,
@@ -327,7 +358,7 @@ def example_6_multiple_altitudes():
     print()
 
 
-def main():
+def main(file_suffix: Optional[str] = None):
     """Run all examples"""
     print()
     print("╔" + "=" * 58 + "╗")
@@ -342,12 +373,12 @@ def main():
     print()
 
     # Uncomment to run examples:
-    # example_1_basic_cappi_geotiff()
-    # example_2_cappi_as_cog()
-    # example_3_ppi_geotiff()
-    # example_4_colmax_geotiff()
-    example_5_wgs84_projection()
-    # example_6_multiple_altitudes()
+    example_1_basic_cappi_geotiff(file_suffix=file_suffix)
+    example_2_cappi_as_cog(file_suffix=file_suffix)
+    example_3_ppi_geotiff(file_suffix=file_suffix)
+    example_4_colmax_geotiff(file_suffix=file_suffix)
+    example_5_wgs84_projection(file_suffix=file_suffix)
+    example_6_multiple_altitudes(file_suffix=file_suffix)
 
     print("=" * 60)
     print("Examples completed!")
@@ -355,4 +386,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(file_suffix="01")

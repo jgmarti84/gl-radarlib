@@ -12,8 +12,70 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from .geometry import GridGeometry
+from .utils import calculate_roi_dist_beam, compute_beam_height
 
 logger = logging.getLogger(__name__)
+
+
+def compute_weights(distances, roi, method="nearest"):
+    """
+    Calcula pesos de interpolación según la distancia y el método.
+
+    Args:
+        distances: np.ndarray de distancias en metros
+        roi: Radio de influencia en metros (puede ser escalar o array del mismo tamaño que distances)
+        method: 'Barnes', 'Cressman', o 'nearest'
+
+    Returns:
+        np.ndarray: Pesos (sin normalizar)
+    """
+    distances = np.asarray(distances, dtype=np.float32)
+    roi = np.asarray(roi, dtype=np.float32)
+
+    if distances.size == 0:
+        return distances  # array vacío
+
+    # Manejar ROI escalar o array
+    if roi.ndim == 0:  # escalar
+        roi_val = float(roi)
+        if roi_val <= 0:
+            return np.zeros_like(distances, dtype=np.float32)
+    else:  # array
+        if np.any(roi <= 0):
+            result = np.zeros_like(distances, dtype=np.float32)
+            valid_roi = roi > 0
+            if not valid_roi.any():
+                return result
+
+    if method == "Barnes":
+        # Barnes: w = exp(-d²/(2σ²)) con σ = ROI/2
+        sigma = roi / 2.0
+        # sigma > 0 ya garantizado por roi > 0
+        return np.exp(-(distances * distances) / (2.0 * sigma * sigma)).astype(np.float32)
+
+    elif method == "Barnes2":
+        # Py-ART: weights = exp(-dist2 / (r2/4)) + 1e-5
+        r2 = roi * roi
+        dist2 = distances * distances
+        w = np.exp(-dist2 / (r2 / 4.0)) + 1e-5
+        return w.astype(np.float32)
+
+    elif method == "Cressman":
+        # Cressman: w = (ROI² - d²) / (ROI² + d²)
+        r2 = roi * roi
+        dist2 = distances * distances
+        w = (r2 - dist2) / (r2 + dist2 + 1e-12)  # epsilon para estabilidad
+        w = np.clip(w, 0.0, 1.0)  # evita negativos
+        return w.astype(np.float32)
+
+    elif method == "nearest":
+        # Nearest: solo el más cercano tiene peso 1
+        weights = np.zeros_like(distances, dtype=np.float32)
+        weights[int(np.argmin(distances))] = 1.0
+        return weights
+
+    else:
+        raise ValueError(f"Método desconocido: {method}")
 
 
 def _process_single_level(args) -> Tuple[int, int, str]:
@@ -34,9 +96,16 @@ def _process_single_level(args) -> Tuple[int, int, str]:
         gate_z,
         gate_valid_mask,
         min_radius,
-        beam_factor,
+        h_factor,
+        nb,
+        bsp,
         weighting,
+        max_neighbors,
         temp_dir,
+        dtype_val,
+        dtype_idx,
+        min_beam_h,
+        blind_range_m,
     ) = args
 
     n_points = grid_y_2d.shape[0]
@@ -48,23 +117,56 @@ def _process_single_level(args) -> Tuple[int, int, str]:
     gate_z_valid = gate_z[gate_valid_mask]
 
     # Build KD-tree from valid gates only
-    gate_coords = np.column_stack([gate_x_valid, gate_y_valid, gate_z_valid]).astype("float64")
+    gate_coords = np.column_stack([gate_x_valid, gate_y_valid, gate_z_valid]).astype("float32")
     tree = cKDTree(gate_coords)
     del gate_coords
     gc.collect()
 
-    grid_z_level = np.full(n_points, gz, dtype="float64")
+    grid_z_level = np.full(n_points, gz, dtype="float32")
 
     # ROI for this level
-    dist_from_radar = np.sqrt(grid_x_2d**2 + grid_y_2d**2 + grid_z_level**2)
-    roi = np.maximum(min_radius, dist_from_radar * beam_factor)
+    # dist_from_radar = np.sqrt(grid_x_2d**2 + grid_y_2d**2 + grid_z_level**2)
+    # roi = np.maximum(min_radius, dist_from_radar * beam_factor)
+    # ROI para este nivel usando dist_beam
+    roi = calculate_roi_dist_beam(
+        z_coords=grid_z_level,
+        y_coords=grid_y_2d,
+        x_coords=grid_x_2d,
+        h_factor=h_factor,
+        nb=nb,
+        bsp=bsp,
+        min_radius=min_radius,
+        radar_offset=(0, 0, 0),
+    )
+    # Máscara de radio ciego: si el voxel está más cerca que el primer gate,
+    # se salta para mantener "sin dato" en la zona no observada por el radar.
+    if blind_range_m is not None and blind_range_m > 0.0:
+        slant_dist = np.sqrt(grid_x_2d**2 + grid_y_2d**2 + grid_z_level**2)
+        in_blind_zone = slant_dist <= float(blind_range_m)
+    else:
+        in_blind_zone = None
 
+    # Máscara below-beam: si este nivel Z está debajo del haz más bajo,
+    # se salta el voxel directamente (fila vacía en W → NaN al interpolar)
+    if min_beam_h is not None and gz < np.max(min_beam_h):
+        below_beam = gz < min_beam_h  # bool array (n_points,)
+    else:
+        below_beam = None  # Ningún voxel de este nivel está debajo del haz
     # Storage for this level
     level_indices = []
     level_weights = []
     level_indptr = [0]
 
     for i in range(n_points):
+        if in_blind_zone is not None and in_blind_zone[i]:
+            level_indptr.append(level_indptr[-1])
+            continue
+
+        # Saltar voxels debajo del haz más bajo del radar
+        if below_beam is not None and below_beam[i]:
+            level_indptr.append(level_indptr[-1])
+            continue
+
         gx, gy, gz_pt = grid_x_2d[i], grid_y_2d[i], grid_z_level[i]
         r = roi[i]
         r2 = r * r
@@ -92,12 +194,20 @@ def _process_single_level(args) -> Tuple[int, int, str]:
         final_indices = candidate_indices_global[mask]
         final_d2 = d2[mask]
 
-        if weighting == "barnes2":
-            w = (np.exp(-final_d2 / (r2 / 4)) + 1e-5).astype("float32")
-        elif weighting == "cressman":
-            w = ((r2 - final_d2) / (r2 + final_d2)).astype("float32")
-        else:
-            w = np.ones(final_d2.shape[0], dtype="float32")
+        # Limitar a max_neighbors si está especificado
+        if max_neighbors is not None and len(final_indices) > max_neighbors:
+            # Usar argpartition para seleccionar k más cercanos eficientemente: O(n) + O(k log k)
+            # 1. Partition: encuentra los k menores sin ordenar (O(n))
+            kth_indices = np.argpartition(final_d2, max_neighbors)[:max_neighbors]
+            # 2. Ordenar los k seleccionados por distancia (O(k log k), k << n típicamente)
+            #    Esto mejora: cache locality, CSR matrix ops, y consistencia con ROI completo
+            kth_indices = kth_indices[np.argsort(final_d2[kth_indices])]
+            final_indices = final_indices[kth_indices]
+            final_d2 = final_d2[kth_indices]
+
+        # Calcular pesos
+        d = np.sqrt(final_d2).astype("float32")
+        w = compute_weights(d, r, weighting).astype(dtype_val)
 
         level_indices.extend(final_indices)
         level_weights.extend(w)
@@ -113,6 +223,10 @@ def _process_single_level(args) -> Tuple[int, int, str]:
     )
 
     n_pairs = len(level_indices)
+    # Limpiar memoria del worker
+    del tree, level_indices, level_weights, level_indptr
+    gc.collect()
+
     return iz, n_pairs, temp_file
 
 
@@ -125,10 +239,18 @@ def compute_grid_geometry(
     temp_dir: str,
     radar_altitude: float = 0.0,
     min_radius: float = 250.0,
-    beam_factor: float = 0.01746,
+    h_factor: float = 0.01746,
+    nb: float = 1.5,
+    bsp: float = 1.2,
     weighting: str = "barnes2",
+    max_neighbors: Optional[int] = None,
     toa: float = 17000.0,
+    min_beam_h: Optional[np.ndarray] = None,
+    blind_range_m: Optional[float] = None,
     n_workers: Optional[int] = None,
+    lowest_elev_deg=None,  # Elevación mínima para máscara below-beam
+    dtype_val=np.float32,
+    dtype_idx=np.int32,
 ) -> GridGeometry:
     """
     Compute the sparse mapping from grid points to radar gates.
@@ -198,6 +320,29 @@ def compute_grid_geometry(
     y_coords = np.linspace(grid_limits[1][0], grid_limits[1][1], ny, dtype="float32")
     x_coords = np.linspace(grid_limits[2][0], grid_limits[2][1], nx, dtype="float32")
 
+    # Preparar grid 2D (Y-X plane)
+    yy, xx = np.meshgrid(y_coords, x_coords, indexing="ij")
+    grid_y_2d = yy.ravel().astype("float32")
+    grid_x_2d = xx.ravel().astype("float32")
+
+    # Precomputar altura mínima del haz para el plano XY (una sola vez)
+    # Se pasa a cada worker para saltar voxels debajo del haz más bajo.
+    # Se resta medio z_step como margen para no enmascarar niveles que
+    # collapse_ppi necesitará interpolar (evita NaN en el nivel z_low).
+    if lowest_elev_deg is not None:
+        z_step = float(z_coords[1] - z_coords[0]) if len(z_coords) > 1 else 500.0
+        below_beam_margin = 0.8 * z_step
+        horiz_dist = np.sqrt(grid_x_2d**2 + grid_y_2d**2)
+        min_beam_h = (compute_beam_height(horiz_dist, lowest_elev_deg, radar_altitude=0.0) - below_beam_margin).astype(
+            "float32"
+        )
+        logger.info(
+            f"  Below-beam mask: elev_min={lowest_elev_deg:.2f}°, margin={below_beam_margin:.0f}m, "
+            f"beam_h range=[{min_beam_h.min():.0f}, {min_beam_h.max():.0f}]m"
+        )
+    else:
+        min_beam_h = None
+
     yy, xx = np.meshgrid(y_coords, x_coords, indexing="ij")
     grid_y_2d = yy.ravel().astype("float64")
     grid_x_2d = xx.ravel().astype("float64")
@@ -224,9 +369,16 @@ def compute_grid_geometry(
             gate_z_relative,
             gate_valid_mask,
             min_radius,
-            beam_factor,
+            h_factor,
+            nb,
+            bsp,
             weighting,
+            max_neighbors,
             temp_dir,
+            dtype_val,
+            dtype_idx,
+            min_beam_h,
+            blind_range_m,
         )
         for iz, gz in enumerate(z_coords)
     ]

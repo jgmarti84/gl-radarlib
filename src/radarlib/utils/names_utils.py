@@ -59,6 +59,43 @@ def get_netcdf_filename_from_bufr_filename(ref_filename: str) -> str:
     return fichero + ".nc"
 
 
+def extract_netcdf_filename_components(filename: str) -> dict:
+    """
+    Extract radar_name, strategy, vol_nr, field_type, and timestamp from a netCDF filename.
+
+    Uses pre-compiled regex for efficient repeated calls.
+
+    netCDF filename format: RADAR_VOLCODE_VOLNR_TIMESTAMP.nc
+    Example: RMA11_0302_01_20251120T120000Z.nc
+
+    Args:
+        filename: netCDF filename to parse
+    Returns:
+        Dictionary with keys: radar_name, vol_code, vol_nr, timestamp
+        Returns None for any key if extraction fails.
+    Example:
+        >>> result = extract_netcdf_filename_components('RMA11_0302_01_20251120T120000Z.nc')
+        >>> result
+        {'radar_name': 'RMA11', 'vol_code': '0302', 'vol_nr': '01', 'timestamp': '20251120T120000Z'}
+    """
+    match = config._NETCDF_FILENAME_PATTERN.match(filename)
+
+    if match:
+        return {
+            "radar_name": match.group(1),
+            "strategy": match.group(2),
+            "vol_nr": match.group(3),
+            "timestamp": match.group(4),
+        }
+    else:
+        return {
+            "radar_name": None,
+            "strategy": None,
+            "vol_nr": None,
+            "timestamp": None,
+        }
+
+
 def extract_bufr_filename_components(filename: str) -> dict:
     """
     Extract radar_name, strategy, vol_nr, and field_type from a BUFR filename.
