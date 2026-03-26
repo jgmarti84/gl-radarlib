@@ -143,6 +143,7 @@ DEFAULTS: Dict[str, Any] = {
     "GEOMETRY_MIN_RADIUS": 900.0,
     "MAX_NEIGHBORS": 1,
     "WEIGHT_FUNCTION": "nearest",
+    "GEOMETRY_BUFR_LOOKBACK_HOURS": 72,
 }
 
 _config: Dict[str, Any] = DEFAULTS.copy()
@@ -288,6 +289,7 @@ GEOMETRY_BSP: float = get("GEOMETRY_BSP")
 GEOMETRY_MIN_RADIUS: float = get("GEOMETRY_MIN_RADIUS")
 MAX_NEIGHBORS: int = get("MAX_NEIGHBORS")
 WEIGHT_FUNCTION: str = get("WEIGHT_FUNCTION")
+GEOMETRY_BUFR_LOOKBACK_HOURS: int = get("GEOMETRY_BUFR_LOOKBACK_HOURS")
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)
 # Format: RADAR_VOLCODE_VOLNR_FIELD_TIMESTAMP.BUFR
