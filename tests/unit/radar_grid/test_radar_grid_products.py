@@ -239,7 +239,7 @@ class TestConstantElevationPPI:
         ppi = constant_elevation_ppi(sample_grid_data, sample_geometry, elevation_angle)
 
         assert ppi.shape == (50, 50)
-        assert ppi.dtype == np.float64
+        assert ppi.dtype == np.float32
 
     def test_ppi_zero_elevation(self, sample_grid_data, sample_geometry):
         """Test PPI with zero elevation."""
