@@ -4,6 +4,9 @@ GeoTIFF generation for radar grid products.
 This module provides functions to convert 2D radar products (CAPPI, PPI, COLMAX)
 into georeferenced GeoTIFF images with optional colormap application and
 Cloud-Optimized GeoTIFF (COG) format.
+
+It also provides utilities to re-render existing raw float COGs with new colormaps
+without needing to reprocess the original radar data.
 """
 
 import logging
@@ -22,6 +25,108 @@ from rasterio.transform import from_bounds
 from .geometry import GridGeometry
 
 logger = logging.getLogger(__name__)
+
+# Metadata tag keys written into COG/GeoTIFF files by this library
+_TAG_CMAP = "radarlib_cmap"
+_TAG_VMIN = "radarlib_vmin"
+_TAG_VMAX = "radarlib_vmax"
+_TAG_NODATA = "radarlib_nodata"
+_TAG_DATA_TYPE = "radarlib_data_type"
+_DATA_TYPE_RGBA = "rgba"
+_DATA_TYPE_RAW = "raw_float"
+
+
+def _get_cmap_name(cmap: Union[str, matplotlib.colors.Colormap]) -> str:
+    """Return the string name of a colormap object or pass-through a string."""
+    if isinstance(cmap, str):
+        return cmap
+    return getattr(cmap, "name", repr(cmap))
+
+
+def _resolve_vmin_vmax(
+    data: np.ndarray,
+    vmin: Optional[float],
+    vmax: Optional[float],
+    nodata_value: Optional[float],
+) -> tuple:
+    """
+    Resolve vmin/vmax, falling back to data extremes when None is supplied.
+
+    Returns
+    -------
+    tuple
+        (resolved_vmin, resolved_vmax) as Python floats
+    """
+    if nodata_value is not None:
+        valid = data[data != nodata_value]
+    else:
+        valid = data[~np.isnan(data)]
+
+    if len(valid) > 0:
+        resolved_vmin = float(vmin) if vmin is not None else float(np.nanmin(valid))
+        resolved_vmax = float(vmax) if vmax is not None else float(np.nanmax(valid))
+    else:
+        resolved_vmin = float(vmin) if vmin is not None else 0.0
+        resolved_vmax = float(vmax) if vmax is not None else 1.0
+    return resolved_vmin, resolved_vmax
+
+
+def _compute_crs_bounds(
+    geometry: GridGeometry,
+    radar_lat: float,
+    radar_lon: float,
+    projection: str,
+) -> tuple:
+    """
+    Convert radar-relative Cartesian grid limits to bounds in the target CRS.
+
+    Returns
+    -------
+    tuple
+        (west_proj, south_proj, east_proj, north_proj, crs)
+        where the first four values are in the target projection units.
+    """
+    y_min, y_max = geometry.grid_limits[1]
+    x_min, x_max = geometry.grid_limits[2]
+
+    local_proj = pyproj.Proj(proj="aeqd", lat_0=radar_lat, lon_0=radar_lon, x_0=0, y_0=0, datum="WGS84")
+    wgs84_proj = pyproj.CRS("EPSG:4326")
+    transformer_to_wgs84 = pyproj.Transformer.from_proj(local_proj, wgs84_proj, always_xy=True)
+
+    corner_lons = []
+    corner_lats = []
+    for x in [x_min, x_max]:
+        for y in [y_min, y_max]:
+            lon, lat = transformer_to_wgs84.transform(x, y)
+            corner_lons.append(lon)
+            corner_lats.append(lat)
+
+    west = min(corner_lons)
+    east = max(corner_lons)
+    south = min(corner_lats)
+    north = max(corner_lats)
+
+    target_proj = pyproj.CRS(projection)
+
+    if target_proj.to_epsg() != 4326:
+        transformer_to_target = pyproj.Transformer.from_crs("EPSG:4326", target_proj, always_xy=True)
+        target_corners_x = []
+        target_corners_y = []
+        for lon in [west, east]:
+            for lat in [south, north]:
+                tx, ty = transformer_to_target.transform(lon, lat)
+                target_corners_x.append(tx)
+                target_corners_y.append(ty)
+        west_proj = min(target_corners_x)
+        east_proj = max(target_corners_x)
+        south_proj = min(target_corners_y)
+        north_proj = max(target_corners_y)
+        crs = target_proj
+    else:
+        west_proj, south_proj, east_proj, north_proj = west, south, east, north
+        crs = pyproj.CRS("EPSG:4326")
+
+    return west_proj, south_proj, east_proj, north_proj, crs
 
 
 def _string_to_resampling(method: str) -> Resampling:
@@ -216,73 +321,19 @@ def create_geotiff(
     if ny != geom_ny or nx != geom_nx:
         raise ValueError(f"Data shape {data.shape} does not match geometry grid shape " f"({geom_ny}, {geom_nx})")
 
+    # Resolve vmin/vmax so we can store them in the file metadata
+    actual_vmin, actual_vmax = _resolve_vmin_vmax(data, vmin, vmax, nodata_value)
+
     # Apply colormap to get RGBA image
-    rgba_image = apply_colormap_to_array(data, cmap, vmin, vmax, nodata_value)
+    rgba_image = apply_colormap_to_array(data, cmap, actual_vmin, actual_vmax, nodata_value)
 
     # Flip the data vertically because rasterio stores images top-to-bottom,
     # while our grid coordinates increase from bottom to top (south to north).
     # Without this flip, the image appears upside down.
     rgba_image = np.flipud(rgba_image)
 
-    # Get grid limits in meters (relative to radar)
-    y_min, y_max = geometry.grid_limits[1]
-    x_min, x_max = geometry.grid_limits[2]
-
-    # # Create coordinate arrays in meters
-    # x_coords_m = np.linspace(x_min, x_max, nx)
-    # y_coords_m = np.linspace(y_min, y_max, ny)
-
-    # Convert from radar-relative Cartesian (meters) to geographic coordinates
-    # First create a local projection centered on the radar
-    # Use Azimuthal Equidistant projection centered on radar
-    local_proj = pyproj.Proj(proj="aeqd", lat_0=radar_lat, lon_0=radar_lon, x_0=0, y_0=0, datum="WGS84")
-    wgs84_proj = pyproj.CRS("EPSG:4326")
-
-    # Get corner coordinates in geographic space (WGS84)
-    transformer_to_wgs84 = pyproj.Transformer.from_proj(local_proj, wgs84_proj, always_xy=True)
-
-    # Transform corners (x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max)
-    corner_lons = []
-    corner_lats = []
-    for x in [x_min, x_max]:
-        for y in [y_min, y_max]:
-            lon, lat = transformer_to_wgs84.transform(x, y)
-            corner_lons.append(lon)
-            corner_lats.append(lat)
-
-    # Get bounds in WGS84
-    west = min(corner_lons)
-    east = max(corner_lons)
-    south = min(corner_lats)
-    north = max(corner_lats)
-
-    # Transform to target projection if not WGS84
-    target_proj = pyproj.CRS(projection)
-
-    if target_proj.to_epsg() != 4326:  # Not WGS84
-        transformer_to_target = pyproj.Transformer.from_crs("EPSG:4326", target_proj, always_xy=True)
-
-        # Transform all corners to get proper bounds in target projection
-        target_corners_x = []
-        target_corners_y = []
-        for lon in [west, east]:
-            for lat in [south, north]:
-                tx, ty = transformer_to_target.transform(lon, lat)
-                target_corners_x.append(tx)
-                target_corners_y.append(ty)
-
-        west_proj = min(target_corners_x)
-        east_proj = max(target_corners_x)
-        south_proj = min(target_corners_y)
-        north_proj = max(target_corners_y)
-
-        # Create transform for target projection
-        transform = from_bounds(west_proj, south_proj, east_proj, north_proj, nx, ny)
-        crs = target_proj
-    else:
-        # Use WGS84
-        transform = from_bounds(west, south, east, north, nx, ny)
-        crs = "EPSG:4326"
+    west_proj, south_proj, east_proj, north_proj, crs = _compute_crs_bounds(geometry, radar_lat, radar_lon, projection)
+    transform = from_bounds(west_proj, south_proj, east_proj, north_proj, nx, ny)
 
     # Write GeoTIFF
     with rasterio.open(
@@ -306,6 +357,17 @@ def create_geotiff(
 
         # Set color interpretation
         dst.colorinterp = (ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha)
+
+        # Store colormap metadata so the file can be re-rendered later
+        dst.update_tags(
+            **{
+                _TAG_CMAP: _get_cmap_name(cmap),
+                _TAG_VMIN: str(actual_vmin),
+                _TAG_VMAX: str(actual_vmax),
+                _TAG_NODATA: str(nodata_value) if nodata_value is not None else "",
+                _TAG_DATA_TYPE: _DATA_TYPE_RGBA,
+            }
+        )
 
     return output_path
 
@@ -402,62 +464,19 @@ def create_cog(
     if ny != geom_ny or nx != geom_nx:
         raise ValueError(f"Data shape {data.shape} does not match geometry grid shape " f"({geom_ny}, {geom_nx})")
 
+    # Resolve vmin/vmax so we can store them in the file metadata
+    actual_vmin, actual_vmax = _resolve_vmin_vmax(data, vmin, vmax, nodata_value)
+
     # Apply colormap to get RGBA image
-    rgba_image = apply_colormap_to_array(data, cmap, vmin, vmax, nodata_value)
+    rgba_image = apply_colormap_to_array(data, cmap, actual_vmin, actual_vmax, nodata_value)
 
     # Flip the data vertically because rasterio stores images top-to-bottom,
     # while our grid coordinates increase from bottom to top (south to north).
     # Without this flip, the image appears upside down.
     rgba_image = np.flipud(rgba_image)
 
-    # Get grid limits in meters (relative to radar)
-    y_min, y_max = geometry.grid_limits[1]
-    x_min, x_max = geometry.grid_limits[2]
-
-    # Convert from radar-relative Cartesian (meters) to geographic coordinates
-    local_proj = pyproj.Proj(proj="aeqd", lat_0=radar_lat, lon_0=radar_lon, x_0=0, y_0=0, datum="WGS84")
-    wgs84_proj = pyproj.CRS("EPSG:4326")
-
-    # Transform corners to WGS84
-    transformer_to_wgs84 = pyproj.Transformer.from_proj(local_proj, wgs84_proj, always_xy=True)
-
-    corner_lons = []
-    corner_lats = []
-    for x in [x_min, x_max]:
-        for y in [y_min, y_max]:
-            lon, lat = transformer_to_wgs84.transform(x, y)
-            corner_lons.append(lon)
-            corner_lats.append(lat)
-
-    west = min(corner_lons)
-    east = max(corner_lons)
-    south = min(corner_lats)
-    north = max(corner_lats)
-
-    # Transform to target projection
-    target_proj = pyproj.CRS(projection)
-
-    if target_proj.to_epsg() != 4326:
-        transformer_to_target = pyproj.Transformer.from_crs("EPSG:4326", target_proj, always_xy=True)
-
-        target_corners_x = []
-        target_corners_y = []
-        for lon in [west, east]:
-            for lat in [south, north]:
-                tx, ty = transformer_to_target.transform(lon, lat)
-                target_corners_x.append(tx)
-                target_corners_y.append(ty)
-
-        west_proj = min(target_corners_x)
-        east_proj = max(target_corners_x)
-        south_proj = min(target_corners_y)
-        north_proj = max(target_corners_y)
-
-        transform = from_bounds(west_proj, south_proj, east_proj, north_proj, nx, ny)
-        crs = target_proj
-    else:
-        transform = from_bounds(west, south, east, north, nx, ny)
-        crs = "EPSG:4326"
+    west_proj, south_proj, east_proj, north_proj, crs = _compute_crs_bounds(geometry, radar_lat, radar_lon, projection)
+    transform = from_bounds(west_proj, south_proj, east_proj, north_proj, nx, ny)
 
     # Convert resampling method string to enum
     resampling_enum = _string_to_resampling(resampling_method)
@@ -487,6 +506,17 @@ def create_cog(
 
         # Set color interpretation
         dst.colorinterp = (ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha)
+
+        # Store colormap metadata so the file can be re-rendered later
+        dst.update_tags(
+            **{
+                _TAG_CMAP: _get_cmap_name(cmap),
+                _TAG_VMIN: str(actual_vmin),
+                _TAG_VMAX: str(actual_vmax),
+                _TAG_NODATA: str(nodata_value) if nodata_value is not None else "",
+                _TAG_DATA_TYPE: _DATA_TYPE_RGBA,
+            }
+        )
 
         # Build overviews
         if overview_factors:
@@ -600,3 +630,428 @@ def save_product_as_geotiff(
             vmax=vmax,
             projection=projection,
         )
+
+
+def create_raw_cog(
+    data: np.ndarray,
+    geometry: GridGeometry,
+    radar_lat: float,
+    radar_lon: float,
+    output_path: Union[str, Path],
+    cmap: Union[str, matplotlib.colors.Colormap] = "viridis",
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    projection: str = "EPSG:3857",
+    nodata_value: Optional[float] = None,
+    overview_factors: Optional[list] = None,
+    resampling_method: str = "nearest",
+) -> Path:
+    """
+    Create a Cloud-Optimized GeoTIFF (COG) that stores the raw float32 data values.
+
+    Unlike :func:`create_cog`, which converts data to RGBA immediately, this function
+    preserves the original floating-point values so the file can later be re-rendered
+    with any colormap via :func:`remap_cog_colormap` or :func:`read_cog_tile_as_rgba`.
+
+    The colormap, vmin, and vmax are stored as file metadata and used as defaults when
+    rendering, but can always be overridden at render time.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        2D array of radar data, shape (ny, nx)
+    geometry : GridGeometry
+        Grid geometry containing spatial extent and grid dimensions
+    radar_lat : float
+        Radar latitude in degrees
+    radar_lon : float
+        Radar longitude in degrees
+    output_path : str or Path
+        Output path for the COG file
+    cmap : str or matplotlib.colors.Colormap, optional
+        Default colormap stored as metadata (default: 'viridis')
+    vmin : float, optional
+        Default minimum value for colormap scaling stored as metadata.
+        If None, the data minimum is computed and stored.
+    vmax : float, optional
+        Default maximum value for colormap scaling stored as metadata.
+        If None, the data maximum is computed and stored.
+    projection : str, optional
+        Target projection as EPSG code (default: 'EPSG:3857' - Web Mercator)
+    nodata_value : float, optional
+        Value to treat as no-data (default: None, NaN values become nodata)
+    overview_factors : list of int, optional
+        Downsampling factors for overview levels (default: [2, 4, 8, 16])
+    resampling_method : str, optional
+        Resampling method for overviews (default: 'nearest')
+
+    Returns
+    -------
+    Path
+        Path to the created raw float COG file
+
+    Examples
+    --------
+    >>> colmax = column_max(grid)
+    >>> raw_path = create_raw_cog(
+    ...     colmax, geometry, radar_lat=40.5, radar_lon=-105.2,
+    ...     output_path="colmax_raw.cog",
+    ...     cmap="viridis", vmin=0, vmax=70,
+    ... )
+    >>> # Later, re-render with a different colormap
+    >>> remap_cog_colormap(raw_path, "colmax_hot.cog", new_cmap="hot")
+    """
+    output_path = Path(output_path)
+
+    if overview_factors is None:
+        overview_factors = [2, 4, 8, 16]
+
+    if not isinstance(overview_factors, list):
+        raise TypeError(f"overview_factors must be a list, got {type(overview_factors).__name__}")
+
+    ny, nx = data.shape
+    _, geom_ny, geom_nx = geometry.grid_shape
+    if ny != geom_ny or nx != geom_nx:
+        raise ValueError(f"Data shape {data.shape} does not match geometry grid shape ({geom_ny}, {geom_nx})")
+
+    # Resolve vmin/vmax so they can be stored as metadata defaults
+    actual_vmin, actual_vmax = _resolve_vmin_vmax(data, vmin, vmax, nodata_value)
+
+    # Flip vertically: rasterio top-to-bottom vs. grid south-to-north
+    data_flipped = np.flipud(data.astype(np.float32))
+
+    west_proj, south_proj, east_proj, north_proj, crs = _compute_crs_bounds(geometry, radar_lat, radar_lon, projection)
+    transform = from_bounds(west_proj, south_proj, east_proj, north_proj, nx, ny)
+
+    resampling_enum = _string_to_resampling(resampling_method)
+
+    # Determine rasterio nodata value
+    rio_nodata = nodata_value if nodata_value is not None else float("nan")
+
+    with rasterio.open(
+        output_path,
+        "w",
+        driver="COG",
+        height=ny,
+        width=nx,
+        count=1,
+        dtype=np.float32,
+        crs=crs,
+        transform=transform,
+        nodata=rio_nodata,
+        compress="DEFLATE",
+        BIGTIFF="IF_NEEDED",
+        tiled=True,
+    ) as dst:
+        dst.write(data_flipped, 1)
+
+        dst.update_tags(
+            **{
+                _TAG_CMAP: _get_cmap_name(cmap),
+                _TAG_VMIN: str(actual_vmin),
+                _TAG_VMAX: str(actual_vmax),
+                _TAG_NODATA: str(nodata_value) if nodata_value is not None else "",
+                _TAG_DATA_TYPE: _DATA_TYPE_RAW,
+            }
+        )
+
+        if overview_factors:
+            dst.build_overviews(overview_factors, resampling_enum)
+            dst.update_tags(ns="rio_overview", resampling=resampling_method)
+
+    logger.debug("Raw float COG written to %s", output_path)
+    return output_path
+
+
+def read_cog_metadata(cog_path: Union[str, Path]) -> dict:
+    """
+    Read the radarlib metadata tags from a COG created by this library.
+
+    Parameters
+    ----------
+    cog_path : str or Path
+        Path to a COG file created by :func:`create_cog`, :func:`create_raw_cog`,
+        or :func:`remap_cog_colormap`.
+
+    Returns
+    -------
+    dict
+        Dictionary with keys ``cmap``, ``vmin``, ``vmax``, ``nodata``, and
+        ``data_type``.  ``vmin`` / ``vmax`` are returned as ``float`` when
+        present, otherwise ``None``.  ``data_type`` is either ``"rgba"`` or
+        ``"raw_float"`` (or ``None`` for files not written by radarlib).
+
+    Examples
+    --------
+    >>> meta = read_cog_metadata("colmax_raw.cog")
+    >>> print(meta["cmap"], meta["vmin"], meta["vmax"])
+    viridis 0.0 70.0
+    """
+    cog_path = Path(cog_path)
+    with rasterio.open(cog_path) as src:
+        tags = src.tags()
+
+    def _parse_float(val: str) -> Optional[float]:
+        if not val:
+            return None
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None
+
+    return {
+        "cmap": tags.get(_TAG_CMAP) or None,
+        "vmin": _parse_float(tags.get(_TAG_VMIN, "")),
+        "vmax": _parse_float(tags.get(_TAG_VMAX, "")),
+        "nodata": _parse_float(tags.get(_TAG_NODATA, "")),
+        "data_type": tags.get(_TAG_DATA_TYPE) or None,
+    }
+
+
+def remap_cog_colormap(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    new_cmap: Union[str, matplotlib.colors.Colormap],
+    new_vmin: Optional[float] = None,
+    new_vmax: Optional[float] = None,
+    overview_factors: Optional[list] = None,
+    resampling_method: str = "nearest",
+) -> Path:
+    """
+    Re-render a raw float COG with a new colormap and produce a new RGBA COG.
+
+    This is the primary function for **changing the colormap** of an existing
+    radar product.  It requires the input file to be a raw float COG created
+    by :func:`create_raw_cog` (``data_type = "raw_float"`` in its metadata).
+
+    Parameters
+    ----------
+    input_path : str or Path
+        Path to a raw float COG (created with :func:`create_raw_cog`).
+    output_path : str or Path
+        Path for the new RGBA COG.
+    new_cmap : str or matplotlib.colors.Colormap
+        New colormap to apply.
+    new_vmin : float, optional
+        Minimum value for the new colormap range.  If None, the value stored
+        in the source file's metadata is used.
+    new_vmax : float, optional
+        Maximum value for the new colormap range.  If None, the value stored
+        in the source file's metadata is used.
+    overview_factors : list of int, optional
+        Overview levels for the output COG (default: [2, 4, 8, 16]).
+    resampling_method : str, optional
+        Resampling method for overviews (default: 'nearest').
+
+    Returns
+    -------
+    Path
+        Path to the new RGBA COG.
+
+    Raises
+    ------
+    ValueError
+        If the input file is not a raw float COG (i.e. already RGBA).
+
+    Examples
+    --------
+    >>> raw_path = create_raw_cog(colmax, geometry, 40.5, -105.2,
+    ...                            "colmax_raw.cog", cmap="viridis",
+    ...                            vmin=0, vmax=70)
+    >>> remap_cog_colormap(raw_path, "colmax_hot.cog", new_cmap="hot")
+    >>> remap_cog_colormap(raw_path, "colmax_jet.cog", new_cmap="jet",
+    ...                     new_vmin=10, new_vmax=60)
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+
+    if overview_factors is None:
+        overview_factors = [2, 4, 8, 16]
+
+    if not isinstance(overview_factors, list):
+        raise TypeError(f"overview_factors must be a list, got {type(overview_factors).__name__}")
+
+    meta = read_cog_metadata(input_path)
+
+    if meta["data_type"] == _DATA_TYPE_RGBA:
+        raise ValueError(
+            f"'{input_path}' is an RGBA COG and cannot be re-rendered. "
+            "Use create_raw_cog() to create a raw float COG first."
+        )
+
+    # Fall back to metadata defaults when the caller does not supply them
+    vmin = new_vmin if new_vmin is not None else meta.get("vmin")
+    vmax = new_vmax if new_vmax is not None else meta.get("vmax")
+    nodata = meta.get("nodata")
+
+    with rasterio.open(input_path) as src:
+        raw_data = src.read(1)
+        file_crs = src.crs
+        file_transform = src.transform
+        ny, nx = raw_data.shape
+
+    # Convert to float64 for processing; restore NaN for nodata pixels
+    raw_data = raw_data.astype(np.float64)
+    if nodata is not None:
+        raw_data[raw_data == nodata] = np.nan
+
+    # Resolve vmin/vmax from actual data if still unknown
+    vmin, vmax = _resolve_vmin_vmax(raw_data, vmin, vmax, None)
+
+    rgba_image = apply_colormap_to_array(raw_data, new_cmap, vmin, vmax)
+
+    resampling_enum = _string_to_resampling(resampling_method)
+
+    with rasterio.open(
+        output_path,
+        "w",
+        driver="COG",
+        height=ny,
+        width=nx,
+        count=4,
+        dtype=np.uint8,
+        crs=file_crs,
+        transform=file_transform,
+        compress="DEFLATE",
+        predictor=2,
+        BIGTIFF="IF_NEEDED",
+        photometric="RGB",
+        tiled=True,
+    ) as dst:
+        dst.write(rgba_image[:, :, 0], 1)
+        dst.write(rgba_image[:, :, 1], 2)
+        dst.write(rgba_image[:, :, 2], 3)
+        dst.write(rgba_image[:, :, 3], 4)
+
+        dst.colorinterp = (ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha)
+
+        dst.update_tags(
+            **{
+                _TAG_CMAP: _get_cmap_name(new_cmap),
+                _TAG_VMIN: str(vmin),
+                _TAG_VMAX: str(vmax),
+                _TAG_NODATA: str(nodata) if nodata is not None else "",
+                _TAG_DATA_TYPE: _DATA_TYPE_RGBA,
+            }
+        )
+
+        if overview_factors:
+            dst.build_overviews(overview_factors, resampling_enum)
+            dst.update_tags(ns="rio_overview", resampling=resampling_method)
+
+    logger.debug("Remapped COG written to %s (cmap=%s)", output_path, _get_cmap_name(new_cmap))
+    return output_path
+
+
+def read_cog_tile_as_rgba(
+    cog_path: Union[str, Path],
+    cmap: Optional[Union[str, matplotlib.colors.Colormap]] = None,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    overview_level: int = 0,
+    window: Optional[rasterio.windows.Window] = None,
+) -> np.ndarray:
+    """
+    Read a tile (or the full image) from a COG and return an RGBA numpy array.
+
+    For **raw float COGs** (created with :func:`create_raw_cog`) the colormap
+    is applied on-the-fly.  You can supply any colormap at read time without
+    modifying the file.
+
+    For **RGBA COGs** (created with :func:`create_cog` or
+    :func:`remap_cog_colormap`) the existing RGBA data is returned directly
+    (no colormap is applied unless a ``cmap`` is explicitly provided, in which
+    case the caller's intent is respected and the colormap is applied to band 1
+    interpreted as raw data — this is mainly useful for RGBA single-band files).
+
+    Parameters
+    ----------
+    cog_path : str or Path
+        Path to a COG file.
+    cmap : str or matplotlib.colors.Colormap, optional
+        Colormap to apply when rendering raw float data.  If None, the
+        colormap stored in the file's metadata is used (defaulting to
+        ``'viridis'`` if no metadata is found).
+    vmin : float, optional
+        Minimum value for colormap scaling.  If None, uses file metadata or
+        data minimum.
+    vmax : float, optional
+        Maximum value for colormap scaling.  If None, uses file metadata or
+        data maximum.
+    overview_level : int, optional
+        Overview (pyramid) level to read.  0 means full resolution.
+        1 means first downsampled level, etc. (default: 0)
+    window : rasterio.windows.Window, optional
+        Spatial window to read.  If None, reads the full extent at the
+        requested overview level.
+
+    Returns
+    -------
+    np.ndarray
+        RGBA image array, shape (height, width, 4), dtype uint8.
+
+    Examples
+    --------
+    >>> # Read the full raw COG with a new colormap
+    >>> rgba = read_cog_tile_as_rgba("colmax_raw.cog", cmap="hot")
+    >>> from PIL import Image
+    >>> Image.fromarray(rgba).save("tile.png")
+
+    >>> # Read a spatial window at overview level 1
+    >>> import rasterio
+    >>> win = rasterio.windows.Window(col_off=100, row_off=100, width=256, height=256)
+    >>> rgba = read_cog_tile_as_rgba("colmax_raw.cog", cmap="jet", overview_level=1,
+    ...                               window=win)
+    """
+    cog_path = Path(cog_path)
+    meta = read_cog_metadata(cog_path)
+    data_type = meta.get("data_type")
+
+    with rasterio.open(cog_path) as src:
+        # Select overview dataset if requested
+        if overview_level > 0:
+            if overview_level > len(src.overviews(1)):
+                raise ValueError(
+                    f"overview_level={overview_level} requested but the file only has "
+                    f"{len(src.overviews(1))} overview level(s)."
+                )
+            ovr_dataset = src.overviews(1)[overview_level - 1]
+            ovr_transform = src.transform * src.transform.scale(
+                src.width / ovr_dataset, src.height / ovr_dataset
+            )
+            _ = ovr_transform  # kept for reference; rasterio handles internally
+
+        if data_type == _DATA_TYPE_RAW or src.count == 1:
+            # Single-band float COG: apply colormap
+            band_data = src.read(1, out_shape=_overview_shape(src, overview_level), window=window).astype(np.float64)
+
+            # Restore NaN for nodata
+            src_nodata = src.nodata
+            if src_nodata is not None and not np.isnan(src_nodata):
+                band_data[band_data == src_nodata] = np.nan
+
+            # Resolve colormap and value range
+            effective_cmap = cmap if cmap is not None else (meta.get("cmap") or "viridis")
+            effective_vmin = vmin if vmin is not None else meta.get("vmin")
+            effective_vmax = vmax if vmax is not None else meta.get("vmax")
+
+            return apply_colormap_to_array(band_data, effective_cmap, effective_vmin, effective_vmax)
+
+        else:
+            # Multi-band (RGBA) COG: return bands directly
+            bands = src.read(
+                out_shape=(src.count, *_overview_shape(src, overview_level)), window=window
+            )
+            # bands shape: (4, H, W) → transpose to (H, W, 4)
+            return np.moveaxis(bands, 0, -1).astype(np.uint8)
+
+
+def _overview_shape(src: rasterio.DatasetReader, overview_level: int) -> tuple:
+    """Return (height, width) for the requested overview level of *src*."""
+    if overview_level == 0:
+        return (src.height, src.width)
+    overviews = src.overviews(1)
+    if not overviews or overview_level > len(overviews):
+        return (src.height, src.width)
+    factor = overviews[overview_level - 1]
+    return (max(1, src.height // factor), max(1, src.width // factor))
