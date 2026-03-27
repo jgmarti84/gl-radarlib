@@ -4,7 +4,7 @@ radar_grid - Fast radar gridding with precomputed geometry
 
 from .compute import compute_grid_geometry
 from .filters import GateFilter, GridFilter, create_mask_from_filter
-from .geometry import GridGeometry, load_geometry, save_geometry
+from .geometry import GridGeometry, build_geometry_filename, load_geometry, peek_geometry_metadata, save_geometry
 from .geotiff import apply_colormap_to_array, create_cog, create_geotiff, save_product_as_geotiff
 from .interpolate import apply_geometry, apply_geometry_multi
 from .mpl_visualization import (
@@ -37,6 +37,8 @@ __all__ = [
     # Geometry I/O
     "save_geometry",
     "load_geometry",
+    "peek_geometry_metadata",
+    "build_geometry_filename",
     # Computation
     "compute_grid_geometry",
     # Interpolation

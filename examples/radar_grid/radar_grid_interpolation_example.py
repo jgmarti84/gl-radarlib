@@ -13,6 +13,15 @@ from radarlib.radar_grid import (
 )
 from radarlib.radar_grid.filters import GateFilter
 
+# ============================================================================
+# CONFIGURATION - Update these paths to match your environment
+# ============================================================================
+DEFAULT_RADAR_FILE = "./app/data/radares/RMA1/netcdf/RMA1_0315_01_20260318T141818Z.nc"
+geometry_file = "RMA1_0315_01_RES1000x600_TOA15000_HF1p1000_MR900_MN1_NB1p30_BSP1p40_nearest_geometry.npz"
+DEFAULT_GEOMETRY_FILE = f"/workspaces/radarlib/data/geometry/RMA1/{geometry_file}"
+DEFAULT_OUTPUT_DIR = "outputs/radar_grid/geotiff_generation"  # Change to your preferred output directory
+# ============================================================================
+
 
 def main_nofilters():
     print("=" * 60)
@@ -20,7 +29,7 @@ def main_nofilters():
     print("=" * 60)
 
     # Load radar
-    file = "data/radares/RMA1/netcdf/RMA1_0315_01_20251208T191648Z.nc"
+    file = DEFAULT_RADAR_FILE
     radar = pyart.io.read(file)
 
     # 1. Radar info
@@ -33,8 +42,7 @@ def main_nofilters():
     # 2. Load pre-computed geometry
     print("\n2. LOAD GEOMETRY")
     print("-" * 40)
-    geometry_dir = "data/geometry/RMA1"
-    geometry = load_geometry(f"{geometry_dir}/RMA1_0315_01_RES1500_TOA12000_FAC017_MR250_geometry.npz")
+    geometry = load_geometry(DEFAULT_GEOMETRY_FILE)
     print(geometry)
 
     # 3. Single field interpolation with timing
@@ -78,7 +86,7 @@ def main_withfilters():
     print("=" * 60)
 
     # Load radar
-    file = "data/radares/RMA1/netcdf/RMA1_0315_01_20251208T191648Z.nc"
+    file = DEFAULT_RADAR_FILE
     radar = pyart.io.read(file)
 
     # 1. Radar info
@@ -91,8 +99,7 @@ def main_withfilters():
     # 2. Load pre-computed geometry
     print("\n2. LOAD GEOMETRY")
     print("-" * 40)
-    geometry_dir = "data/geometry/RMA1"
-    geometry = load_geometry(f"{geometry_dir}/RMA1_0315_01_RES1500_TOA12000_FAC017_MR250_geometry.npz")
+    geometry = load_geometry(DEFAULT_GEOMETRY_FILE)
     print(geometry)
 
     # 3. Single field interpolation with timing
@@ -147,4 +154,4 @@ def main_withfilters():
 
 if __name__ == "__main__":
     main_nofilters()
-    # main_withfilters()
+    main_withfilters()

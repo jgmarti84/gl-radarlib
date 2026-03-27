@@ -28,6 +28,6 @@
             ]
         }
     },
-    "postCreateCommand": "./.devcontainer/post-create.sh",
+    "postCreateCommand": ".devcontainer/post-create.sh",
     "remoteUser": "root"
 }

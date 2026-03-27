@@ -2,11 +2,19 @@ import logging
 import os
 import time
 
-import numpy as np
 import pyart
 
 # Import our module
-from radarlib.radar_grid import compute_grid_geometry, get_gate_coordinates, get_radar_info, save_geometry
+from radarlib.radar_grid import (
+    build_geometry_filename,
+    compute_grid_geometry,
+    get_gate_coordinates,
+    get_radar_info,
+    load_geometry,
+    peek_geometry_metadata,
+    save_geometry,
+)
+from radarlib.radar_grid.utils import calculate_grid_points, safe_range_max_m
 
 # Configurar logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -19,7 +27,8 @@ def main():
     print("=" * 60)
 
     # Load radar
-    file = "data/radares/RMA1/netcdf/RMA1_0315_02_20251208T191243Z.nc"
+    file = "./app/data/radares/RMA1/netcdf/RMA1_0315_01_20260318T141818Z.nc"
+    # file = "data/radares/RMA1/netcdf/RMA1_0315_02_20251208T191243Z.nc"
     radar = pyart.io.read(file)
 
     # Print radar info
@@ -29,13 +38,21 @@ def main():
         print(f"  {k}: {v}")
 
     # Grid configuration
-    grid_resolution = 1000
-    cap_z = 12000.0
-    min_radius = 400.0
-    beam_factor = 0.022
-    range_max_m = radar.range["data"].max()
+    grid_resolution_xy = 1000
+    grid_resolution_z = 600
+    cap_z = 15000.0
+    min_radius = 900.0
+    beam_factor = 1.1
+    nb = 1.3
+    bsp = 1.4
+    weighting = "nearest"
+    # range_max_m = radar.range["data"].max()
+    # Calcular límites Z según producto ANTES de prepare_radar_for_product
+    range_max_m = safe_range_max_m(radar, round_to_km=20)
+
     print("Grid configuration:")
-    print(f"  Grid resolution: {grid_resolution} m")
+    print(f"  Grid resolution xy: {grid_resolution_xy} m")
+    print(f"  Grid resolution z: {grid_resolution_z} m")
     print(f"  Cap Z: {cap_z} m")
     print(f"  Min radius: {min_radius} m")
     print(f"  Beam factor: {beam_factor}")
@@ -45,9 +62,12 @@ def main():
     y_grid_limits = (-range_max_m, range_max_m)
     x_grid_limits = (-range_max_m, range_max_m)
 
-    z_points = int(np.ceil(z_grid_limits[1] / grid_resolution)) + 1
-    y_points = int((y_grid_limits[1] - y_grid_limits[0]) / grid_resolution)
-    x_points = int((x_grid_limits[1] - x_grid_limits[0]) / grid_resolution)
+    # z_points = int(np.ceil(z_grid_limits[1] / grid_resolution_z)) + 1
+    # y_points = int((y_grid_limits[1] - y_grid_limits[0]) / grid_resolution_xy)
+    # x_points = int((x_grid_limits[1] - x_grid_limits[0]) / grid_resolution_xy)
+    z_points, y_points, x_points = calculate_grid_points(
+        z_grid_limits, y_grid_limits, x_grid_limits, grid_resolution_xy, grid_resolution_z
+    )
 
     grid_shape = (z_points, y_points, x_points)
     grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
@@ -69,11 +89,6 @@ def main():
     print("\n--- Computing geometry ---")
     gate_x, gate_y, gate_z = get_gate_coordinates(radar)
     print(f"Gate coordinates: {len(gate_x):,} gates")
-
-    file_name = f"{info['radar_name']}_{info['strategy']}_{info['volume_nr']}"
-    file_name += f"_RES{int(grid_resolution)}_TOA{int(cap_z)}"
-    file_name += f"_FAC{int(str(beam_factor).replace('0.', '')[:3]):03d}_MR{int(min_radius)}_geometry"
-
     start = time.time()
     geometry = compute_grid_geometry(
         gate_x,
@@ -85,16 +100,51 @@ def main():
         toa=cap_z,
         min_radius=min_radius,
         radar_altitude=info["altitude"],
-        beam_factor=beam_factor,
-        n_workers=3,
+        h_factor=beam_factor,
+        nb=nb,
+        bsp=bsp,
+        weighting=weighting,
+        max_neighbors=1,
+        n_workers=8,
     )
     print(f"Completed in {time.time() - start:.1f} seconds")
+
+    # Attach build parameters as metadata so the file is self-describing
+    geometry.metadata = {
+        "radar_name": info["radar_name"],
+        "strategy": info["strategy"],
+        "volume_nr": info["volume_nr"],
+        "grid_resolution_xy": grid_resolution_xy,
+        "grid_resolution_z": grid_resolution_z,
+        "toa": cap_z,
+        "h_factor": beam_factor,
+        "min_radius": min_radius,
+        "max_neighbors": 1,
+        "nb": nb,
+        "bsp": bsp,
+        "weighting": weighting,
+    }
     print(geometry)
 
     # Test 2: Save and load
     print("\n--- Save/Load geometry ---")
+    # Derive the canonical filename from the build parameters
+    file_name = build_geometry_filename(geometry.metadata)
     os.makedirs(geometry_dir, exist_ok=True)
-    save_geometry(geometry, f"{geometry_dir}/{file_name}.npz")
+    save_path = f"{geometry_dir}/{file_name}.npz"
+    save_geometry(geometry, save_path)
+    print(f"Saved to: {save_path}")
+
+    # Peek at parameters WITHOUT loading the heavy arrays
+    print("\n--- Peeking at metadata before full load ---")
+    meta = peek_geometry_metadata(save_path)
+    for k, v in meta.items():
+        print(f"  {k}: {v}")
+
+    # Now do the full load
+    print("\n--- Loading full geometry ---")
+    loaded = load_geometry(save_path)
+    print(loaded)
 
     print("\n" + "=" * 60)
     print("FINISHED BUILDING GEOMETRY EXAMPLE!")
