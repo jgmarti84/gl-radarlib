@@ -296,6 +296,11 @@ GEOMETRY_BUFR_LOOKBACK_HOURS: int = get("GEOMETRY_BUFR_LOOKBACK_HOURS")
 _BUFR_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_([A-Z]{2,10})_(\d{8}T\d{6}Z)\.BUFR$", re.IGNORECASE)
 _NETCDF_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_(\d{8}T\d{6}Z)\.nc$", re.IGNORECASE)
 
+ROI_PARAMS_VOL01 = None
+ROI_PARAMS_VOL02 = None
+ROI_PARAMS_VOL03 = None
+ROI_PARAMS_VOL04 = None
+
 
 def reload(path: Optional[str] = None) -> None:
     """Force reload configuration. If path is provided, try it first."""

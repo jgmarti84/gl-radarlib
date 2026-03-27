@@ -162,13 +162,17 @@ class ProductGenerationDaemon:
 
             for vol_num in vol_nums_keys:
                 try:
-                    roi_params = dict(
-                        default_roi_params, **json.loads(os.environ.get(f"ROI_PARAMS_VOL{vol_num}", "{}"))
-                    )
+                    roi_params_env = os.environ.get(f"ROI_PARAMS_VOL{vol_num}")
+                    if roi_params_env is not None:
+                        roi_params_overrides = json.loads(roi_params_env)
+                    else:
+                        roi_params_overrides = getattr(config, f"ROI_PARAMS_VOL{vol_num}", None) or {}
+
+                    roi_params = dict(default_roi_params, **roi_params_overrides)
                 except Exception as e:
                     logger.warning(
                         f"Failed to parse ROI_PARAMS_VOL{vol_num} "
-                        f"from environment variable: {e}. Using default parameters."
+                        f"from environment variable: {e} or using the config yaml. Using default parameters."
                     )
                     roi_params = default_roi_params
 
