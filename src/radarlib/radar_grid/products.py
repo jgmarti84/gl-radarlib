@@ -268,7 +268,6 @@ def constant_elevation_ppi(
         weight_low = 1.0 - weight_high
 
         # Handle boundaries
-        # valid_interp = (z_low >= 0) & (z_high < nz)
         below_grid = target_z < z_min
         above_grid = target_z > z_max
 
@@ -282,13 +281,28 @@ def constant_elevation_ppi(
         val_low = grid[z_low_safe, y_indices, x_indices]
         val_high = grid[z_high_safe, y_indices, x_indices]
 
-        # Interpolate where valid
-        result = weight_low * val_low + weight_high * val_high
+        # NaN-aware interpolation: when only one of the two bracketing levels has
+        # valid data (e.g. the lower level is masked by the below-beam filter),
+        # fall back to the single valid level instead of propagating NaN.
+        # Only output NaN when both levels are NaN (genuinely unobserved).
+        nan_low = np.isnan(val_low)
+        nan_high = np.isnan(val_high)
+        both_valid = ~nan_low & ~nan_high
+        only_low = ~nan_low & nan_high
+        only_high = nan_low & ~nan_high
+        neither = nan_low & nan_high
 
-        # For points below grid, use lowest level (or set to NaN)
+        result_data = np.zeros((ny, nx), dtype="float32")
+        result_data[both_valid] = (
+            weight_low[both_valid] * val_low[both_valid] + weight_high[both_valid] * val_high[both_valid]
+        )
+        result_data[only_low] = val_low[only_low]
+        result_data[only_high] = val_high[only_high]
+
+        result = np.where(neither, np.nan, result_data).astype("float32")
+
+        # For points outside the grid extent, force NaN
         result[below_grid] = np.nan
-
-        # For points above grid, use highest level (or set to NaN)
         result[above_grid] = np.nan
 
     else:
