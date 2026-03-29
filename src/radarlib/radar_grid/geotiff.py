@@ -6,7 +6,9 @@ into georeferenced GeoTIFF images with optional colormap application and
 Cloud-Optimized GeoTIFF (COG) format.
 
 It also provides utilities to re-render existing raw float COGs with new colormaps
-without needing to reprocess the original radar data.
+without needing to reprocess the original radar data, and to upgrade legacy RGBA
+COG files (created before the raw float format was introduced) into the raw float
+format so they too can benefit from dynamic colormap changes.
 """
 
 import logging
@@ -873,10 +875,15 @@ def remap_cog_colormap(
 
     meta = read_cog_metadata(input_path)
 
-    if meta["data_type"] == _DATA_TYPE_RGBA:
+    with rasterio.open(input_path) as src:
+        file_band_count = src.count
+        file_dtype = src.dtypes[0]
+
+    if _is_rgba_cog(meta, file_band_count, file_dtype):
         raise ValueError(
-            f"'{input_path}' is an RGBA COG and cannot be re-rendered. "
-            "Use create_raw_cog() to create a raw float COG first."
+            f"'{input_path}' is an RGBA COG and cannot be re-rendered directly. "
+            "Convert it to a raw float COG first using convert_rgba_cog_to_raw(), "
+            "then call remap_cog_colormap() on the converted file."
         )
 
     # Fall back to metadata defaults when the caller does not supply them
@@ -1055,3 +1062,343 @@ def _overview_shape(src: rasterio.DatasetReader, overview_level: int) -> tuple:
         return (src.height, src.width)
     factor = overviews[overview_level - 1]
     return (max(1, src.height // factor), max(1, src.width // factor))
+
+
+def _is_rgba_cog(meta: dict, band_count: int, dtype: str) -> bool:
+    """
+    Return True when a rasterio dataset is an RGBA-encoded COG.
+
+    Checks both the radarlib metadata tag (present on files created by this
+    library) and the band count / dtype combination (for legacy files that
+    pre-date the metadata tag).
+    """
+    if meta.get("data_type") == _DATA_TYPE_RGBA:
+        return True
+    # Heuristic for legacy RGBA files: 4 uint8 bands and NOT tagged as raw
+    if band_count == 4 and dtype in ("uint8",) and meta.get("data_type") != _DATA_TYPE_RAW:
+        return True
+    return False
+
+
+def _build_colormap_lut(
+    cmap: Union[str, matplotlib.colors.Colormap],
+    vmin: float,
+    vmax: float,
+    lut_size: int,
+) -> tuple:
+    """
+    Build a lookup table mapping uint8 RGB tuples to float data values.
+
+    Parameters
+    ----------
+    cmap : str or Colormap
+        Colormap to invert.
+    vmin, vmax : float
+        Data range used when the colormap was applied.
+    lut_size : int
+        Number of uniformly spaced sample points across [vmin, vmax].
+
+    Returns
+    -------
+    lut_float : np.ndarray, shape (lut_size,)
+        Float values at each LUT entry.
+    lut_rgb : np.ndarray, shape (lut_size, 3), dtype uint8
+        Corresponding RGB values (0-255) for each float entry.
+    """
+    if isinstance(cmap, str):
+        cmap = plt.get_cmap(cmap)
+
+    lut_float = np.linspace(vmin, vmax, lut_size)
+    norm = Normalize(vmin=vmin, vmax=vmax, clip=True)
+    normalized = norm(lut_float)
+    # cmap returns float RGBA in [0, 1]; convert RGB to uint8
+    lut_rgba_f = cmap(normalized)  # shape (lut_size, 4)
+    lut_rgb = (lut_rgba_f[:, :3] * 255).astype(np.uint8)
+    return lut_float, lut_rgb
+
+
+def _invert_colormap_to_float(
+    rgba_image: np.ndarray,
+    cmap: Union[str, matplotlib.colors.Colormap],
+    vmin: float,
+    vmax: float,
+    lut_size: int = 1024,
+    chunk_size: int = 4096,
+) -> np.ndarray:
+    """
+    Approximate the original float values by inverting the colormap mapping.
+
+    Each opaque pixel's RGB values are matched against a dense lookup table
+    (LUT) and the nearest entry (in RGB Euclidean distance) is used to
+    reconstruct an approximate float value.  Transparent pixels (alpha == 0)
+    become ``NaN``.
+
+    .. note::
+        The reconstruction is an **approximation**.  Because the colormap was
+        applied and the result was quantized to uint8 before writing to disk,
+        each pixel can represent at most one of ~256 distinct float values
+        within [vmin, vmax].  Increasing ``lut_size`` does not recover
+        additional precision beyond the uint8 quantization limit, but it does
+        improve coverage for colormaps with non-monotone colour channels.
+
+    Parameters
+    ----------
+    rgba_image : np.ndarray, shape (H, W, 4), dtype uint8
+        RGBA image as read from the COG.
+    cmap : str or Colormap
+        The colormap that was originally used to create the RGBA data.
+    vmin, vmax : float
+        Value range that was originally used for normalisation.
+    lut_size : int, optional
+        Number of sample points in the lookup table (default: 1024).
+    chunk_size : int, optional
+        Number of pixels to process at once when doing nearest-neighbour
+        lookup (controls peak memory use, default: 4096).
+
+    Returns
+    -------
+    np.ndarray, shape (H, W), dtype float32
+        Reconstructed float values; NaN where alpha was 0.
+    """
+    lut_float, lut_rgb = _build_colormap_lut(cmap, vmin, vmax, lut_size)
+    lut_rgb_f = lut_rgb.astype(np.float32)  # (lut_size, 3)
+
+    H, W = rgba_image.shape[:2]
+    flat_rgba = rgba_image.reshape(-1, 4)
+    flat_rgb = flat_rgba[:, :3].astype(np.float32)
+    alpha = flat_rgba[:, 3]
+
+    result_flat = np.full(H * W, np.nan, dtype=np.float32)
+    opaque_indices = np.where(alpha > 0)[0]
+
+    if opaque_indices.size == 0:
+        return result_flat.reshape(H, W)
+
+    # Process opaque pixels in chunks to limit peak memory usage
+    for start in range(0, opaque_indices.size, chunk_size):
+        end = min(start + chunk_size, opaque_indices.size)
+        chunk_idx = opaque_indices[start:end]
+        chunk_rgb = flat_rgb[chunk_idx]  # (chunk, 3)
+
+        # Squared Euclidean distance between each chunk pixel and each LUT entry
+        # diff shape: (chunk, lut_size, 3)
+        diff = chunk_rgb[:, np.newaxis, :] - lut_rgb_f[np.newaxis, :, :]
+        dists = (diff * diff).sum(axis=-1)  # (chunk, lut_size)
+
+        nearest = np.argmin(dists, axis=-1)  # (chunk,)
+        result_flat[chunk_idx] = lut_float[nearest].astype(np.float32)
+
+    return result_flat.reshape(H, W)
+
+
+def convert_rgba_cog_to_raw(
+    input_path: Union[str, Path],
+    output_path: Union[str, Path],
+    cmap: Optional[Union[str, matplotlib.colors.Colormap]] = None,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    lut_size: int = 1024,
+    overview_factors: Optional[list] = None,
+    resampling_method: str = "nearest",
+) -> Path:
+    """
+    Convert a legacy RGBA COG into a raw float32 COG suitable for colormap changes.
+
+    The original RGBA COG stores data with the colormap already baked in as
+    uint8 pixel values.  This function **approximately** recovers the original
+    floating-point values by performing an inverse colormap lookup: for each
+    opaque pixel, the RGB value is matched against a dense lookup table (LUT)
+    built from the supplied (or file-embedded) colormap and value range.
+
+    The resulting raw float COG can subsequently be re-rendered with any
+    colormap via :func:`remap_cog_colormap` or :func:`read_cog_tile_as_rgba`,
+    just like a file originally created by :func:`create_raw_cog`.
+
+    .. warning::
+        **Approximate conversion** — because the original data were quantized
+        to uint8 when the RGBA COG was written, the reconstructed float values
+        have a precision of at most ``(vmax − vmin) / 255``.  The conversion
+        cannot recover sub-quantisation detail that was already lost.
+
+    Parameters
+    ----------
+    input_path : str or Path
+        Path to the existing RGBA COG (single or multi-band, uint8).
+        May be a legacy file without radarlib metadata, or a newer file
+        written by :func:`create_cog`.
+    output_path : str or Path
+        Destination path for the new raw float32 COG.
+    cmap : str or matplotlib.colors.Colormap, optional
+        Colormap that was used when the RGBA COG was created.  If ``None``,
+        the value stored in the file's ``radarlib_cmap`` metadata tag is used.
+        **Required** when the input file has no radarlib metadata.
+    vmin : float, optional
+        Minimum data value that was used for colormap normalisation.  If
+        ``None``, uses the ``radarlib_vmin`` metadata tag.
+        **Required** when the input file has no radarlib metadata.
+    vmax : float, optional
+        Maximum data value that was used for colormap normalisation.  If
+        ``None``, uses the ``radarlib_vmax`` metadata tag.
+        **Required** when the input file has no radarlib metadata.
+    lut_size : int, optional
+        Number of uniformly spaced sample points used to build the inverse
+        lookup table.  Higher values increase the resolution of the
+        reconstructed float values at the cost of slightly more computation
+        (default: 1024).
+    overview_factors : list of int, optional
+        Overview levels written into the output COG (default: [2, 4, 8, 16]).
+    resampling_method : str, optional
+        Resampling method for overviews (default: 'nearest').
+
+    Returns
+    -------
+    Path
+        Path to the newly created raw float32 COG.
+
+    Raises
+    ------
+    ValueError
+        If the input file is already a raw float COG (no conversion needed).
+    ValueError
+        If ``cmap``, ``vmin``, or ``vmax`` cannot be determined from the
+        input arguments or from the file's embedded metadata.
+
+    Examples
+    --------
+    Convert a legacy RGBA COG (no metadata) to raw float — you must supply
+    the original colormap and value range:
+
+    >>> convert_rgba_cog_to_raw(
+    ...     "colmax_legacy.cog", "colmax_raw.cog",
+    ...     cmap="viridis", vmin=0, vmax=70,
+    ... )
+
+    Convert a newer RGBA COG that already contains radarlib metadata — the
+    colormap/vmin/vmax are read automatically from the file:
+
+    >>> convert_rgba_cog_to_raw("colmax_new_rgba.cog", "colmax_raw.cog")
+
+    After conversion, freely re-render with any colormap:
+
+    >>> remap_cog_colormap("colmax_raw.cog", "colmax_hot.cog", new_cmap="hot")
+    >>> rgba = read_cog_tile_as_rgba("colmax_raw.cog", cmap="plasma")
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+
+    if overview_factors is None:
+        overview_factors = [2, 4, 8, 16]
+
+    if not isinstance(overview_factors, list):
+        raise TypeError(f"overview_factors must be a list, got {type(overview_factors).__name__}")
+
+    meta = read_cog_metadata(input_path)
+
+    # Reject raw float input — nothing to convert
+    if meta.get("data_type") == _DATA_TYPE_RAW:
+        raise ValueError(
+            f"'{input_path}' is already a raw float COG (data_type='raw_float'). "
+            "No conversion is needed."
+        )
+
+    # Resolve colormap and value range: prefer caller args, fall back to metadata
+    effective_cmap = cmap if cmap is not None else meta.get("cmap")
+    effective_vmin = vmin if vmin is not None else meta.get("vmin")
+    effective_vmax = vmax if vmax is not None else meta.get("vmax")
+
+    missing = []
+    if effective_cmap is None:
+        missing.append("cmap")
+    if effective_vmin is None:
+        missing.append("vmin")
+    if effective_vmax is None:
+        missing.append("vmax")
+    if missing:
+        raise ValueError(
+            f"Cannot determine {', '.join(missing)} for '{input_path}'. "
+            "The file has no radarlib metadata. "
+            "Please supply the original colormap and value range explicitly:\n"
+            "  convert_rgba_cog_to_raw(input, output, cmap='viridis', vmin=0, vmax=70)"
+        )
+
+    effective_vmin = float(effective_vmin)
+    effective_vmax = float(effective_vmax)
+
+    with rasterio.open(input_path) as src:
+        band_count = src.count
+        dtype = src.dtypes[0]
+        file_crs = src.crs
+        file_transform = src.transform
+        ny, nx = src.height, src.width
+        nodata_meta = meta.get("nodata")
+
+        # Read RGBA bands; handle both 4-band and (unusual) single-band uint8 files
+        if band_count >= 4:
+            r = src.read(1)
+            g = src.read(2)
+            b = src.read(3)
+            a = src.read(4)
+            rgba_image = np.stack([r, g, b, a], axis=-1).astype(np.uint8)
+        elif band_count == 3:
+            r = src.read(1)
+            g = src.read(2)
+            b = src.read(3)
+            a = np.full((ny, nx), 255, dtype=np.uint8)
+            rgba_image = np.stack([r, g, b, a], axis=-1).astype(np.uint8)
+        else:
+            raise ValueError(
+                f"'{input_path}' has {band_count} band(s); expected an RGBA or RGB COG "
+                "(3 or 4 uint8 bands)."
+            )
+
+    logger.debug(
+        "Inverting colormap '%s' (vmin=%s, vmax=%s) for %s",
+        _get_cmap_name(effective_cmap),
+        effective_vmin,
+        effective_vmax,
+        input_path,
+    )
+
+    float_data = _invert_colormap_to_float(
+        rgba_image,
+        effective_cmap,
+        effective_vmin,
+        effective_vmax,
+        lut_size=lut_size,
+    )
+
+    resampling_enum = _string_to_resampling(resampling_method)
+
+    with rasterio.open(
+        output_path,
+        "w",
+        driver="COG",
+        height=ny,
+        width=nx,
+        count=1,
+        dtype=np.float32,
+        crs=file_crs,
+        transform=file_transform,
+        nodata=float("nan"),
+        compress="DEFLATE",
+        BIGTIFF="IF_NEEDED",
+        tiled=True,
+    ) as dst:
+        dst.write(float_data, 1)
+
+        dst.update_tags(
+            **{
+                _TAG_CMAP: _get_cmap_name(effective_cmap),
+                _TAG_VMIN: str(effective_vmin),
+                _TAG_VMAX: str(effective_vmax),
+                _TAG_NODATA: str(nodata_meta) if nodata_meta is not None else "",
+                _TAG_DATA_TYPE: _DATA_TYPE_RAW,
+            }
+        )
+
+        if overview_factors:
+            dst.build_overviews(overview_factors, resampling_enum)
+            dst.update_tags(ns="rio_overview", resampling=resampling_method)
+
+    logger.debug("Converted RGBA COG to raw float COG at %s", output_path)
+    return output_path

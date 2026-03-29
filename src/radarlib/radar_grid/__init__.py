@@ -7,6 +7,7 @@ from .filters import GateFilter, GridFilter, create_mask_from_filter
 from .geometry import GridGeometry, build_geometry_filename, load_geometry, peek_geometry_metadata, save_geometry
 from .geotiff import (
     apply_colormap_to_array,
+    convert_rgba_cog_to_raw,
     create_cog,
     create_geotiff,
     create_raw_cog,
@@ -90,4 +91,6 @@ __all__ = [
     "remap_cog_colormap",
     "read_cog_metadata",
     "read_cog_tile_as_rgba",
+    # Legacy conversion
+    "convert_rgba_cog_to_raw",
 ]
