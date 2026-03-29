@@ -4,6 +4,9 @@
         "dockerfile": "Dockerfile",
         "context": "../.."
     },
+    "mounts": [
+        "source=${localWorkspaceFolder}/outputs,target=/workspaces/radarlib/outputs,type=bind"
+    ],
     "containerEnv": {
         "PYTHONUNBUFFERED": "1",
         "FTP_HOST": "200.16.116.24",
@@ -28,6 +31,6 @@
             ]
         }
     },
-    "postCreateCommand": ".devcontainer/post-create.sh",
+    "postCreateCommand": ".devcontainer/radarlib/post-create.sh",
     "remoteUser": "root"
 }
