@@ -120,7 +120,7 @@ def extract_cog_filename_components(filename: str) -> dict:
             "radar_name": match.group(1),
             "timestamp": match.group(2),
             "field_type": match.group(3),
-            "filtered": not bool(match.group(4)),  # If group(5) is 'o', it's non-filtered
+            "filtered": not bool(match.group(4)),  # If group(4) is 'o', it's non-filtered
             "sweep": match.group(5),
         }
     else:

@@ -1322,7 +1322,6 @@ def convert_rgba_cog_to_raw(
 
     with rasterio.open(input_path) as src:
         band_count = src.count
-        # dtype = src.dtypes[0]
         file_crs = src.crs
         file_transform = src.transform
         ny, nx = src.height, src.width
