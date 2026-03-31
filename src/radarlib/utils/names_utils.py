@@ -96,6 +96,43 @@ def extract_netcdf_filename_components(filename: str) -> dict:
         }
 
 
+def extract_cog_filename_components(filename: str) -> dict:
+    """
+    Extract radar_name, strategy, vol_nr, field_type, timestamp, and filtered status from a COG filename.
+
+    Uses pre-compiled regex for efficient repeated calls.
+
+    COG filename format: RADAR_TIMESTAMP_FIELD_SWEEP[_o].tif
+    Example: RMA1_20260326T200000Z_VRAD_00.tif (filtered)
+             RMA1_20260326T200000Z_VRADo_00.tif (non-filtered)
+
+    Args:
+        filename: COG filename to parse
+    Returns:
+        Dictionary with keys: radar_name, timestamp, field_type, sweep, filtered
+        Returns None for any key if extraction fails.
+        {'radar_name': 'RMA1', 'timestamp': '20260326T200000Z', 'field_type': 'VRAD', 'sweep': '00', 'filtered': False}
+    """
+    match = config._COG_FILENAME_PATTERN.match(filename)
+
+    if match:
+        return {
+            "radar_name": match.group(1),
+            "timestamp": match.group(2),
+            "field_type": match.group(3),
+            "filtered": not bool(match.group(4)),  # If group(5) is 'o', it's non-filtered
+            "sweep": match.group(5),
+        }
+    else:
+        return {
+            "radar_name": None,
+            "timestamp": None,
+            "field_type": None,
+            "sweep": None,
+            "filtered": None,
+        }
+
+
 def extract_bufr_filename_components(filename: str) -> dict:
     """
     Extract radar_name, strategy, vol_nr, and field_type from a BUFR filename.

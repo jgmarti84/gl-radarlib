@@ -1023,9 +1023,7 @@ def read_cog_tile_as_rgba(
                     f"{len(src.overviews(1))} overview level(s)."
                 )
             ovr_dataset = src.overviews(1)[overview_level - 1]
-            ovr_transform = src.transform * src.transform.scale(
-                src.width / ovr_dataset, src.height / ovr_dataset
-            )
+            ovr_transform = src.transform * src.transform.scale(src.width / ovr_dataset, src.height / ovr_dataset)
             _ = ovr_transform  # kept for reference; rasterio handles internally
 
         if data_type == _DATA_TYPE_RAW or src.count == 1:
@@ -1046,9 +1044,7 @@ def read_cog_tile_as_rgba(
 
         else:
             # Multi-band (RGBA) COG: return bands directly
-            bands = src.read(
-                out_shape=(src.count, *_overview_shape(src, overview_level)), window=window
-            )
+            bands = src.read(out_shape=(src.count, *_overview_shape(src, overview_level)), window=window)
             # bands shape: (4, H, W) → transpose to (H, W, 4)
             return np.moveaxis(bands, 0, -1).astype(np.uint8)
 
@@ -1283,6 +1279,7 @@ def convert_rgba_cog_to_raw(
     >>> remap_cog_colormap("colmax_raw.cog", "colmax_hot.cog", new_cmap="hot")
     >>> rgba = read_cog_tile_as_rgba("colmax_raw.cog", cmap="plasma")
     """
+
     input_path = Path(input_path)
     output_path = Path(output_path)
 
@@ -1297,8 +1294,7 @@ def convert_rgba_cog_to_raw(
     # Reject raw float input — nothing to convert
     if meta.get("data_type") == _DATA_TYPE_RAW:
         raise ValueError(
-            f"'{input_path}' is already a raw float COG (data_type='raw_float'). "
-            "No conversion is needed."
+            f"'{input_path}' is already a raw float COG (data_type='raw_float'). " "No conversion is needed."
         )
 
     # Resolve colormap and value range: prefer caller args, fall back to metadata
@@ -1326,7 +1322,7 @@ def convert_rgba_cog_to_raw(
 
     with rasterio.open(input_path) as src:
         band_count = src.count
-        dtype = src.dtypes[0]
+        # dtype = src.dtypes[0]
         file_crs = src.crs
         file_transform = src.transform
         ny, nx = src.height, src.width
@@ -1347,8 +1343,7 @@ def convert_rgba_cog_to_raw(
             rgba_image = np.stack([r, g, b, a], axis=-1).astype(np.uint8)
         else:
             raise ValueError(
-                f"'{input_path}' has {band_count} band(s); expected an RGBA or RGB COG "
-                "(3 or 4 uint8 bands)."
+                f"'{input_path}' has {band_count} band(s); expected an RGBA or RGB COG " "(3 or 4 uint8 bands)."
             )
 
     logger.debug(

@@ -592,21 +592,22 @@ class ProductGenerationDaemon:
                         vmax = config.__dict__.get(vmax_key, None)
                         cmap = config.__dict__.get(cmap_key, None)
 
-                        gf = GateFilter(radar)
-                        gf.exclude_below_elevation_angle(config.COLMAX_ELEV_LIMIT1)
-                        if config.COLMAX_RHOHV_FILTER:
-                            gf.exclude_below(rhv_field, config.COLMAX_RHOHV_UMBRAL)
-                        if config.COLMAX_WRAD_FILTER:
-                            gf.exclude_above(wrad_field, config.COLMAX_WRAD_UMBRAL)
-                        if config.COLMAX_TDR_FILTER:
-                            gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
-                        colmax_data_filtered = apply_geometry(
+                        # gf = GateFilter(radar)
+                        # gf.exclude_below_elevation_angle(config.COLMAX_ELEV_LIMIT1)
+                        # if config.COLMAX_RHOHV_FILTER:
+                        #     gf.exclude_below(rhv_field, config.COLMAX_RHOHV_UMBRAL)
+                        # if config.COLMAX_WRAD_FILTER:
+                        #     gf.exclude_above(wrad_field, config.COLMAX_WRAD_UMBRAL)
+                        # if config.COLMAX_TDR_FILTER:
+                        #     gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
+                        colmax_data_unfiltered = apply_geometry(
                             self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
                             colmax_data,
-                            additional_filters=[gf],
+                            # additional_filters=[],
                         )
                         colmax = column_max(
-                            colmax_data_filtered, geometry=self.geometry[volume_info["strategy"]][volume_info["vol_nr"]]
+                            colmax_data_unfiltered,
+                            geometry=self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
                         )
 
                         # Save as COG using convenience function
