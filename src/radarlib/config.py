@@ -295,6 +295,7 @@ GEOMETRY_BUFR_LOOKBACK_HOURS: int = get("GEOMETRY_BUFR_LOOKBACK_HOURS")
 # Format: RADAR_VOLCODE_VOLNR_FIELD_TIMESTAMP.BUFR
 _BUFR_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_([A-Z]{2,10})_(\d{8}T\d{6}Z)\.BUFR$", re.IGNORECASE)
 _NETCDF_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_(\d{8}T\d{6}Z)\.nc$", re.IGNORECASE)
+_COG_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{8}T\d{6}Z)_([A-Z0-9]+?)(o?)_(\d{2})\.tif$", re.IGNORECASE)
 
 ROI_PARAMS_VOL01 = None
 ROI_PARAMS_VOL02 = None

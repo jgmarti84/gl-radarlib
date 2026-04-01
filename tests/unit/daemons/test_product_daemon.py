@@ -197,7 +197,7 @@ class TestProductGenerationDaemonIntegration:
     @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
     def test_different_product_types(self, mock_tracker, tmp_path):
         """Should accept different product types."""
-        for product_type in ["image", "geotiff", "cog"]:
+        for product_type in ["image", "geotiff", "cog", "raw_cog"]:
             config = ProductGenerationDaemonConfig(
                 local_netcdf_dir=tmp_path / "netcdf",
                 local_product_dir=tmp_path / "products",
@@ -215,3 +215,175 @@ class TestProductGenerationDaemonIntegration:
                 daemon = ProductGenerationDaemon(config)
 
             assert daemon.config.product_type == product_type
+
+
+class TestProductGenerationDaemonRawCog:
+    """Tests for raw_cog product type routing in ProductGenerationDaemon."""
+
+    @pytest.fixture
+    def raw_cog_config(self, tmp_path):
+        """Create a daemon configuration with raw_cog product type."""
+        return ProductGenerationDaemonConfig(
+            local_netcdf_dir=tmp_path / "netcdf",
+            local_product_dir=tmp_path / "products",
+            state_db=tmp_path / "state.db",
+            volume_types={"0315": {"01": ["DBZH"]}},
+            radar_name="RMA1",
+            poll_interval=1,
+            product_type="raw_cog",
+        )
+
+    @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
+    def test_raw_cog_product_type_stored(self, mock_tracker, raw_cog_config):
+        """Daemon should store raw_cog product type."""
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            daemon = ProductGenerationDaemon(raw_cog_config)
+
+        assert daemon.config.product_type == "raw_cog"
+
+    @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
+    def test_raw_cog_routes_to_correct_method(self, mock_tracker, raw_cog_config, tmp_path):
+        """_generate_product_async should call _generate_raw_cog_products_sync for raw_cog."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            daemon = ProductGenerationDaemon(raw_cog_config)
+
+        # Create a fake NetCDF file so the path-exists check passes
+        netcdf_file = tmp_path / "netcdf" / "fake.nc"
+        netcdf_file.parent.mkdir(parents=True, exist_ok=True)
+        netcdf_file.write_bytes(b"fake")
+
+        volume_info = {
+            "volume_id": "vol_001",
+            "netcdf_path": str(netcdf_file),
+            "is_complete": 1,
+            "strategy": "0315",
+            "vol_nr": "01",
+        }
+
+        # Patch the state tracker methods and the generation method itself
+        daemon.state_tracker.register_product_generation = MagicMock()
+        daemon.state_tracker.mark_product_status = MagicMock()
+
+        with _patch.object(daemon, "_generate_raw_cog_products_sync") as mock_raw_cog:
+            with _patch.object(daemon, "_generate_cog_products_sync") as mock_legacy_cog:
+                with _patch.object(daemon, "_generate_products_sync") as mock_image:
+                    result = asyncio.run(daemon._generate_product_async(volume_info))
+
+        mock_raw_cog.assert_called_once()
+        mock_legacy_cog.assert_not_called()
+        mock_image.assert_not_called()
+        assert result is True
+
+    @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
+    def test_geotiff_still_routes_to_legacy_method(self, mock_tracker, tmp_path):
+        """product_type='geotiff' must still use _generate_cog_products_sync (no regression)."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        config = ProductGenerationDaemonConfig(
+            local_netcdf_dir=tmp_path / "netcdf",
+            local_product_dir=tmp_path / "products",
+            state_db=tmp_path / "state.db",
+            volume_types={"0315": {"01": ["DBZH"]}},
+            radar_name="RMA1",
+            product_type="geotiff",
+        )
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            daemon = ProductGenerationDaemon(config)
+
+        netcdf_file = tmp_path / "netcdf" / "fake.nc"
+        netcdf_file.parent.mkdir(parents=True, exist_ok=True)
+        netcdf_file.write_bytes(b"fake")
+
+        volume_info = {
+            "volume_id": "vol_001",
+            "netcdf_path": str(netcdf_file),
+            "is_complete": 1,
+            "strategy": "0315",
+            "vol_nr": "01",
+        }
+
+        daemon.state_tracker.register_product_generation = MagicMock()
+        daemon.state_tracker.mark_product_status = MagicMock()
+
+        with _patch.object(daemon, "_generate_cog_products_sync") as mock_legacy_cog:
+            with _patch.object(daemon, "_generate_raw_cog_products_sync") as mock_raw_cog:
+                with _patch.object(daemon, "_generate_products_sync") as mock_image:
+                    result = asyncio.run(daemon._generate_product_async(volume_info))
+
+        mock_legacy_cog.assert_called_once()
+        mock_raw_cog.assert_not_called()
+        mock_image.assert_not_called()
+        assert result is True
+
+    @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
+    def test_image_still_routes_to_legacy_method(self, mock_tracker, tmp_path):
+        """product_type='image' must still use _generate_products_sync (no regression)."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        config = ProductGenerationDaemonConfig(
+            local_netcdf_dir=tmp_path / "netcdf",
+            local_product_dir=tmp_path / "products",
+            state_db=tmp_path / "state.db",
+            volume_types={"0315": {"01": ["DBZH"]}},
+            radar_name="RMA1",
+            product_type="image",
+        )
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            daemon = ProductGenerationDaemon(config)
+
+        netcdf_file = tmp_path / "netcdf" / "fake.nc"
+        netcdf_file.parent.mkdir(parents=True, exist_ok=True)
+        netcdf_file.write_bytes(b"fake")
+
+        volume_info = {
+            "volume_id": "vol_001",
+            "netcdf_path": str(netcdf_file),
+            "is_complete": 1,
+            "strategy": "0315",
+            "vol_nr": "01",
+        }
+
+        daemon.state_tracker.register_product_generation = MagicMock()
+        daemon.state_tracker.mark_product_status = MagicMock()
+
+        with _patch.object(daemon, "_generate_products_sync") as mock_image:
+            with _patch.object(daemon, "_generate_cog_products_sync") as mock_legacy_cog:
+                with _patch.object(daemon, "_generate_raw_cog_products_sync") as mock_raw_cog:
+                    result = asyncio.run(daemon._generate_product_async(volume_info))
+
+        mock_image.assert_called_once()
+        mock_legacy_cog.assert_not_called()
+        mock_raw_cog.assert_not_called()
+        assert result is True
+
+    @patch("radarlib.daemons.product_daemon.SQLiteStateTracker")
+    def test_generate_raw_cog_products_sync_method_exists(self, mock_tracker, raw_cog_config):
+        """ProductGenerationDaemon must expose _generate_raw_cog_products_sync."""
+        from unittest.mock import patch as _patch
+
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        with _patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+            daemon = ProductGenerationDaemon(raw_cog_config)
+
+        assert callable(getattr(daemon, "_generate_raw_cog_products_sync", None))
