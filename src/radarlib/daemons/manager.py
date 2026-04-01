@@ -38,7 +38,12 @@ class DaemonManagerConfig:
         enable_processing_daemon: Whether to start processing daemon
         enable_product_daemon: Whether to start product generation daemon
         enable_cleanup_daemon: Whether to start cleanup daemon
-        product_type: Type of product to generate ('image', 'geotiff', etc.)
+        product_type: Type of product to generate:
+                      - ``'image'``: PNG visualization (default)
+                      - ``'geotiff'``: Legacy multi-band RGBA Cloud-Optimized GeoTIFF
+                      - ``'raw_cog'``: Single-band float32 COG with embedded colormap metadata,
+                        enabling dynamic colormap changes via ``remap_cog_colormap`` or
+                        ``read_cog_tile_as_rgba``
         add_colmax: Whether to generate COLMAX field in product daemon
         bufr_retention_days: Days to keep BUFR files before cleanup (default: 7)
         netcdf_retention_days: Days to keep NetCDF files before cleanup (default: 7)

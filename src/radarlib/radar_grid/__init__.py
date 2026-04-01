@@ -5,7 +5,17 @@ radar_grid - Fast radar gridding with precomputed geometry
 from .compute import compute_grid_geometry
 from .filters import GateFilter, GridFilter, create_mask_from_filter
 from .geometry import GridGeometry, build_geometry_filename, load_geometry, peek_geometry_metadata, save_geometry
-from .geotiff import apply_colormap_to_array, create_cog, create_geotiff, save_product_as_geotiff
+from .geotiff import (
+    apply_colormap_to_array,
+    convert_rgba_cog_to_raw,
+    create_cog,
+    create_geotiff,
+    create_raw_cog,
+    read_cog_metadata,
+    read_cog_tile_as_rgba,
+    remap_cog_colormap,
+    save_product_as_geotiff,
+)
 from .interpolate import apply_geometry, apply_geometry_multi
 from .mpl_visualization import (
     FIELD_CONFIGS,
@@ -74,6 +84,13 @@ __all__ = [
     # GeoTIFF generation
     "create_geotiff",
     "create_cog",
+    "create_raw_cog",
     "save_product_as_geotiff",
     "apply_colormap_to_array",
+    # Colormap modification
+    "remap_cog_colormap",
+    "read_cog_metadata",
+    "read_cog_tile_as_rgba",
+    # Legacy conversion
+    "convert_rgba_cog_to_raw",
 ]

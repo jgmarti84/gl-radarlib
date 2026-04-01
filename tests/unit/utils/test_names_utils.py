@@ -187,3 +187,137 @@ class TestTimezones:
         """Test that Argentina timezone constant is defined."""
         assert hasattr(names_utils, "tz_arg")
         assert names_utils.tz_arg is not None
+
+
+class TestExtractCogFilenameComponents:
+    """Tests for extract_cog_filename_components() function.
+
+    COG filename format: RADAR_TIMESTAMP_FIELD[o]_SWEEP.tif
+    The 'o' suffix marks a NON-filtered product; its absence marks a filtered one.
+    """
+
+    # ------------------------------------------------------------------
+    # Happy-path: filtered products (no 'o' suffix)
+    # ------------------------------------------------------------------
+
+    def test_filtered_filename_basic(self):
+        """Filtered filename (no 'o') should yield filtered=True."""
+        result = names_utils.extract_cog_filename_components("RMA1_20260326T200000Z_VRAD_00.tif")
+
+        assert result["radar_name"] == "RMA1"
+        assert result["timestamp"] == "20260326T200000Z"
+        assert result["field_type"] == "VRAD"
+        assert result["sweep"] == "00"
+        assert result["filtered"] is True
+
+    def test_nonfiltered_filename_basic(self):
+        """Non-filtered filename (with 'o' suffix) should yield filtered=False."""
+        result = names_utils.extract_cog_filename_components("RMA1_20260326T200000Z_VRADo_00.tif")
+
+        assert result["radar_name"] == "RMA1"
+        assert result["timestamp"] == "20260326T200000Z"
+        # field_type should NOT include the trailing 'o'
+        assert result["field_type"] == "VRAD"
+        assert result["sweep"] == "00"
+        assert result["filtered"] is False
+
+    def test_filtered_dbzh(self):
+        """DBZH filtered product."""
+        result = names_utils.extract_cog_filename_components("RMA1_20260326T200000Z_DBZH_01.tif")
+
+        assert result["field_type"] == "DBZH"
+        assert result["filtered"] is True
+        assert result["sweep"] == "01"
+
+    def test_nonfiltered_dbzh(self):
+        """DBZHo non-filtered product."""
+        result = names_utils.extract_cog_filename_components("RMA1_20260326T200000Z_DBZHo_01.tif")
+
+        assert result["field_type"] == "DBZH"
+        assert result["filtered"] is False
+        assert result["sweep"] == "01"
+
+    def test_various_field_types(self):
+        """Should parse all common field types correctly."""
+        field_cases = ["DBZH", "DBZV", "VRAD", "WRAD", "ZDR", "RHOHV", "KDP", "PHIDP", "COLMAX"]
+        for field in field_cases:
+            filename = f"RMA1_20260326T200000Z_{field}_00.tif"
+            result = names_utils.extract_cog_filename_components(filename)
+            assert result["field_type"] == field, f"Failed for field '{field}'"
+            assert result["filtered"] is True
+
+    def test_various_nonfiltered_field_types(self):
+        """Should parse all common non-filtered field types (with 'o') correctly."""
+        field_cases = ["DBZH", "VRAD", "ZDR", "RHOHV"]
+        for field in field_cases:
+            filename = f"RMA1_20260326T200000Z_{field}o_00.tif"
+            result = names_utils.extract_cog_filename_components(filename)
+            assert result["field_type"] == field, f"Failed for field '{field}'"
+            assert result["filtered"] is False
+
+    def test_different_radar_names(self):
+        """Should extract different radar name prefixes."""
+        cases = [
+            ("RMA1_20260326T200000Z_DBZH_00.tif", "RMA1"),
+            ("RMA5_20260326T200000Z_DBZH_00.tif", "RMA5"),
+            ("RMA11_20260326T200000Z_DBZH_00.tif", "RMA11"),
+        ]
+        for filename, expected_radar in cases:
+            result = names_utils.extract_cog_filename_components(filename)
+            assert result["radar_name"] == expected_radar, f"Failed for {filename}"
+
+    def test_timestamp_extracted_correctly(self):
+        """Timestamp should be extracted verbatim."""
+        result = names_utils.extract_cog_filename_components("RMA1_20260326T123456Z_DBZH_00.tif")
+        assert result["timestamp"] == "20260326T123456Z"
+
+    def test_different_sweep_numbers(self):
+        """Sweep numbers 00-99 should be extracted as zero-padded strings."""
+        for sweep_int, sweep_str in [(0, "00"), (1, "01"), (9, "09"), (10, "10"), (99, "99")]:
+            filename = f"RMA1_20260326T200000Z_DBZH_{sweep_str}.tif"
+            result = names_utils.extract_cog_filename_components(filename)
+            assert result["sweep"] == sweep_str, f"Failed for sweep {sweep_str}"
+
+    # ------------------------------------------------------------------
+    # Edge cases: invalid / malformed filenames
+    # ------------------------------------------------------------------
+
+    def test_invalid_filename_returns_all_nones(self):
+        """Unrecognised filename should return a dict with all None values."""
+        result = names_utils.extract_cog_filename_components("not_a_valid_cog_filename.txt")
+
+        assert result["radar_name"] is None
+        assert result["timestamp"] is None
+        assert result["field_type"] is None
+        assert result["sweep"] is None
+        assert result["filtered"] is None
+
+    def test_empty_string_returns_all_nones(self):
+        """Empty string should return all None values."""
+        result = names_utils.extract_cog_filename_components("")
+
+        assert all(v is None for v in result.values())
+
+    def test_missing_extension_returns_nones(self):
+        """Filename without .tif extension should not match."""
+        result = names_utils.extract_cog_filename_components("RMA1_20260326T200000Z_DBZH_00")
+
+        assert result["radar_name"] is None
+
+    def test_wrong_extension_returns_nones(self):
+        """Filename with .nc extension should not match COG pattern."""
+        result = names_utils.extract_cog_filename_components("RMA1_20260326T200000Z_DBZH_00.nc")
+
+        assert result["radar_name"] is None
+
+    def test_returns_dict_with_expected_keys(self):
+        """Return value should always be a dict with the 5 expected keys."""
+        for filename in [
+            "RMA1_20260326T200000Z_DBZH_00.tif",
+            "bad_filename.txt",
+            "",
+        ]:
+            result = names_utils.extract_cog_filename_components(filename)
+            assert isinstance(result, dict)
+            assert set(result.keys()) == {"radar_name", "timestamp", "field_type", "sweep", "filtered"}
+
