@@ -57,7 +57,7 @@ def example_basic_daemon_manager():
         enable_download_daemon=True,
         enable_processing_daemon=True,
         enable_product_daemon=True,
-        product_type="geotiff",
+        product_type="raw_cog",
         add_colmax=True,
         enable_cleanup_daemon=True,
         netcdf_retention_days=2 / 24,
