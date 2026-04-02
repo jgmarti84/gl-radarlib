@@ -39,6 +39,9 @@ corresponding section in `docs/radarlib_EN.md`:
 > ⚠️ This is the most critical section for webmet25 compatibility.
 > For full details always read the Output Contract section in
 > `docs/radarlib_EN.md` before touching any output-related code.
+> ⚠️ This contract is duplicated in webmet25's
+> `copilot-instructions.md`. If you change this,
+> update that file too.
 
 ### Primary Output Format
 - **GeoTIFF (COG):** This is the primary and current output format.
