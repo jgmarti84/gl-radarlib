@@ -332,6 +332,15 @@ class ProductGenerationDaemon:
         )
 
         try:
+            from radarlib.utils.memory_profiling import aggressive_cleanup, log_memory_usage
+
+            _memory_monitoring = True
+        except ImportError:
+            _memory_monitoring = False
+
+        _cycle_count = 0
+
+        try:
             while self._running:
                 try:
                     # Check for and reset stuck volumes
@@ -339,6 +348,13 @@ class ProductGenerationDaemon:
 
                     # Process volumes ready for product generation
                     await self._process_volumes_for_products()
+
+                    _cycle_count += 1
+
+                    # Every 5 cycles: log memory and run aggressive GC
+                    if _memory_monitoring and _cycle_count % 5 == 0:
+                        log_memory_usage(f"Product daemon cycle {_cycle_count}")
+                        aggressive_cleanup(f"Product daemon cycle {_cycle_count}")
 
                     # Wait before next check
                     await asyncio.sleep(self.config.poll_interval)
@@ -512,12 +528,14 @@ class ProductGenerationDaemon:
         Generates COG files using radar_processor library for all fields in the radar volume.
         Similar flow to PNG generation but outputs GeoTIFF files instead.
         """
+        from radarlib.utils.memory_profiling import log_memory_usage
 
         filename = str(netcdf_path)
         vol_types = self.config.volume_types
 
         try:
             # --- Load volume -----------------------------------------------------------------
+            log_memory_usage("Before loading radar")
             try:
                 radar = read_radar_netcdf(filename)
                 logger.debug(f"Volume {filename} loaded successfully for COG generation.")
@@ -534,6 +552,8 @@ class ProductGenerationDaemon:
                 error_msg = f"Standardizing fields: {e}"
                 logger.error(f"Error standardizing fields {filename}: {e}")
                 raise RuntimeError(error_msg)
+
+            log_memory_usage("After loading and standardizing radar")
 
             # --- Determine reflectivity fields (horizontal and vertical) ---
             fields = determine_reflectivity_fields(radar)
@@ -591,20 +611,13 @@ class ProductGenerationDaemon:
                         vmin = config.__dict__.get(vmin_key, None)
                         vmax = config.__dict__.get(vmax_key, None)
                         cmap = config.__dict__.get(cmap_key, None)
-
-                        # gf = GateFilter(radar)
-                        # gf.exclude_below_elevation_angle(config.COLMAX_ELEV_LIMIT1)
-                        # if config.COLMAX_RHOHV_FILTER:
-                        #     gf.exclude_below(rhv_field, config.COLMAX_RHOHV_UMBRAL)
-                        # if config.COLMAX_WRAD_FILTER:
-                        #     gf.exclude_above(wrad_field, config.COLMAX_WRAD_UMBRAL)
-                        # if config.COLMAX_TDR_FILTER:
-                        #     gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
+                        log_memory_usage("Before unfiltered COLMAX generation")
                         colmax_data_unfiltered = apply_geometry(
                             self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
                             colmax_data,
                             # additional_filters=[],
                         )
+                        log_memory_usage("After apply_geometry for unfiltered COLMAX")
                         colmax = column_max(
                             colmax_data_unfiltered,
                             geometry=self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
@@ -626,7 +639,7 @@ class ProductGenerationDaemon:
                             overview_factors=[2, 4, 8, 16],
                             resampling_method="average",  # Better for intensity data
                         )
-
+                        log_memory_usage("After save_product_as_geotiff for unfiltered COLMAX generation")
                         if output_file.exists():
                             # Generate the proper filename using radarlib naming convention
                             output_dict = product_path_and_filename(
@@ -658,6 +671,7 @@ class ProductGenerationDaemon:
                     except Exception as e:
                         error_msg = f"Generating COLMAX: {e}"
                         logger.error(f"Error generating COLMAX for {filename_stem}: {e}")
+                    log_memory_usage("After saving geotiff for unfiltered COLMAX")
 
                 if "COLMAX" in config.FILTERED_FIELDS_TO_PLOT:
                     # filtered COLMAX
@@ -683,11 +697,13 @@ class ProductGenerationDaemon:
                         if config.COLMAX_TDR_FILTER:
                             gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
 
+                        log_memory_usage("Before filtered COLMAX generation")
                         colmax_data_filtered = apply_geometry(
                             self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
                             colmax_data,
                             additional_filters=[gf],
                         )
+                        log_memory_usage("After apply_geometry for filtered COLMAX")
                         colmax = column_max(
                             colmax_data_filtered, geometry=self.geometry[volume_info["strategy"]][volume_info["vol_nr"]]
                         )
@@ -710,6 +726,7 @@ class ProductGenerationDaemon:
                             overview_factors=[2, 4, 8, 16],
                             resampling_method="average",  # Better for intensity data
                         )
+                        log_memory_usage("After save_product_as_geotiff for COLMAX")
 
                         if output_file.exists():
                             # Generate the proper filename using radarlib naming convention
@@ -743,6 +760,7 @@ class ProductGenerationDaemon:
                         error_msg = f"Generating COLMAX: {e}"
                         logger.error(f"Error generating COLMAX for {filename_stem}: {e}")
                         # Continue with plotting even if COLMAX fails
+                    log_memory_usage("After saving geotiff for filtered COLMAX")
 
             # --- Prepare field lists ----------------------------------------------------
             cog_generated = False
@@ -785,6 +803,7 @@ class ProductGenerationDaemon:
                     grid_data = apply_geometry(
                         self.geometry[volume_info["strategy"]][volume_info["vol_nr"]], field_data
                     )
+                    log_memory_usage(f"After apply_geometry for unfiltered {plot_field}")
 
                     # Generate PPI
                     elevation_angle = radar.get_elevation(sweep)
@@ -812,6 +831,7 @@ class ProductGenerationDaemon:
                         overview_factors=[2, 4, 8, 16],
                         resampling_method="average",  # Better for intensity data
                     )
+                    log_memory_usage(f"After save_product_as_geotiff for unfiltered {plot_field}")
 
                     if output_file.exists():
                         # Generate the proper filename using radarlib naming convention
@@ -844,6 +864,7 @@ class ProductGenerationDaemon:
                 except Exception as e:
                     logger.error(f"Error generating unfiltered COG for {plot_field}: {e}")
                     continue
+                log_memory_usage(f"After saved geotiff for unfiltered {plot_field}")
 
             # --- COG Generation block (filtered) ----------------------------------------------
             logger.info(f"Generating filtered COG products for {filename_stem}")
@@ -903,6 +924,7 @@ class ProductGenerationDaemon:
                         field_data,
                         additional_filters=[gf],
                     )
+                    log_memory_usage(f"After apply_geometry for filtered {plot_field}")
 
                     # Generate PPI
                     elevation_angle = radar.get_elevation(sweep)
@@ -930,6 +952,7 @@ class ProductGenerationDaemon:
                         overview_factors=[2, 4, 8, 16],
                         resampling_method="average",  # Better for intensity data
                     )
+                    log_memory_usage(f"After save_product_as_geotiff for filtered {plot_field}")
 
                     if output_file.exists():
                         # Generate the proper filename using radarlib naming convention
@@ -961,6 +984,7 @@ class ProductGenerationDaemon:
                 except Exception as e:
                     logger.error(f"Error generating filtered COG for {plot_field}: {e}")
                     continue
+                log_memory_usage(f"After saved geotiff for filtered {plot_field}")
 
             if not cog_generated:
                 raise RuntimeError("No COG products were successfully generated")
@@ -974,6 +998,7 @@ class ProductGenerationDaemon:
                     del radar
             except Exception:
                 logger.debug("Failed to delete radar object during cleanup", exc_info=False)
+            gc.collect()
 
     def _generate_raw_cog_products_sync(self, netcdf_path: Path, volume_info: Dict) -> None:
         """
@@ -995,6 +1020,8 @@ class ProductGenerationDaemon:
             netcdf_path: Path to the NetCDF volume file to process
             volume_info: Dictionary with volume metadata from the state database
         """
+        import gc
+
         from radarlib.radar_grid import (
             GateFilter,
             GridFilter,
@@ -1004,12 +1031,14 @@ class ProductGenerationDaemon:
             create_raw_cog,
             get_field_data,
         )
+        from radarlib.utils.memory_profiling import log_memory_usage
 
         filename = str(netcdf_path)
         vol_types = self.config.volume_types
 
         try:
             # --- Load volume -----------------------------------------------------------------
+            log_memory_usage("Before loading radar")
             try:
                 radar = read_radar_netcdf(filename)
                 logger.debug(f"Volume {filename} loaded successfully for raw COG generation.")
@@ -1026,6 +1055,8 @@ class ProductGenerationDaemon:
                 error_msg = f"Standardizing fields: {e}"
                 logger.error(f"Error standardizing fields {filename}: {e}")
                 raise RuntimeError(error_msg)
+
+            log_memory_usage("After loading and standardizing radar")
 
             # --- Determine reflectivity fields (horizontal and vertical) ---
             fields = determine_reflectivity_fields(radar)
@@ -1066,7 +1097,6 @@ class ProductGenerationDaemon:
                     try:
                         colmax_data = get_field_data(radar, hrefl_field)
 
-                        temp_dir = tempfile.mkdtemp()
                         vmin_key = "VMIN_REFL_NOFILTERS"
                         vmax_key = "VMAX_REFL_NOFILTERS"
                         cmap_key = "CMAP_REFL_NOFILTERS"
@@ -1082,57 +1112,72 @@ class ProductGenerationDaemon:
                             gf.exclude_above(wrad_field, config.COLMAX_WRAD_UMBRAL)
                         if config.COLMAX_TDR_FILTER:
                             gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
+                        log_memory_usage("Before unfiltered COLMAX generation")
                         colmax_data_filtered = apply_geometry(
                             self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
                             colmax_data,
                             additional_filters=[gf],
                         )
+                        log_memory_usage("After apply_geometry for unfiltered COLMAX")
                         colmax = column_max(
                             colmax_data_filtered,
                             geometry=self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
                         )
 
-                        output_file = Path(temp_dir) / "ppi.cog"
-                        create_raw_cog(
-                            colmax,
-                            self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
-                            float(radar.latitude["data"].data[0]),
-                            float(radar.longitude["data"].data[0]),
-                            output_file,
-                            cmap=cmap,
-                            vmin=vmin,
-                            vmax=vmax,
-                            overview_factors=[2, 4, 8, 16],
-                            resampling_method="average",
-                        )
-
-                        if output_file.exists():
-                            output_dict = product_path_and_filename(
-                                radar, colmax_field, sweep, round_filename=True, filtered=False, extension="tif"
+                        with tempfile.TemporaryDirectory() as temp_dir:
+                            output_file = Path(temp_dir) / "ppi.cog"
+                            create_raw_cog(
+                                colmax,
+                                self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                                float(radar.latitude["data"].data[0]),
+                                float(radar.longitude["data"].data[0]),
+                                output_file,
+                                cmap=cmap,
+                                vmin=vmin,
+                                vmax=vmax,
+                                overview_factors=[2, 4, 8, 16],
+                                resampling_method="average",
                             )
+                            log_memory_usage("After create_raw_cog for unfiltered COLMAX")
+                            if output_file.exists():
+                                output_dict = product_path_and_filename(
+                                    radar, colmax_field, sweep, round_filename=True, filtered=False, extension="tif"
+                                )
 
-                            target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
-                            target_subdir.mkdir(parents=True, exist_ok=True)
-                            target_path = target_subdir / output_dict["ceiled"][1]
+                                target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
+                                target_subdir.mkdir(parents=True, exist_ok=True)
+                                target_path = target_subdir / output_dict["ceiled"][1]
 
-                            shutil.move(str(output_file), str(target_path))
-                            logger.info(
-                                f"Generated unfiltered raw COG: {colmax_field} sweep {sweep} -> {target_path.name}"
-                            )
+                                shutil.move(str(output_file), str(target_path))
+                                logger.info(
+                                    f"Generated unfiltered raw COG: {colmax_field} sweep {sweep} -> {target_path.name}"
+                                )
 
-                            rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
-                            rounded_subdir.mkdir(parents=True, exist_ok=True)
-                            rounded_path = rounded_subdir / output_dict["rounded"][1]
+                                rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
+                                rounded_subdir.mkdir(parents=True, exist_ok=True)
+                                rounded_path = rounded_subdir / output_dict["rounded"][1]
 
-                            if target_path != rounded_path:
-                                shutil.copy2(target_path, rounded_path)
-                                logger.debug(f"Created rounded version: {rounded_path.name}")
+                                if target_path != rounded_path:
+                                    shutil.copy2(target_path, rounded_path)
+                                    logger.debug(f"Created rounded version: {rounded_path.name}")
 
-                        shutil.rmtree(temp_dir, ignore_errors=True)
                         logger.debug(f"Unfiltered raw COLMAX generated successfully for {filename_stem}.")
+
+                        # Explicit cleanup of large arrays
+                        del colmax_data, colmax_data_filtered, colmax, gf
+                        gc.collect()
 
                     except Exception as e:
                         logger.error(f"Error generating unfiltered raw COLMAX for {filename_stem}: {e}")
+                    finally:
+                        # Ensure cleanup even if exception occurred
+                        if "colmax_data" in locals():
+                            del colmax_data
+                        if "colmax_data_filtered" in locals():
+                            del colmax_data_filtered
+                        if "colmax" in locals():
+                            del colmax
+                    log_memory_usage("After saving geotiff for unfiltered COLMAX")
 
                 # Filtered COLMAX
                 if "COLMAX" in config.FILTERED_FIELDS_TO_PLOT:
@@ -1140,7 +1185,6 @@ class ProductGenerationDaemon:
                     try:
                         colmax_data = get_field_data(radar, hrefl_field)
 
-                        temp_dir = tempfile.mkdtemp()
                         vmin_key = "VMIN_REFL"
                         vmax_key = "VMAX_REFL"
                         cmap_key = "CMAP_REFL"
@@ -1157,11 +1201,13 @@ class ProductGenerationDaemon:
                         if config.COLMAX_TDR_FILTER:
                             gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
 
+                        log_memory_usage("Before filtered COLMAX generation")
                         colmax_data_filtered = apply_geometry(
                             self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
                             colmax_data,
                             additional_filters=[gf],
                         )
+                        log_memory_usage("After apply_geometry for filtered COLMAX")
                         colmax = column_max(
                             colmax_data_filtered,
                             geometry=self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
@@ -1169,47 +1215,61 @@ class ProductGenerationDaemon:
                         gridf = GridFilter()
                         colmax = gridf.apply_below(colmax, config.COLMAX_THRESHOLD)
 
-                        output_file = Path(temp_dir) / "ppi.cog"
-                        create_raw_cog(
-                            colmax,
-                            self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
-                            float(radar.latitude["data"].data[0]),
-                            float(radar.longitude["data"].data[0]),
-                            output_file,
-                            cmap=cmap,
-                            vmin=vmin,
-                            vmax=vmax,
-                            overview_factors=[2, 4, 8, 16],
-                            resampling_method="average",
-                        )
-
-                        if output_file.exists():
-                            output_dict = product_path_and_filename(
-                                radar, colmax_field, sweep, round_filename=True, filtered=True, extension="tif"
+                        with tempfile.TemporaryDirectory() as temp_dir:
+                            output_file = Path(temp_dir) / "ppi.cog"
+                            create_raw_cog(
+                                colmax,
+                                self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                                float(radar.latitude["data"].data[0]),
+                                float(radar.longitude["data"].data[0]),
+                                output_file,
+                                cmap=cmap,
+                                vmin=vmin,
+                                vmax=vmax,
+                                overview_factors=[2, 4, 8, 16],
+                                resampling_method="average",
                             )
+                            log_memory_usage("After create_raw_cog for filtered COLMAX")
 
-                            target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
-                            target_subdir.mkdir(parents=True, exist_ok=True)
-                            target_path = target_subdir / output_dict["ceiled"][1]
+                            if output_file.exists():
+                                output_dict = product_path_and_filename(
+                                    radar, colmax_field, sweep, round_filename=True, filtered=True, extension="tif"
+                                )
 
-                            shutil.move(str(output_file), str(target_path))
-                            logger.info(
-                                f"Generated filtered raw COG: {colmax_field} sweep {sweep} -> {target_path.name}"
-                            )
+                                target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
+                                target_subdir.mkdir(parents=True, exist_ok=True)
+                                target_path = target_subdir / output_dict["ceiled"][1]
 
-                            rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
-                            rounded_subdir.mkdir(parents=True, exist_ok=True)
-                            rounded_path = rounded_subdir / output_dict["rounded"][1]
+                                shutil.move(str(output_file), str(target_path))
+                                logger.info(
+                                    f"Generated filtered raw COG: {colmax_field} sweep {sweep} -> {target_path.name}"
+                                )
 
-                            if target_path != rounded_path:
-                                shutil.copy2(target_path, rounded_path)
-                                logger.debug(f"Created rounded version: {rounded_path.name}")
+                                rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
+                                rounded_subdir.mkdir(parents=True, exist_ok=True)
+                                rounded_path = rounded_subdir / output_dict["rounded"][1]
 
-                        shutil.rmtree(temp_dir, ignore_errors=True)
+                                if target_path != rounded_path:
+                                    shutil.copy2(target_path, rounded_path)
+                                    logger.debug(f"Created rounded version: {rounded_path.name}")
+
                         logger.debug(f"Filtered raw COLMAX generated successfully for {filename_stem}.")
+
+                        # Explicit cleanup of large arrays
+                        del colmax_data, colmax_data_filtered, colmax, gf, gridf
+                        gc.collect()
 
                     except Exception as e:
                         logger.error(f"Error generating filtered raw COLMAX for {filename_stem}: {e}")
+                    finally:
+                        # Ensure cleanup even if exception occurred
+                        if "colmax_data" in locals():
+                            del colmax_data
+                        if "colmax_data_filtered" in locals():
+                            del colmax_data_filtered
+                        if "colmax" in locals():
+                            del colmax
+                    log_memory_usage("After saving geotiff for filtered COLMAX")
 
             # --- Prepare field lists ----------------------------------------------------
             raw_cog_generated = False
@@ -1245,12 +1305,11 @@ class ProductGenerationDaemon:
                     vmax = config.__dict__.get(vmax_key, None)
                     cmap = config.__dict__.get(cmap_key, None)
 
-                    temp_dir = tempfile.mkdtemp()
-
                     field_data = get_field_data(radar, plot_field)
                     grid_data = apply_geometry(
                         self.geometry[volume_info["strategy"]][volume_info["vol_nr"]], field_data
                     )
+                    log_memory_usage(f"After apply_geometry for unfiltered {plot_field}")
 
                     elevation_angle = radar.get_elevation(sweep)
                     elevation_angle = float(np.unique(elevation_angle)[0])
@@ -1261,48 +1320,64 @@ class ProductGenerationDaemon:
                         interpolation="linear",
                     )
 
-                    output_file = Path(temp_dir) / "ppi.cog"
-                    create_raw_cog(
-                        ppi,
-                        self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
-                        float(radar.latitude["data"].data[0]),
-                        float(radar.longitude["data"].data[0]),
-                        output_file,
-                        cmap=cmap,
-                        vmin=vmin,
-                        vmax=vmax,
-                        overview_factors=[2, 4, 8, 16],
-                        resampling_method="average",
-                    )
-
-                    if output_file.exists():
-                        output_dict = product_path_and_filename(
-                            radar, plot_field, sweep, round_filename=True, filtered=False, extension="tif"
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        output_file = Path(temp_dir) / "ppi.cog"
+                        create_raw_cog(
+                            ppi,
+                            self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                            float(radar.latitude["data"].data[0]),
+                            float(radar.longitude["data"].data[0]),
+                            output_file,
+                            cmap=cmap,
+                            vmin=vmin,
+                            vmax=vmax,
+                            overview_factors=[2, 4, 8, 16],
+                            resampling_method="average",
                         )
+                        log_memory_usage(f"After create_raw_cog for unfiltered {plot_field}")
 
-                        target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
-                        target_subdir.mkdir(parents=True, exist_ok=True)
-                        target_path = target_subdir / output_dict["ceiled"][1]
+                        if output_file.exists():
+                            output_dict = product_path_and_filename(
+                                radar, plot_field, sweep, round_filename=True, filtered=False, extension="tif"
+                            )
 
-                        shutil.move(str(output_file), str(target_path))
-                        logger.info(f"Generated unfiltered raw COG: {plot_field} sweep {sweep} -> {target_path.name}")
+                            target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
+                            target_subdir.mkdir(parents=True, exist_ok=True)
+                            target_path = target_subdir / output_dict["ceiled"][1]
 
-                        rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
-                        rounded_subdir.mkdir(parents=True, exist_ok=True)
-                        rounded_path = rounded_subdir / output_dict["rounded"][1]
+                            shutil.move(str(output_file), str(target_path))
+                            logger.info(
+                                f"Generated unfiltered raw COG: {plot_field} sweep {sweep} -> {target_path.name}"
+                            )
 
-                        if target_path != rounded_path:
-                            shutil.copy2(target_path, rounded_path)
-                            logger.debug(f"Created rounded version: {rounded_path.name}")
+                            rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
+                            rounded_subdir.mkdir(parents=True, exist_ok=True)
+                            rounded_path = rounded_subdir / output_dict["rounded"][1]
 
-                        raw_cog_generated = True
+                            if target_path != rounded_path:
+                                shutil.copy2(target_path, rounded_path)
+                                logger.debug(f"Created rounded version: {rounded_path.name}")
 
-                    shutil.rmtree(temp_dir, ignore_errors=True)
+                            raw_cog_generated = True
+
                     logger.debug(f"Generated unfiltered raw COG for {plot_field} successfully.")
+
+                    # Explicit cleanup of large arrays
+                    del field_data, grid_data, ppi
+                    gc.collect()
 
                 except Exception as e:
                     logger.error(f"Error generating unfiltered raw COG for {plot_field}: {e}")
-                    continue
+                finally:
+                    # Ensure cleanup even if exception occurred
+                    if "field_data" in locals():
+                        del field_data
+                    if "grid_data" in locals():
+                        del grid_data
+                    if "ppi" in locals():
+                        del ppi
+
+                log_memory_usage(f"After saved geotiff for unfiltered {plot_field}")
 
             # --- Raw COG generation block (filtered) ------------------------------------
             logger.info(f"Generating filtered raw COG products for {filename_stem}")
@@ -1349,14 +1424,13 @@ class ProductGenerationDaemon:
                     vmax = config.__dict__.get(vmax_key, None)
                     cmap = config.__dict__.get(cmap_key, None)
 
-                    temp_dir = tempfile.mkdtemp()
-
                     field_data = get_field_data(radar, plot_field)
                     grid_data = apply_geometry(
                         self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
                         field_data,
                         additional_filters=[gf],
                     )
+                    log_memory_usage(f"After apply_geometry for filtered {plot_field}")
 
                     elevation_angle = radar.get_elevation(sweep)
                     elevation_angle = float(np.unique(elevation_angle)[0])
@@ -1367,48 +1441,64 @@ class ProductGenerationDaemon:
                         interpolation="linear",
                     )
 
-                    output_file = Path(temp_dir) / "ppi.cog"
-                    create_raw_cog(
-                        ppi,
-                        self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
-                        float(radar.latitude["data"].data[0]),
-                        float(radar.longitude["data"].data[0]),
-                        output_file,
-                        cmap=cmap,
-                        vmin=vmin,
-                        vmax=vmax,
-                        overview_factors=[2, 4, 8, 16],
-                        resampling_method="average",
-                    )
-
-                    if output_file.exists():
-                        output_dict = product_path_and_filename(
-                            radar, plot_field, sweep, round_filename=True, filtered=True, extension="tif"
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        output_file = Path(temp_dir) / "ppi.cog"
+                        create_raw_cog(
+                            ppi,
+                            self.geometry[volume_info["strategy"]][volume_info["vol_nr"]],
+                            float(radar.latitude["data"].data[0]),
+                            float(radar.longitude["data"].data[0]),
+                            output_file,
+                            cmap=cmap,
+                            vmin=vmin,
+                            vmax=vmax,
+                            overview_factors=[2, 4, 8, 16],
+                            resampling_method="average",
                         )
+                        log_memory_usage(f"After create_raw_cog for filtered {plot_field}")
 
-                        target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
-                        target_subdir.mkdir(parents=True, exist_ok=True)
-                        target_path = target_subdir / output_dict["ceiled"][1]
+                        if output_file.exists():
+                            output_dict = product_path_and_filename(
+                                radar, plot_field, sweep, round_filename=True, filtered=True, extension="tif"
+                            )
 
-                        shutil.move(str(output_file), str(target_path))
-                        logger.info(f"Generated filtered raw COG: {plot_field} sweep {sweep} -> {target_path.name}")
+                            target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
+                            target_subdir.mkdir(parents=True, exist_ok=True)
+                            target_path = target_subdir / output_dict["ceiled"][1]
 
-                        rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
-                        rounded_subdir.mkdir(parents=True, exist_ok=True)
-                        rounded_path = rounded_subdir / output_dict["rounded"][1]
+                            shutil.move(str(output_file), str(target_path))
+                            logger.info(f"Generated filtered raw COG: {plot_field} sweep {sweep} -> {target_path.name}")
 
-                        if target_path != rounded_path:
-                            shutil.copy2(target_path, rounded_path)
-                            logger.debug(f"Created rounded version: {rounded_path.name}")
+                            rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
+                            rounded_subdir.mkdir(parents=True, exist_ok=True)
+                            rounded_path = rounded_subdir / output_dict["rounded"][1]
 
-                        raw_cog_generated = True
+                            if target_path != rounded_path:
+                                shutil.copy2(target_path, rounded_path)
+                                logger.debug(f"Created rounded version: {rounded_path.name}")
 
-                    shutil.rmtree(temp_dir, ignore_errors=True)
+                            raw_cog_generated = True
+
                     logger.debug(f"Generated filtered raw COG for {plot_field} successfully.")
+
+                    # Explicit cleanup of large arrays
+                    del field_data, grid_data, ppi
+                    if "gf" in locals():
+                        del gf
+                    gc.collect()
 
                 except Exception as e:
                     logger.error(f"Error generating filtered raw COG for {plot_field}: {e}")
-                    continue
+                finally:
+                    # Ensure cleanup even if exception occurred
+                    if "field_data" in locals():
+                        del field_data
+                    if "grid_data" in locals():
+                        del grid_data
+                    if "ppi" in locals():
+                        del ppi
+
+                log_memory_usage(f"After saved geotiff for filtered {plot_field}")
 
             if not raw_cog_generated:
                 raise RuntimeError("No raw COG products were successfully generated")
@@ -1422,6 +1512,7 @@ class ProductGenerationDaemon:
                     del radar
             except Exception:
                 logger.debug("Failed to delete radar object during cleanup", exc_info=False)
+            gc.collect()
 
     def _generate_products_sync(self, netcdf_path: Path, volume_info: Dict) -> None:
         """
