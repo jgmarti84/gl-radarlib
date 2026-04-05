@@ -273,7 +273,7 @@ class TestExtractCogFilenameComponents:
 
     def test_different_sweep_numbers(self):
         """Sweep numbers 00-99 should be extracted as zero-padded strings."""
-        for sweep_int, sweep_str in [(0, "00"), (1, "01"), (9, "09"), (10, "10"), (99, "99")]:
+        for _, sweep_str in [(0, "00"), (1, "01"), (9, "09"), (10, "10"), (99, "99")]:
             filename = f"RMA1_20260326T200000Z_DBZH_{sweep_str}.tif"
             result = names_utils.extract_cog_filename_components(filename)
             assert result["sweep"] == sweep_str, f"Failed for sweep {sweep_str}"
@@ -320,4 +320,3 @@ class TestExtractCogFilenameComponents:
             result = names_utils.extract_cog_filename_components(filename)
             assert isinstance(result, dict)
             assert set(result.keys()) == {"radar_name", "timestamp", "field_type", "sweep", "filtered"}
-

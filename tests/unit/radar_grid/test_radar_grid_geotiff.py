@@ -12,13 +12,11 @@ Tests cover:
 - helper functions (_resolve_vmin_vmax, _get_cmap_name, _compute_crs_bounds)
 """
 
-import tempfile
-from pathlib import Path
-
 import numpy as np
 import pytest
 import rasterio
 
+from radarlib.radar_grid.geometry import GridGeometry
 from radarlib.radar_grid.geotiff import (
     _DATA_TYPE_RAW,
     _DATA_TYPE_RGBA,
@@ -31,7 +29,6 @@ from radarlib.radar_grid.geotiff import (
     _resolve_vmin_vmax,
     _string_to_resampling,
     apply_colormap_to_array,
-    convert_rgba_cog_to_raw,
     create_cog,
     create_geotiff,
     create_raw_cog,
@@ -39,8 +36,6 @@ from radarlib.radar_grid.geotiff import (
     read_cog_tile_as_rgba,
     remap_cog_colormap,
 )
-from radarlib.radar_grid.geometry import GridGeometry
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -356,9 +351,7 @@ class TestReadCogMetadata:
     def test_missing_tags_return_none(self, tmp_path):
         # Create a minimal rasterio file without radarlib tags
         out = tmp_path / "plain.tif"
-        with rasterio.open(
-            out, "w", driver="GTiff", height=4, width=4, count=1, dtype=np.float32
-        ) as dst:
+        with rasterio.open(out, "w", driver="GTiff", height=4, width=4, count=1, dtype=np.float32) as dst:
             dst.write(np.zeros((1, 4, 4), dtype=np.float32))
         meta = read_cog_metadata(out)
         assert meta["cmap"] is None

@@ -249,7 +249,8 @@ class TestProductGenerationDaemonRawCog:
     def test_raw_cog_routes_to_correct_method(self, mock_tracker, raw_cog_config, tmp_path):
         """_generate_product_async should call _generate_raw_cog_products_sync for raw_cog."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch as _patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
 
         from radarlib.daemons.product_daemon import ProductGenerationDaemon
 
@@ -287,7 +288,8 @@ class TestProductGenerationDaemonRawCog:
     def test_geotiff_still_routes_to_legacy_method(self, mock_tracker, tmp_path):
         """product_type='geotiff' must still use _generate_cog_products_sync (no regression)."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch as _patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
 
         from radarlib.daemons.product_daemon import ProductGenerationDaemon
 
@@ -332,7 +334,8 @@ class TestProductGenerationDaemonRawCog:
     def test_image_still_routes_to_legacy_method(self, mock_tracker, tmp_path):
         """product_type='image' must still use _generate_products_sync (no regression)."""
         import asyncio
-        from unittest.mock import MagicMock, patch as _patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
 
         from radarlib.daemons.product_daemon import ProductGenerationDaemon
 
