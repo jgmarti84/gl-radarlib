@@ -66,6 +66,14 @@ def main():
     logger.info("Genpro25 Radar Data Processing Service Starting")
     logger.info("=" * 60)
 
+    # Log startup memory baseline
+    try:
+        from radarlib.utils.memory_profiling import log_memory_usage
+
+        log_memory_usage("Genpro25 service startup")
+    except ImportError:
+        pass
+
     # Define volume types
     volume_types = config.VOLUME_TYPES  # type: ignore
 
@@ -109,6 +117,14 @@ def main():
         logger.info("\n\nStopping daemons...")
         manager.stop()
         logger.info("All daemons stopped")
+
+    # Log final memory state
+    try:
+        from radarlib.utils.memory_profiling import log_memory_usage
+
+        log_memory_usage("Genpro25 service shutdown")
+    except ImportError:
+        pass
 
     # Show final status
     status = manager.get_status()

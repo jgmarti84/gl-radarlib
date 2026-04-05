@@ -123,10 +123,139 @@ ROOT_RADAR_PRODUCTS_PATH/
 
 ---
 
+## Memory Management Best Practices
+> ✅ radarlib implements comprehensive memory cleanup to prevent
+> leaks in long-running daemons. Always follow these patterns.
+
+### Rule 1: Explicit Cleanup of Large Numpy Arrays
+**Pattern:** Always delete large arrays after use in loops
+
+```python
+# ✅ CORRECT
+for field in fields:
+    field_data = get_field_data(radar, field)     # Large array
+    grid_data = apply_geometry(geometry, field_data)  # Large array
+    ppi = constant_elevation_ppi(grid_data)           # Large array
+
+    # Use the data...
+    save_product(ppi)
+
+    # Explicit cleanup
+    del field_data, grid_data, ppi
+    gc.collect()
+
+# ❌ WRONG - Arrays persist across loop iterations
+for field in fields:
+    field_data = get_field_data(radar, field)
+    grid_data = apply_geometry(geometry, field_data)
+    # No cleanup - memory accumulates!
+```
+
+### Rule 2: Use Context Managers for Temporary Directories
+**Pattern:** Use `TemporaryDirectory()` instead of `mkdtemp()`
+
+```python
+# ✅ CORRECT - Automatic cleanup
+import tempfile
+with tempfile.TemporaryDirectory() as temp_dir:
+    output_file = Path(temp_dir) / "output.tif"
+    create_cog(data, output_file)
+    shutil.move(output_file, target_path)
+# temp_dir automatically deleted here
+
+# ❌ WRONG - Manual cleanup required, often forgotten
+temp_dir = tempfile.mkdtemp()
+output_file = Path(temp_dir) / "output.tif"
+create_cog(data, output_file)
+shutil.move(output_file, target_path)
+shutil.rmtree(temp_dir)  # Easy to forget or miss on error!
+```
+
+### Rule 3: Trigger GC After Heavy Operations
+**Pattern:** Call `gc.collect()` after creating many intermediate objects
+
+```python
+# ✅ CORRECT
+import gc
+
+for field in radar.fields.keys():
+    # Processing that creates intermediate masked arrays
+    radar.fields[field]["data"] = ma.masked_invalid(radar.fields[field]["data"])
+    radar.fields[field]["data"] = ma.masked_outside(radar.fields[field]["data"], -100000, 100000)
+
+# Force GC to free intermediate copies
+gc.collect()
+```
+
+### Rule 4: Comprehensive Finally Blocks
+**Pattern:** Always cleanup in finally blocks, even for exceptions
+
+```python
+# ✅ CORRECT
+try:
+    radar = load_radar(filename)
+    grid_data = process(radar)
+    save_output(grid_data)
+finally:
+    # Cleanup even if exception occurs
+    if 'radar' in locals():
+        del radar
+    if 'grid_data' in locals():
+        del grid_data
+    gc.collect()
+
+# ❌ WRONG - No cleanup on exception
+try:
+    radar = load_radar(filename)
+    grid_data = process(radar)
+    save_output(grid_data)
+except Exception:
+    pass  # Memory leaked!
+```
+
+### Rule 5: Use Memory Monitoring in Long-Running Code
+**Pattern:** Use `log_memory_usage()` to track memory at key points
+
+```python
+from radarlib.utils.memory_profiling import log_memory_usage, check_and_cleanup_memory
+
+def process_volume(volume_path):
+    log_memory_usage("Before loading volume")
+
+    radar = load_volume(volume_path)
+    log_memory_usage("After loading volume")
+
+    # Process fields...
+    for field in fields:
+        grid_data = apply_geometry(radar, field)
+        log_memory_usage(f"After apply_geometry for {field}")
+        save_product(grid_data)
+        del grid_data
+
+    # Check memory and force GC if threshold exceeded
+    check_and_cleanup_memory(threshold_mb=1100.0, label="After field processing")
+
+    log_memory_usage("After volume processing")
+```
+
+### Memory Leak Investigation Checklist
+If you suspect a memory leak:
+
+1. ✅ Are large numpy arrays explicitly deleted in loops?
+2. ✅ Are temporary directories using context managers?
+3. ✅ Is `gc.collect()` called after heavy operations?
+4. ✅ Do finally blocks cleanup all large objects?
+5. ✅ Are intermediate copies in masking/filtering operations freed?
+6. ✅ Are PyART radar objects deleted after use?
+7. ✅ Is memory monitoring in place to track RSS growth?
+
+---
+
 ## Known Gaps & Risks (Quick Reference)
 > Do not replicate these patterns. Suggest fixes when touching
 > these areas. Full details in `docs/radarlib_EN.md`.
 
+- ✅ **Memory management:** FIXED - Comprehensive cleanup implemented
 - ❌ Limited error handling in daemons
 - ❌ No retry logic for failed processing steps
 - ❌ Incomplete test coverage for `radar_grid`

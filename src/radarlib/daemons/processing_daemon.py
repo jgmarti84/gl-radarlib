@@ -133,6 +133,15 @@ class ProcessingDaemon:
         )
 
         try:
+            from radarlib.utils.memory_profiling import aggressive_cleanup, log_memory_usage
+
+            _memory_monitoring = True
+        except ImportError:
+            _memory_monitoring = False
+
+        _cycle_count = 0
+
+        try:
             while self._running:
                 try:
                     # Check for and reset stuck volumes
@@ -146,6 +155,13 @@ class ProcessingDaemon:
 
                     # Process complete volumes
                     await self._process_complete_volumes()
+
+                    _cycle_count += 1
+
+                    # Every 5 cycles: log memory and run aggressive GC
+                    if _memory_monitoring and _cycle_count % 5 == 0:
+                        log_memory_usage(f"Processing daemon cycle {_cycle_count}")
+                        aggressive_cleanup(f"Processing daemon cycle {_cycle_count}")
 
                     # Wait before next check
                     await asyncio.sleep(self.config.poll_interval)
@@ -512,11 +528,15 @@ class ProcessingDaemon:
             Exception if decoding or saving fails
         """
         # Import here to avoid issues if pyart not available
+        import gc
+
         from radarlib.io.bufr.bufr import bufr_to_dict
         from radarlib.io.bufr.pyart_writer import bufr_fields_to_pyart_radar
+        from radarlib.utils.memory_profiling import log_memory_usage
         from radarlib.utils.names_utils import get_netcdf_filename_from_bufr_filename
 
         # Decode all BUFR files
+        log_memory_usage("Before BUFR decoding")
         logger.debug(f"Decoding {len(bufr_paths)} BUFR files...")
         decoded_fields = []
 
@@ -541,10 +561,14 @@ class ProcessingDaemon:
             raise ValueError(f"No BUFR files could be decoded for volume {volume_id}")
 
         logger.debug(f"Successfully decoded {len(decoded_fields)} fields")
+        log_memory_usage("After all BUFR files decoded")
 
-        # Create PyART Radar object
+        # Free decoded BUFR dicts before building the large PyART Radar object
         logger.debug("Creating PyART Radar object...")
         radar = bufr_fields_to_pyart_radar(decoded_fields)
+        del decoded_fields
+        gc.collect()
+        log_memory_usage("After PyART Radar object creation (decoded_fields freed)")
 
         if radar is None:
             raise ValueError(f"Failed to create Radar object for volume {volume_id}")
@@ -559,6 +583,11 @@ class ProcessingDaemon:
         import pyart
 
         pyart.io.write_cfradial(str(netcdf_path), radar)
+
+        # Explicit cleanup of PyART Radar object (100-200 MB)
+        del radar
+        gc.collect()
+        log_memory_usage("After NetCDF write and radar cleanup")
 
         logger.info(f"Successfully saved NetCDF file: {netcdf_path}")
         return netcdf_path
