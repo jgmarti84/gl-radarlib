@@ -4,10 +4,12 @@
 # Script para generar documentación PDF de radarlib
 #
 # Uso:
-#   ./generate_pdf.sh          # genera ambas versiones (EN + ES)
-#   ./generate_pdf.sh en       # genera solo la versión en inglés
-#   ./generate_pdf.sh es       # genera solo la versión en español (secciones separadas)
-#   ./generate_pdf.sh es-single # genera solo la versión en español (README.es.md)
+#   ./generate_pdf.sh              # genera ambas versiones (EN + ES) - MÁSTER
+#   ./generate_pdf.sh EN           # genera solo versión en inglés - MÁSTER
+#   ./generate_pdf.sh ES           # genera solo versión en español - MÁSTER
+#   ./generate_pdf.sh en           # genera versión en inglés (legacy - README.md)
+#   ./generate_pdf.sh es           # genera versión en español (legacy - secciones separadas)
+#   ./generate_pdf.sh es-single    # genera versión en español (legacy - README.es.md)
 #
 # Requisitos:
 #   - pandoc (apt install pandoc)
@@ -19,7 +21,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LANG_ARG="${1:-all}"
+LANG_ARG="${1:-master}"
 VERSION="v0.1.0"
 
 # ─── Helper: detect best available font ──────────────────────────────────────
@@ -137,7 +139,21 @@ generate_en() {
     local out_pdf="$SCRIPT_DIR/radarlib_documentation.pdf"
     local out_html="$SCRIPT_DIR/radarlib_documentation.html"
 
-    echo "[ EN ] Generando documentación en inglés..."
+    echo "[ EN ] Generando documentación en inglés (LEGACY)..."
+    if [ ! -f "$en_src" ]; then
+        echo "  Error: $en_src no encontrado."
+        return 1
+    fi
+    generate_doc "$out_pdf" "$out_html" "en" "radarlib Documentation (Legacy)" "$en_src"
+}
+
+# ─── English MASTER version (docs/radarlib_EN.md → docs/radarlib_EN.pdf) ──────
+generate_en_master() {
+    local en_src="$SCRIPT_DIR/radarlib_EN.md"
+    local out_pdf="$SCRIPT_DIR/radarlib_EN.pdf"
+    local out_html="$SCRIPT_DIR/radarlib_EN.html"
+
+    echo "[ EN ] Generando documentación en inglés (MÁSTER)..."
     if [ ! -f "$en_src" ]; then
         echo "  Error: $en_src no encontrado."
         return 1
@@ -151,7 +167,21 @@ generate_es_single() {
     local out_pdf="$SCRIPT_DIR/radarlib_documentacion_es.pdf"
     local out_html="$SCRIPT_DIR/radarlib_documentacion_es.html"
 
-    echo "[ ES ] Generando documentación en español (archivo único)..."
+    echo "[ ES ] Generando documentación en español (LEGACY - archivo único)..."
+    if [ ! -f "$es_src" ]; then
+        echo "  Error: $es_src no encontrado."
+        return 1
+    fi
+    generate_doc "$out_pdf" "$out_html" "es-419" "Documentación de radarlib (Legacy)" "$es_src"
+}
+
+# ─── Spanish MASTER version (docs/radarlib_ES.md → docs/radarlib_ES.pdf) ──────
+generate_es_master() {
+    local es_src="$SCRIPT_DIR/radarlib_ES.md"
+    local out_pdf="$SCRIPT_DIR/radarlib_ES.pdf"
+    local out_html="$SCRIPT_DIR/radarlib_ES.html"
+
+    echo "[ ES ] Generando documentación en español (MÁSTER)..."
     if [ ! -f "$es_src" ]; then
         echo "  Error: $es_src no encontrado."
         return 1
@@ -186,6 +216,17 @@ generate_es_multi() {
 
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 case "$LANG_ARG" in
+    EN)
+        generate_en_master
+        ;;
+    ES)
+        generate_es_master
+        ;;
+    master)
+        generate_en_master
+        echo ""
+        generate_es_master
+        ;;
     en)
         generate_en
         ;;
@@ -196,6 +237,14 @@ case "$LANG_ARG" in
         generate_es_single
         ;;
     all)
+        generate_en_master
+        echo ""
+        generate_es_master
+        echo ""
+        echo "────────────────────────────────────────────────────"
+        echo "Versiones Legacy (para compatibilidad):"
+        echo "────────────────────────────────────────────────────"
+        echo ""
         generate_en
         echo ""
         generate_es_single
@@ -204,11 +253,21 @@ case "$LANG_ARG" in
         ;;
     *)
         echo "Argumento no reconocido: '$LANG_ARG'"
-        echo "Uso: $0 [en|es|es-single|all]"
-        echo "  en        — documentación en inglés (docs/README.md)"
-        echo "  es-single — documentación en español, archivo único (docs/README.es.md)"
-        echo "  es        — documentación en español, secciones separadas (docs/es/*.md)"
-        echo "  all       — todas las versiones (valor por defecto)"
+        echo ""
+        echo "Uso: $0 [EN|ES|en|es|es-single|master|all]"
+        echo ""
+        echo "MÁSTER (Recomendado - Consolidado):"
+        echo "  EN        — Documentación en inglés (docs/radarlib_EN.md)"
+        echo "  ES        — Documentación en español (docs/radarlib_ES.md)"
+        echo "  master    — Ambas versiones MÁSTER (EN + ES) [DEFECTO]"
+        echo ""
+        echo "LEGACY (Compatibilidad):"
+        echo "  en        — Documentación en inglés (docs/README.md)"
+        echo "  es-single — Documentación en español, archivo único (docs/README.es.md)"
+        echo "  es        — Documentación en español, secciones separadas (docs/es/*.md)"
+        echo ""
+        echo "Opciones:"
+        echo "  all       — Todas las versiones (MÁSTER + LEGACY)"
         exit 1
         ;;
 esac

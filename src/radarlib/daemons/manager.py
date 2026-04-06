@@ -216,6 +216,13 @@ class DaemonManager:
 
         logger.info(f"Starting daemon manager for radar '{self.config.radar_name}'")
 
+        try:
+            from radarlib.utils.memory_profiling import log_memory_usage
+
+            log_memory_usage("DaemonManager startup")
+        except ImportError:
+            pass
+
         # Create and start download daemon
         if self.config.enable_download_daemon:
             self.download_daemon = self._create_download_daemon()
@@ -266,6 +273,13 @@ class DaemonManager:
             self.stop()
         finally:
             self._running = False
+            try:
+                from radarlib.utils.memory_profiling import aggressive_cleanup, log_memory_usage
+
+                log_memory_usage("DaemonManager shutdown")
+                aggressive_cleanup("DaemonManager shutdown")
+            except ImportError:
+                pass
 
     def stop(self) -> None:
         """Stop all running daemons."""

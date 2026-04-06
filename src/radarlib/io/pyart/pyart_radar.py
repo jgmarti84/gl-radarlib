@@ -169,6 +169,8 @@ def estandarizar_campos_RMA(radar: Radar, idioma: bool = True, replace_dbz_field
 
 def normalize_RMA_fields(radar: Radar, idioma: bool | int | str = True, replace_dbz_fields=False):
 
+    import gc
+
     from radarlib.utils.fields_utils import calcular_zdr
 
     # logger = logging.getLogger(logger_name)
@@ -219,6 +221,9 @@ def normalize_RMA_fields(radar: Radar, idioma: bool | int | str = True, replace_
                 # Enmascara solo los datos inválidos (NaN, INF, etc)
                 radar.fields[field]["data"] = ma.masked_invalid(radar.fields[field]["data"])
                 radar.fields[field]["data"] = ma.masked_outside(radar.fields[field]["data"], -100000, 100000)
+
+        # Force garbage collection to free intermediate masking arrays
+        gc.collect()
 
         # =====================================================================
         # Normalización de Nombres

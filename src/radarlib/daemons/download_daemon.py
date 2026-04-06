@@ -6,6 +6,7 @@ and downloads new files, similar to the process_new_files pattern in FTPRadarDae
 """
 
 import asyncio
+import gc
 import logging
 import re
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from typing import Dict, Optional
 from radarlib.io.ftp.ftp import exponential_backoff_retry
 from radarlib.io.ftp.ftp_client import FTPError, RadarFTPClientAsync
 from radarlib.state.sqlite_tracker import SQLiteStateTracker
+from radarlib.utils.memory_profiling import aggressive_cleanup, log_memory_usage
 from radarlib.utils.names_utils import build_vol_types_regex, extract_bufr_filename_components
 
 logger = logging.getLogger(__name__)
@@ -123,6 +125,10 @@ class DownloadDaemon:
         """
         logger.info(f"[{self.radar_name}] Starting continuous daemon with poll interval: {self.poll_interval} seconds")
 
+        # Memory monitoring setup (per copilot-instructions.md Rule 5)
+        _cycle_count = 0
+        log_memory_usage(f"[{self.radar_name}] DownloadDaemon startup")
+
         while True:
             try:
                 # Determine resume date: use latest downloaded file if available and newer than start_date
@@ -208,11 +214,25 @@ class DownloadDaemon:
                                         observation_datetime=dt,
                                     )
                                     logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
+                                finally:
+                                    # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
+                                    if "components" in locals():
+                                        del components
+                                    gc.collect()
 
                             tasks.append(asyncio.create_task(download_one()))
 
                         await asyncio.gather(*tasks)
                         logger.info(f"[{self.radar_name}] Processed {len(files)} files.")
+
+                        # Cleanup task list to release closure references (per copilot-instructions.md Rules 1, 3)
+                        tasks = []
+                        gc.collect()
+
+                        _cycle_count += 1
+                        if _cycle_count % 5 == 0:  # Every 5 cycles, same cadence as other daemons
+                            log_memory_usage(f"[{self.radar_name}] DownloadDaemon cycle {_cycle_count}")
+                            aggressive_cleanup(f"DownloadDaemon cycle {_cycle_count}")
                     else:
                         logger.info(f"[{self.radar_name}] No new files.")
 

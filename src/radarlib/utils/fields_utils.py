@@ -349,6 +349,8 @@ def calcular_zdr(radar: Radar, ref_vertical=None, ref_horizontal=None, zdr_out_f
         DESCRIPTION.
 
     """
+    import gc
+
     if ref_horizontal is None:
         ref_horizontal = get_field_name("reflectivity")
     if ref_vertical is None:
@@ -361,6 +363,11 @@ def calcular_zdr(radar: Radar, ref_vertical=None, ref_horizontal=None, zdr_out_f
 
     # Agregamos el campo a los datos del radar.
     radar.add_field_like(ref_horizontal, zdr_out_field, ZDR, replace_existing=True)
+
+    # Explicitly delete temporary array to free memory
+    del ZDR
+    gc.collect()
+
     return radar
 
 
