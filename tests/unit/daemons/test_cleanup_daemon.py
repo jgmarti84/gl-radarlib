@@ -424,6 +424,7 @@ class TestCleanupDaemonIntegration:
         tracker.close()
 
 
+class TestDaemonManagerWithCleanup:
     """Tests for DaemonManager with CleanupDaemon."""
 
     def test_daemon_manager_config_has_cleanup_options(self):
