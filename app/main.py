@@ -38,8 +38,22 @@ def main():
 
     logging.setLogRecordFactory(_record_factory)
 
+    formatter = logging.Formatter(
+        fmt="%(asctime)s [%(radar)s|%(levelname)s] %(module)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Configure the root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+
     # handlers
     stream_handler = logging.StreamHandler()
+    stream_log_level = os.getenv("STREAM_LOG_LEVEL", "INFO").upper()
+    stream_handler.setLevel(getattr(logging, stream_log_level, logging.INFO))  # Fallback to INFO if invalid
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
     # ensure log directory exists before creating a FileHandler to avoid "No such file or directory"
     log_dir = Path(config.ROOT_LOGS_PATH) / radar_name  # type: ignore
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -54,27 +68,11 @@ def main():
         utc=True,  # Use local time (True for UTC)
     )
 
-    formatter = logging.Formatter(
-        fmt="%(asctime)s [%(radar)s|%(levelname)s] %(module)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    stream_handler.setFormatter(formatter)
+    file_log_level = os.getenv("FILE_LOG_LEVEL", "INFO").upper()
+    timed_handler.setLevel(getattr(logging, file_log_level, logging.INFO))  # Fallback to INFO if invalid
     timed_handler.setFormatter(formatter)
-    # Explicitly set the handler level so no records are silently dropped by the handler itself
-    stream_handler.setLevel(logging.INFO)
-    timed_handler.setLevel(logging.INFO)
-
-    # Configure the root logger explicitly instead of using logging.basicConfig() which is a
-    # no-op when any handler has already been attached to the root logger (e.g. by a module-level
-    # basicConfig call inside an imported library).
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    root_logger.handlers.clear()
-    root_logger.addHandler(stream_handler)
     root_logger.addHandler(timed_handler)
 
-    # Obtain the module logger AFTER the root logger is fully configured so the record factory
-    # and formatter are in place for all subsequent calls.
     logger = logging.getLogger(__name__)
     ################################################################
 
