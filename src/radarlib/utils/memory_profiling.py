@@ -9,11 +9,10 @@ import gc
 import logging
 import tracemalloc
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 try:
-    if TYPE_CHECKING:
-        import psutil
+    import psutil
 except ImportError:
     psutil = None  # type: ignore
 
