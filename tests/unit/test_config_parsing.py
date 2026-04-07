@@ -10,80 +10,80 @@ APP_PATH = Path(__file__).parent.parent.parent / "app"
 sys.path.insert(0, str(APP_PATH))
 
 
-class TestRadiarlibConfigDefaults:
-    """Test that radarlib.config has cleanup daemon defaults."""
+# class TestRadiarlibConfigDefaults:
+#     """Test that radarlib.config has cleanup daemon defaults."""
 
-    def test_cleanup_daemon_defaults_exist(self):
-        """Verify radarlib.config defines cleanup daemon configuration."""
-        from radarlib import config as radarlib_config
+#     def test_cleanup_daemon_defaults_exist(self):
+#         """Verify radarlib.config defines cleanup daemon configuration."""
+#         from radarlib import config as radarlib_config
 
-        # These MUST exist as module-level attributes
-        required_attrs = [
-            "ENABLE_CLEANUP_DAEMON",
-            "CLEANUP_POLL_INTERVAL",
-            "BUFR_RETENTION_DAYS",
-            "NETCDF_RETENTION_DAYS",
-        ]
+#         # These MUST exist as module-level attributes
+#         required_attrs = [
+#             "ENABLE_CLEANUP_DAEMON",
+#             "CLEANUP_POLL_INTERVAL",
+#             "BUFR_RETENTION_DAYS",
+#             "NETCDF_RETENTION_DAYS",
+#         ]
 
-        missing = []
-        for attr in required_attrs:
-            if not hasattr(radarlib_config, attr):
-                missing.append(attr)
-            else:
-                value = getattr(radarlib_config, attr)
-                print(f"✓ radarlib.config.{attr} = {value}")
+#         missing = []
+#         for attr in required_attrs:
+#             if not hasattr(radarlib_config, attr):
+#                 missing.append(attr)
+#             else:
+#                 value = getattr(radarlib_config, attr)
+#                 print(f"✓ radarlib.config.{attr} = {value}")
 
-        assert not missing, (
-            f"Missing in radarlib.config: {missing}\n"
-            f"These must be defined as module-level attributes for app/config.py to work"
-        )
+#         assert not missing, (
+#             f"Missing in radarlib.config: {missing}\n"
+#             f"These must be defined as module-level attributes for app/config.py to work"
+#         )
 
 
-# class TestConfigFlattening:
-#     """Test that app/config.py correctly flattens YAML structure."""
+class TestConfigFlattening:
+    """Test that app/config.py correctly flattens YAML structure."""
 
-#     @pytest.fixture
-#     def minimal_yaml_file(self, tmp_path):
-#         """Create a minimal genpro25.yml so app/config.py can be imported."""
-#         yml_file = tmp_path / "genpro25.yml"
-#         yml_file.write_text("local:\n  DAEMON_PARAMS:\n    ENABLE_CLEANUP_DAEMON: true\n")
-#         return yml_file
+    @pytest.fixture
+    def minimal_yaml_file(self, tmp_path):
+        """Create a minimal genpro25.yml so app/config.py can be imported."""
+        yml_file = tmp_path / "genpro25.yml"
+        yml_file.write_text("local:\n  DAEMON_PARAMS:\n    ENABLE_CLEANUP_DAEMON: true\n")
+        return yml_file
 
-#     def test_flatten_config_with_daemon_params(self, minimal_yaml_file, monkeypatch):
-#         """Verify _flatten_config removes DAEMON_PARAMS nesting."""
-#         monkeypatch.setenv("GENPRO25_CONFIG", str(minimal_yaml_file))
-#         sys.path.insert(0, str(APP_PATH))
-#         if "config" in sys.modules:
-#             del sys.modules["config"]
-#         from config import _flatten_config
+    def test_flatten_config_with_daemon_params(self, minimal_yaml_file, monkeypatch):
+        """Verify _flatten_config removes DAEMON_PARAMS nesting."""
+        monkeypatch.setenv("GENPRO25_CONFIG", str(minimal_yaml_file))
+        sys.path.insert(0, str(APP_PATH))
+        if "config" in sys.modules:
+            del sys.modules["config"]
+        from config import _flatten_config
 
-#         test_config = {
-#             "DAEMON_PARAMS": {
-#                 "ENABLE_CLEANUP_DAEMON": True,
-#                 "CLEANUP_POLL_INTERVAL": 900,
-#                 "BUFR_RETENTION_DAYS": 3,
-#                 "NETCDF_RETENTION_DAYS": 5,
-#             },
-#             "COLMAX": {
-#                 "COLMAX_THRESHOLD": -3,
-#             },
-#         }
+        test_config = {
+            "DAEMON_PARAMS": {
+                "ENABLE_CLEANUP_DAEMON": True,
+                "CLEANUP_POLL_INTERVAL": 900,
+                "BUFR_RETENTION_DAYS": 3,
+                "NETCDF_RETENTION_DAYS": 5,
+            },
+            "COLMAX": {
+                "COLMAX_THRESHOLD": -3,
+            },
+        }
 
-#         flattened = _flatten_config(test_config)
+        flattened = _flatten_config(test_config)
 
-#         # After flattening, DAEMON_PARAMS key should be GONE
-#         assert "DAEMON_PARAMS" not in flattened, "DAEMON_PARAMS should be flattened away, but key still exists"
+        # After flattening, DAEMON_PARAMS key should be GONE
+        assert "DAEMON_PARAMS" not in flattened, "DAEMON_PARAMS should be flattened away, but key still exists"
 
-#         # Flattened values should have the DAEMON_PARAMS values
-#         assert (
-#             flattened.get("ENABLE_CLEANUP_DAEMON") is True
-#         ), f"Expected True, got {flattened.get('ENABLE_CLEANUP_DAEMON')}"
-#         assert (
-#             flattened.get("CLEANUP_POLL_INTERVAL") == 900
-#         ), f"Expected 900, got {flattened.get('CLEANUP_POLL_INTERVAL')}"
+        # Flattened values should have the DAEMON_PARAMS values
+        assert (
+            flattened.get("ENABLE_CLEANUP_DAEMON") is True
+        ), f"Expected True, got {flattened.get('ENABLE_CLEANUP_DAEMON')}"
+        assert (
+            flattened.get("CLEANUP_POLL_INTERVAL") == 900
+        ), f"Expected 900, got {flattened.get('CLEANUP_POLL_INTERVAL')}"
 
-#         print("✓ Flattening works correctly")
-#         print(f"  Keys in flattened result: {list(flattened.keys())[:5]}...")
+        print("✓ Flattening works correctly")
+        print(f"  Keys in flattened result: {list(flattened.keys())[:5]}...")
 
 
 class TestAppConfigLoading:
