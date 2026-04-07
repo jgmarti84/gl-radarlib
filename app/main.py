@@ -26,7 +26,9 @@ def main():
 
     ################################################################
     # LOGGING SETUP
-    # Ensure every LogRecord has a 'radar' attribute so "%(radar)s" in the format won't KeyError
+    # Ensure every LogRecord has a 'radar' attribute so "%(radar)s" in the format won't KeyError.
+    # setLogRecordFactory must be registered BEFORE any handler or formatter is attached so that
+    # all records — including those emitted during handler construction — carry the 'radar' field.
     _old_factory = logging.getLogRecordFactory()
 
     def _record_factory(*args, **kwargs):
@@ -34,10 +36,24 @@ def main():
         record.radar = radar_name
         return record
 
-    logger = logging.getLogger(__name__)
+    logging.setLogRecordFactory(_record_factory)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s [%(radar)s|%(levelname)s] %(module)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Configure the root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
 
     # handlers
     stream_handler = logging.StreamHandler()
+    stream_log_level = os.getenv("STREAM_LOG_LEVEL", "INFO").upper()
+    stream_handler.setLevel(getattr(logging, stream_log_level, logging.INFO))  # Fallback to INFO if invalid
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
     # ensure log directory exists before creating a FileHandler to avoid "No such file or directory"
     log_dir = Path(config.ROOT_LOGS_PATH) / radar_name  # type: ignore
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -52,14 +68,12 @@ def main():
         utc=True,  # Use local time (True for UTC)
     )
 
-    logging.setLogRecordFactory(_record_factory)
+    file_log_level = os.getenv("FILE_LOG_LEVEL", "INFO").upper()
+    timed_handler.setLevel(getattr(logging, file_log_level, logging.INFO))  # Fallback to INFO if invalid
+    timed_handler.setFormatter(formatter)
+    root_logger.addHandler(timed_handler)
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(radar)s|%(levelname)s] %(module)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[stream_handler, timed_handler],
-    )
+    logger = logging.getLogger(__name__)
     ################################################################
 
     logger.info("=" * 60)
@@ -143,6 +157,10 @@ def main():
     if status["processing_daemon"]["stats"]:
         logger.info(f"    Volumes processed: {status['processing_daemon']['stats']['volumes_processed']}")
     logger.info("=" * 60)
+
+    # Flush and close all log handlers before exit so that buffered records in the
+    # TimedRotatingFileHandler are written to disk even on a clean shutdown.
+    logging.shutdown()
 
 
 if __name__ == "__main__":
