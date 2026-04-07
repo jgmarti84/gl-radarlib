@@ -359,6 +359,70 @@ class TestCleanupDaemonIntegration:
 
         tracker.close()
 
+    @pytest.mark.asyncio
+    async def test_cleanup_with_non_default_product_type(self, tmp_path):
+        """Test that cleanup correctly finds files when product_type is not 'image'."""
+        state_db = tmp_path / "state.db"
+        bufr_dir = tmp_path / "bufr"
+        bufr_dir.mkdir()
+        netcdf_dir = tmp_path / "netcdf"
+        netcdf_dir.mkdir()
+
+        tracker = SQLiteStateTracker(state_db)
+
+        # Create old observation datetime (older than retention period)
+        old_datetime = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+
+        # Create BUFR file
+        bufr_file = bufr_dir / "RMA1_0315_01_DBZH_20250101T120000Z.BUFR"
+        bufr_file.write_bytes(b"test data")
+
+        # Add to database using an ISO string observation_datetime (no datetime objects)
+        tracker.mark_downloaded(
+            bufr_file.name,
+            f"/remote/{bufr_file.name}",
+            str(bufr_file),
+            radar_name="RMA1",
+            strategy="0315",
+            vol_nr="01",
+            field_type="DBZH",
+            observation_datetime=old_datetime,
+        )
+
+        # Register and complete volume processing
+        volume_id = tracker.get_volume_id("RMA1", "0315", "01", old_datetime)
+        tracker.register_volume(volume_id, "RMA1", "0315", "01", old_datetime, ["DBZH"], True)
+
+        netcdf_file = netcdf_dir / "test.nc"
+        netcdf_file.write_bytes(b"netcdf data")
+        tracker.mark_volume_processing(volume_id, "completed", str(netcdf_file))
+
+        # Register product generation with 'raw_cog' product type (not 'image')
+        tracker.register_product_generation(volume_id, "raw_cog")
+        tracker.mark_product_status(volume_id, "raw_cog", "completed")
+
+        # Querying for 'image' should find nothing (product_type mismatch)
+        files_image = tracker.get_bufr_files_for_cleanup(7, "RMA1", ["image"])
+        assert len(files_image) == 0, "Should not find files when product_type does not match"
+
+        # Querying for 'raw_cog' should find the file
+        files_raw_cog = tracker.get_bufr_files_for_cleanup(7, "RMA1", ["raw_cog"])
+        assert len(files_raw_cog) == 1, "Should find file when product_type matches 'raw_cog'"
+
+        # Cleanup daemon configured with 'raw_cog' product type should work end-to-end
+        config = CleanupDaemonConfig(
+            state_db=state_db,
+            radar_name="RMA1",
+            bufr_retention_days=7,
+            product_types=["raw_cog"],
+            dry_run=True,
+        )
+        daemon = CleanupDaemon(config)
+        result = await daemon.run_once()
+        assert result["bufr_cleaned"] >= 1, "Cleanup daemon should have found and processed the file"
+
+        tracker.close()
+
 
 class TestDaemonManagerWithCleanup:
     """Tests for DaemonManager with CleanupDaemon."""
@@ -389,3 +453,41 @@ class TestDaemonManagerWithCleanup:
         assert config.cleanup_poll_interval == 1800
         assert config.bufr_retention_days == 7
         assert config.netcdf_retention_days == 7
+        # cleanup_product_types should default to match product_type (default "image")
+        assert config.cleanup_product_types == ["image"]
+
+    def test_daemon_manager_cleanup_product_types_matches_product_type(self):
+        """Test that cleanup_product_types defaults to match the configured product_type."""
+        from radarlib.daemons import DaemonManagerConfig
+
+        config = DaemonManagerConfig(
+            radar_name="RMA1",
+            base_path=Path("/tmp/test"),
+            ftp_host="ftp.example.com",
+            ftp_user="user",
+            ftp_password="pass",
+            ftp_base_path="/L2",
+            volume_types={},
+            product_type="raw_cog",
+        )
+
+        # cleanup_product_types should default to ["raw_cog"] when product_type="raw_cog"
+        assert config.cleanup_product_types == ["raw_cog"]
+
+    def test_daemon_manager_explicit_cleanup_product_types_respected(self):
+        """Test that an explicit cleanup_product_types is not overridden."""
+        from radarlib.daemons import DaemonManagerConfig
+
+        config = DaemonManagerConfig(
+            radar_name="RMA1",
+            base_path=Path("/tmp/test"),
+            ftp_host="ftp.example.com",
+            ftp_user="user",
+            ftp_password="pass",
+            ftp_base_path="/L2",
+            volume_types={},
+            product_type="raw_cog",
+            cleanup_product_types=["image", "raw_cog"],
+        )
+
+        assert config.cleanup_product_types == ["image", "raw_cog"]

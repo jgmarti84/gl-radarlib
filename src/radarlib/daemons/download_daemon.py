@@ -199,7 +199,7 @@ class DownloadDaemon:
                                         strategy=components["strategy"],
                                         vol_nr=components["vol_nr"],
                                         field_type=components["field_type"],
-                                        observation_datetime=dt,
+                                        observation_datetime=dt.isoformat(),
                                     )
                                     logger.info(f"[{self.radar_name}] Downloaded {fname}")
                                 except FTPError as e:
@@ -211,7 +211,7 @@ class DownloadDaemon:
                                         strategy=components["strategy"],
                                         vol_nr=components["vol_nr"],
                                         field_type=components["field_type"],
-                                        observation_datetime=dt,
+                                        observation_datetime=dt.isoformat(),
                                     )
                                     logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
                                 finally:
