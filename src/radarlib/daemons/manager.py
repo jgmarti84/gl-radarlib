@@ -3,7 +3,7 @@
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -75,7 +75,7 @@ class DaemonManagerConfig:
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
     bufr_retention_days: int = 7
     netcdf_retention_days: int = 7
-    cleanup_product_types: List[str] = field(default_factory=lambda: ["image"])
+    cleanup_product_types: Optional[List[str]] = None
 
     def __post_init__(self):
         """Post-initialization checks."""
@@ -90,6 +90,11 @@ class DaemonManagerConfig:
 
         if self.start_date is None:
             self.start_date = datetime.now().replace(tzinfo=timezone.utc)
+
+        # Default cleanup_product_types to the configured product_type so that cleanup
+        # waits for the same product type the product daemon actually generates.
+        if self.cleanup_product_types is None:
+            self.cleanup_product_types = [self.product_type]
 
 
 class DaemonManager:
