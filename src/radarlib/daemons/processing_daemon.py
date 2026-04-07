@@ -311,7 +311,7 @@ class ProcessingDaemon:
                 AND observation_datetime >= ?
             ORDER BY observation_datetime
         """,
-            (self.config.radar_name, min_datetime.isoformat().replace("T", " ")),
+            (self.config.radar_name, min_datetime.isoformat()),
         )
 
         files = cursor.fetchall()

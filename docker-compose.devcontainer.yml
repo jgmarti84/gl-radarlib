@@ -1,3 +1,18 @@
 services:
-  genpro25:
+  genpro25-rma1:
+    command: [ "tail", "-f", "/dev/null" ]
+
+  # ==========================================================================
+  # TESTING SERVICE (devcontainer only)
+  # ==========================================================================
+  tests:
+    build:
+      context: ./
+      dockerfile: tests/Dockerfile
+    container_name: radarlib_tests
+    environment:
+      PYTHONPATH: /app/src/
+    volumes:
+      - ./tests:/app/tests
+      - ./genpro25.yml:/app/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
     command: [ "tail", "-f", "/dev/null" ]

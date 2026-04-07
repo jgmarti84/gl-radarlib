@@ -262,7 +262,66 @@ If you suspect a memory leak:
 - ❌ No integration tests for the full pipeline
 - ❌ No GeoTIFF output validation
 - ❌ SQLite state tracking may bottleneck at high frequency
-- ❌ `genpro25.yml` configuration is poorly documented
+- ✅ **Configuration system:** FIXED - Unified loader in `app/config.py`
+
+---
+
+## Configuration System
+
+### Two-Layer Design
+The configuration system has two distinct layers:
+
+| Layer | File | Purpose |
+|-------|------|---------|
+| **radarlib core** | `src/radarlib/config.py` | Standalone library defaults (colormaps, GRC thresholds, geometry params, daemon defaults). Used by all radarlib internals. |
+| **Genpro25 service** | `app/config.py` | Service-layer config. Merges `_DEFAULTS` + genpro25.yml YAML + env vars. Consumed by `app/main.py`. |
+
+These two layers are **independent** — `app/config.py` does NOT import from `radarlib.config`.
+
+### Precedence (app/config.py)
+Lowest → Highest:
+1. `_DEFAULTS` dict in `app/config.py`
+2. Flattened leaf values from the active section in `genpro25.yml`
+3. OS environment variables (type-coerced against `_DEFAULTS`)
+
+### YAML Structure & Flattening
+`genpro25.yml` uses nested grouping sections (`DAEMON_PARAMS`, `FTP`, `COLMAX`, etc.)
+that are NOT themselves config keys. `_flatten_dict()` removes these structural nodes,
+promoting their leaf children to the top level.
+
+**Rule:** a YAML key whose name appears in `_DEFAULTS` is treated as a *config key*
+(value kept as-is, even if the value is a dict, e.g. `VOLUME_TYPES`). Any other
+dict-valued key is treated as a *grouping node* and recursed into.
+
+```
+# genpro25.yml (nested)       →   flattened result
+DAEMON_PARAMS:                 →   ENABLE_CLEANUP_DAEMON: True
+  ENABLE_CLEANUP_DAEMON: True  →   CLEANUP_POLL_INTERVAL: 1800
+  CLEANUP_POLL_INTERVAL: 1800
+
+VOLUME_TYPES:                  →   VOLUME_TYPES: {"0315": {...}}  # kept intact
+  "0315":
+    "01": [...]
+```
+
+### Rules When Adding New Config Keys
+1. **Service-layer settings** (daemon toggles, poll intervals, retention days, paths, FTP):
+   → Add to `_DEFAULTS` in `app/config.py` only.
+2. **radarlib internal settings** (colormaps, GRC thresholds, geometry params):
+   → Add to `DEFAULTS` in `src/radarlib/config.py` only, plus a convenience attribute.
+3. **Settings shared by both layers** (e.g. a new cleanup param):
+   → Add to BOTH files with matching default values.
+4. **Never** add `app/config.py` imports inside `src/radarlib/config.py` — radarlib
+   must remain usable as a standalone library without the Genpro25 service layer.
+5. After adding a key, add the matching entry in `genpro25.yml` (even if `None`).
+
+### Public API (app/config.py)
+```python
+import config
+config.FTP_HOST              # module-level attribute (any key in _DEFAULTS)
+config.get_config(key)       # safe getter with optional default
+config.get_all_config()      # returns copy of full merged dict
+```
 
 ---
 

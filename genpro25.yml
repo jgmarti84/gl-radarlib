@@ -123,5 +123,5 @@ local:
     CLEANUP_POLL_INTERVAL: 1800 # in seconds
     PRODUCT_TYPE: "raw_cog" # "image", "geotiff" or "raw_cog"
     ADD_COLMAX: True # Set to True to add Colmax products
-    NETCDF_RETENTION_DAYS: 0.08333333333333333 # in days
-    BUFR_RETENTION_DAYS: 0.08333333333333333 # in days
+    NETCDF_RETENTION_DAYS: 0.333333333333333 # in days
+    BUFR_RETENTION_DAYS: 0.333333333333333 # in days
