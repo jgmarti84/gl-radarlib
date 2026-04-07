@@ -30,7 +30,6 @@ from radarlib.state.sqlite_tracker import SQLiteStateTracker
 from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
 from radarlib.utils.names_utils import product_path_and_filename
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 

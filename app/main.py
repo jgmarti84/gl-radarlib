@@ -26,7 +26,9 @@ def main():
 
     ################################################################
     # LOGGING SETUP
-    # Ensure every LogRecord has a 'radar' attribute so "%(radar)s" in the format won't KeyError
+    # Ensure every LogRecord has a 'radar' attribute so "%(radar)s" in the format won't KeyError.
+    # setLogRecordFactory must be registered BEFORE any handler or formatter is attached so that
+    # all records — including those emitted during handler construction — carry the 'radar' field.
     _old_factory = logging.getLogRecordFactory()
 
     def _record_factory(*args, **kwargs):
@@ -34,7 +36,7 @@ def main():
         record.radar = radar_name
         return record
 
-    logger = logging.getLogger(__name__)
+    logging.setLogRecordFactory(_record_factory)
 
     # handlers
     stream_handler = logging.StreamHandler()
@@ -52,14 +54,28 @@ def main():
         utc=True,  # Use local time (True for UTC)
     )
 
-    logging.setLogRecordFactory(_record_factory)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(radar)s|%(levelname)s] %(module)s - %(message)s",
+    formatter = logging.Formatter(
+        fmt="%(asctime)s [%(radar)s|%(levelname)s] %(module)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[stream_handler, timed_handler],
     )
+    stream_handler.setFormatter(formatter)
+    timed_handler.setFormatter(formatter)
+    # Explicitly set the handler level so no records are silently dropped by the handler itself
+    stream_handler.setLevel(logging.INFO)
+    timed_handler.setLevel(logging.INFO)
+
+    # Configure the root logger explicitly instead of using logging.basicConfig() which is a
+    # no-op when any handler has already been attached to the root logger (e.g. by a module-level
+    # basicConfig call inside an imported library).
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.handlers.clear()
+    root_logger.addHandler(stream_handler)
+    root_logger.addHandler(timed_handler)
+
+    # Obtain the module logger AFTER the root logger is fully configured so the record factory
+    # and formatter are in place for all subsequent calls.
+    logger = logging.getLogger(__name__)
     ################################################################
 
     logger.info("=" * 60)
@@ -143,6 +159,10 @@ def main():
     if status["processing_daemon"]["stats"]:
         logger.info(f"    Volumes processed: {status['processing_daemon']['stats']['volumes_processed']}")
     logger.info("=" * 60)
+
+    # Flush and close all log handlers before exit so that buffered records in the
+    # TimedRotatingFileHandler are written to disk even on a clean shutdown.
+    logging.shutdown()
 
 
 if __name__ == "__main__":
