@@ -11,6 +11,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
     environment:
       RADAR_NAME: "RMA1"
+      STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
