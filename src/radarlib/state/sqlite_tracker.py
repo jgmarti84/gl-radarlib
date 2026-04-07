@@ -1128,6 +1128,11 @@ class SQLiteStateTracker:
         if product_types is None:
             product_types = ["image"]
 
+        logger.debug(
+            f"get_bufr_files_for_cleanup: radar={radar_name!r}, cutoff={cutoff_iso!r}, "
+            f"product_types={product_types!r}"
+        )
+
         # Build query for product type checks
         product_type_placeholders = ", ".join("?" for _ in product_types)
         product_type_count = len(product_types)
@@ -1184,7 +1189,9 @@ class SQLiteStateTracker:
                 (cutoff_iso, *product_types, product_type_count),
             )
 
-        return [dict(row) for row in cursor.fetchall()]
+        results = [dict(row) for row in cursor.fetchall()]
+        logger.debug(f"get_bufr_files_for_cleanup: found {len(results)} file(s) ready for cleanup")
+        return results
 
     def get_netcdf_files_for_cleanup(
         self, retention_days: int, radar_name: Optional[str] = None, product_types: Optional[List[str]] = None
@@ -1214,6 +1221,11 @@ class SQLiteStateTracker:
 
         if product_types is None:
             product_types = ["image"]
+
+        logger.debug(
+            f"get_netcdf_files_for_cleanup: radar={radar_name!r}, cutoff={cutoff_iso!r}, "
+            f"product_types={product_types!r}"
+        )
 
         # Build query for product type checks
         product_type_placeholders = ", ".join("?" for _ in product_types)
@@ -1261,7 +1273,9 @@ class SQLiteStateTracker:
                 (cutoff_iso, *product_types, product_type_count),
             )
 
-        return [dict(row) for row in cursor.fetchall()]
+        results = [dict(row) for row in cursor.fetchall()]
+        logger.debug(f"get_netcdf_files_for_cleanup: found {len(results)} volume(s) ready for cleanup")
+        return results
 
     def get_incomplete_volumes_fields(self, volume_info) -> List[Dict]:
         """ """
