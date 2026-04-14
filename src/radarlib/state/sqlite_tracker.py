@@ -183,6 +183,19 @@ class SQLiteStateTracker:
             cursor.execute("ALTER TABLE downloads ADD COLUMN cleaned_at TEXT")
             logger.info("Added cleaned_at column to downloads table")
 
+        # Add retry tracking columns for failed download handling
+        if "retry_attempt_count" not in download_columns:
+            cursor.execute("ALTER TABLE downloads ADD COLUMN retry_attempt_count INTEGER DEFAULT 0")
+            logger.info("Added retry_attempt_count column to downloads table")
+
+        if "permanently_failed" not in download_columns:
+            cursor.execute("ALTER TABLE downloads ADD COLUMN permanently_failed INTEGER DEFAULT 0")
+            logger.info("Added permanently_failed column to downloads table")
+
+        if "last_retry_error" not in download_columns:
+            cursor.execute("ALTER TABLE downloads ADD COLUMN last_retry_error TEXT")
+            logger.info("Added last_retry_error column to downloads table")
+
         # Check and add cleanup_status column to volume_processing table
         cursor.execute("PRAGMA table_info(volume_processing)")
         volume_columns = {row[1] for row in cursor.fetchall()}
@@ -198,6 +211,8 @@ class SQLiteStateTracker:
         # Add indexes for cleanup queries
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_download_cleanup_status ON downloads(cleanup_status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_volume_cleanup_status ON volume_processing(cleanup_status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_download_permanently_failed ON downloads(permanently_failed)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_download_retry_count ON downloads(retry_attempt_count)")
 
         conn.commit()
 
@@ -340,6 +355,88 @@ class SQLiteStateTracker:
 
         conn.commit()
         logger.debug(f"Marked '{filename}' as failed")
+
+    def get_retry_count_for_failed_file(self, filename: str) -> int:
+        """
+        Get the current retry attempt count for a failed file.
+
+        Args:
+            filename: Name of the file to check
+
+        Returns:
+            Current retry attempt count, or 0 if file not found or not failed
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT retry_attempt_count FROM downloads WHERE filename = ? AND status = 'failed'",
+            (filename,),
+        )
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def increment_retry_count(self, filename: str, error_msg: str) -> int:
+        """
+        Increment the retry attempt count for a failed file.
+
+        Args:
+            filename: Name of the file
+            error_msg: Error message from the failed download attempt
+
+        Returns:
+            New retry attempt count after increment
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Get current count
+        cursor.execute(
+            "SELECT retry_attempt_count FROM downloads WHERE filename = ?",
+            (filename,),
+        )
+        row = cursor.fetchone()
+        current_count = row[0] if row else 0
+        new_count = current_count + 1
+
+        # Increment count and update last error
+        cursor.execute(
+            """
+            UPDATE downloads
+            SET retry_attempt_count = ?, last_retry_error = ?, updated_at = ?
+            WHERE filename = ?
+            """,
+            (new_count, error_msg, now, filename),
+        )
+
+        conn.commit()
+        logger.debug(f"Incremented retry count for '{filename}' to {new_count}: {error_msg}")
+        return new_count
+
+    def mark_download_permanently_failed(self, filename: str) -> None:
+        """
+        Mark a file as permanently failed (e.g., FTP 550 error - file not found).
+
+        This prevents infinite retry attempts for files that will never be available.
+
+        Args:
+            filename: Name of the file to mark as permanently failed
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute(
+            """
+            UPDATE downloads
+            SET permanently_failed = 1, updated_at = ?
+            WHERE filename = ?
+            """,
+            (now, filename),
+        )
+
+        conn.commit()
+        logger.debug(f"Marked '{filename}' as permanently failed - no further retries")
 
     def get_downloaded_files(self) -> Set[str]:
         """

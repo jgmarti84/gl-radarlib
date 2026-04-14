@@ -47,6 +47,8 @@ class DownloadDaemonConfig:
     bufr_download_max_retries: int = 3
     bufr_download_base_delay: float = 1
     bufr_download_max_delay: float = 30
+    failed_file_retry_interval: int = 600  # Retry failed files every 10 minutes (in seconds)
+    failed_file_retention_days: int = 1  # Keep retrying for up to 1 day
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -94,8 +96,10 @@ class DownloadDaemon:
             "bufr_files_pending": 0,
             "last_downloaded": None,
             "total_bytes": 0,
+            "failed_files_retried": 0,
         }
         self._running = False
+        self._last_failed_retry_time: Optional[datetime] = None
 
     @property
     def vol_types(self):
@@ -236,6 +240,9 @@ class DownloadDaemon:
                     else:
                         logger.info(f"[{self.radar_name}] No new files.")
 
+                    # Periodically retry failed downloads
+                    await self._retry_failed_downloads_async()
+
             except Exception as e:
                 logger.exception(f"[{self.radar_name}] Error during check_latest_folder: {e}")
 
@@ -267,6 +274,122 @@ class DownloadDaemon:
             local_path = self.local_dir / fname
             candidates.append((remote, local_path, fname, dt, "new"))
         return candidates
+
+    async def _retry_failed_downloads_async(self) -> None:
+        """
+        Periodically retry failed BUFR file downloads.
+
+        This method runs every `failed_file_retry_interval` seconds and attempts
+        to re-download files that previously failed due to FTP errors. Files that
+        have been in 'failed' status for more than `failed_file_retention_days` are
+        abandoned.
+        """
+        now = datetime.now(timezone.utc)
+
+        # Check if enough time has passed since last retry attempt
+        if self._last_failed_retry_time is not None:
+            elapsed = (now - self._last_failed_retry_time).total_seconds()
+            if elapsed < self.config.failed_file_retry_interval:
+                # Not yet time to retry
+                return
+
+        # Get all failed files for this radar from the database
+        try:
+            conn = self.state_tracker._get_connection()
+            cursor = conn.cursor()
+            cutoff_datetime = (now.timestamp() - (self.config.failed_file_retention_days * 86400))
+
+            cursor.execute(
+                """
+                SELECT filename, remote_path, local_path, field_type, observation_datetime, created_at
+                FROM downloads
+                WHERE radar_name = ? AND status = 'failed' AND created_at > ?
+                ORDER BY created_at DESC
+                LIMIT 50
+            """,
+                (self.radar_name, cutoff_datetime),
+            )
+            failed_files = cursor.fetchall()
+
+            if not failed_files:
+                logger.debug(f"[{self.radar_name}] No failed files to retry")
+                return
+
+            logger.info(f"[{self.radar_name}] Retrying {len(failed_files)} failed downloads...")
+            self._last_failed_retry_time = now
+
+            # Retry each failed file
+            retry_count = 0
+            async with RadarFTPClientAsync(
+                self.config.host,
+                self.config.username,
+                self.config.password,
+                max_workers=self.config.max_concurrent_downloads,
+            ) as client:
+                for failed_file in failed_files:
+                    filename = failed_file[0]
+                    remote_path = failed_file[1]
+                    local_path = Path(failed_file[2])
+                    field_type = failed_file[3]
+                    observation_datetime = failed_file[4]
+
+                    try:
+                        logger.debug(
+                            f"[{self.radar_name}] Retrying failed download: {filename} "
+                            f"from {remote_path}"
+                        )
+
+                        # Remove local file if it partially exists
+                        if local_path.exists():
+                            try:
+                                local_path.unlink()
+                            except OSError:
+                                pass
+
+                        # Retry download with exponential backoff
+                        await exponential_backoff_retry(
+                            lambda: client.download_file_async(remote_path, str(local_path)),
+                            max_retries=self.config.bufr_download_max_retries,
+                            base_delay=self.config.bufr_download_base_delay,
+                            max_delay=self.config.bufr_download_max_delay,
+                        )
+
+                        # Mark as successfully downloaded
+                        file_size = local_path.stat().st_size
+                        components = extract_bufr_filename_components(filename)
+
+                        self.state_tracker.mark_downloaded(
+                            filename,
+                            remote_path,
+                            str(local_path),
+                            file_size=file_size,
+                            checksum=None,
+                            radar_name=self.radar_name,
+                            strategy=components["strategy"],
+                            vol_nr=components["vol_nr"],
+                            field_type=field_type,
+                            observation_datetime=observation_datetime,
+                        )
+
+                        logger.info(f"[{self.radar_name}] Successfully retried: {filename}")
+                        retry_count += 1
+                        self._stats["failed_files_retried"] += 1
+
+                    except FTPError as e:
+                        logger.warning(f"[{self.radar_name}] Retry still failing for {filename}: {e}")
+                    except Exception as e:
+                        logger.error(f"[{self.radar_name}] Unexpected error retrying {filename}: {e}")
+                    finally:
+                        gc.collect()
+
+            if retry_count > 0:
+                logger.info(
+                    f"[{self.radar_name}] Retry attempt complete: {retry_count}/{len(failed_files)} "
+                    f"files successfully recovered"
+                )
+
+        except Exception as e:
+            logger.error(f"[{self.radar_name}] Error during failed file retry: {e}", exc_info=True)
 
     def stop(self) -> None:
         """Stop the daemon gracefully."""

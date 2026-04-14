@@ -117,7 +117,7 @@ local:
     ENABLE_PROCESSING_DAEMON: True # Set to True to enable the processing daemon
     ENABLE_PRODUCT_DAEMON: True # Set to True to enable the product generation daemon
     ENABLE_CLEANUP_DAEMON: True # Set to True to enable the cleanup daemon
-    DOWNLOAD_POLL_INTERVAL: 60 # in seconds
+    DOWNLOAD_POLL_INTERVAL: 300 # in seconds
     PROCESSING_POLL_INTERVAL: 30 # in seconds
     PRODUCT_POLL_INTERVAL: 30 # in seconds
     CLEANUP_POLL_INTERVAL: 1800 # in seconds

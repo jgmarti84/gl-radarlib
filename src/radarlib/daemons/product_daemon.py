@@ -572,15 +572,23 @@ class ProductGenerationDaemon:
 
             filename_stem = Path(filename).stem
 
-            # Verify volume completeness
-            fields_to_check = vol_types[filename_stem.split("_")[1]][filename_stem.split("_")[2]][:]
-            radar_fields = radar.fields.keys()
-            missing_fields = set(fields_to_check) - set(radar_fields)
+            # Verify volume completeness - log missing fields but don't reject volume
+            try:
+                strategy = filename_stem.split("_")[1]
+                vol_nr = filename_stem.split("_")[2]
+                fields_expected = vol_types[strategy][vol_nr][:]
+                radar_fields = set(radar.fields.keys())
+                missing_fields = set(fields_expected) - radar_fields
 
-            if missing_fields:
-                logger.debug(f"Incomplete volume, missing: {missing_fields}")
-            else:
-                logger.debug("Complete volume.")
+                if missing_fields:
+                    logger.info(
+                        f"Incomplete volume {filename_stem}: missing {missing_fields}. "
+                        f"Will generate COGs for available fields: {radar_fields & set(fields_expected)}"
+                    )
+                else:
+                    logger.debug("Complete volume - all expected fields present.")
+            except (IndexError, KeyError) as e:
+                logger.debug(f"Could not parse volume structure from {filename_stem}: {e}. Proceeding with available fields.")
 
             # Get lowest sweep for PPI products
             sweep = get_lowest_nsweep(radar)
@@ -600,8 +608,15 @@ class ProductGenerationDaemon:
                 if "COLMAX" in config.FIELDS_TO_PLOT:
                     logger.debug(f"Generating COLMAX for {filename_stem}")
                     try:
-                        # COLMAX is generated from the reflectivity field
-                        colmax_data = get_field_data(radar, hrefl_field)
+                        # Validate field exists before accessing
+                        if hrefl_field not in radar.fields:
+                            logger.warning(
+                                f"Cannot generate COLMAX: Reflectivity field '{hrefl_field}' not found. "
+                                f"Available fields: {set(radar.fields.keys())}. Skipping COLMAX."
+                            )
+                        else:
+                            # COLMAX is generated from the reflectivity field
+                            colmax_data = get_field_data(radar, hrefl_field)
 
                         temp_dir = tempfile.mkdtemp()
                         vmin_key = "VMIN_REFL_NOFILTERS"
@@ -986,9 +1001,13 @@ class ProductGenerationDaemon:
                 log_memory_usage(f"After saved geotiff for filtered {plot_field}")
 
             if not cog_generated:
-                raise RuntimeError("No COG products were successfully generated")
-
-            logger.info(f"COG product generation completed successfully for {filename_stem}")
+                logger.warning(
+                    f"No filtered COG products were successfully generated for {filename_stem}. "
+                    f"This may indicate an incomplete volume with missing fields. "
+                    f"Will retry on next iteration if volume is being processed."
+                )
+            else:
+                logger.info(f"Filtered COG product generation completed successfully for {filename_stem}")
 
         finally:
             # Cleanup radar object if it was created
@@ -1075,13 +1094,18 @@ class ProductGenerationDaemon:
 
             filename_stem = Path(filename).stem
 
-            # Verify volume completeness
+            # Verify volume completeness and check for missing critical fields
             fields_to_check = vol_types[filename_stem.split("_")[1]][filename_stem.split("_")[2]][:]
             radar_fields = radar.fields.keys()
             missing_fields = set(fields_to_check) - set(radar_fields)
 
             if missing_fields:
-                logger.debug(f"Incomplete volume, missing: {missing_fields}")
+                logger.warning(
+                    f"Incomplete volume {filename_stem}, missing fields: {missing_fields}. "
+                    f"Skipping product generation for this volume."
+                )
+                # Skip this volume but don't raise an error - mark it as having missing fields
+                raise ValueError(f"Volume has missing required fields: {missing_fields}")
             else:
                 logger.debug("Complete volume.")
 
@@ -1094,6 +1118,14 @@ class ProductGenerationDaemon:
                 if "COLMAX" in config.FIELDS_TO_PLOT:
                     logger.debug(f"Generating raw COLMAX for {filename_stem}")
                     try:
+                        # Validate field exists before accessing
+                        if hrefl_field not in radar.fields:
+                            logger.error(
+                                f"Reflectivity field '{hrefl_field}' not found in radar. "
+                                f"Available fields: {set(radar.fields.keys())}"
+                            )
+                            raise KeyError(f"Reflectivity field '{hrefl_field}' not found")
+
                         colmax_data = get_field_data(radar, hrefl_field)
 
                         vmin_key = "VMIN_REFL_NOFILTERS"
@@ -1500,9 +1532,13 @@ class ProductGenerationDaemon:
                 log_memory_usage(f"After saved geotiff for filtered {plot_field}")
 
             if not raw_cog_generated:
-                raise RuntimeError("No raw COG products were successfully generated")
-
-            logger.info(f"Raw COG product generation completed successfully for {filename_stem}")
+                logger.warning(
+                    f"No raw COG products were successfully generated for {filename_stem}. "
+                    f"This may indicate an incomplete volume with missing fields. "
+                    f"Will retry on next iteration if volume is being processed."
+                )
+            else:
+                logger.info(f"Raw COG product generation completed successfully for {filename_stem}")
 
         finally:
             # Cleanup radar object if it was created
@@ -1575,13 +1611,18 @@ class ProductGenerationDaemon:
             # eliminamos la extension .nc
             filename_stem = Path(filename).stem
 
-            # Verificamos el volúmen
+            # Verificamos el volúmen and check for missing critical fields
             fields_to_check = vol_types[filename_stem.split("_")[1]][filename_stem.split("_")[2]][:]
             radar_fields = radar.fields.keys()
             missing_fields = set(fields_to_check) - set(radar_fields)
 
             if missing_fields:
-                logger.debug(f"Incomplete volume, missing: {missing_fields}")
+                logger.warning(
+                    f"Incomplete volume {filename_stem}, missing fields: {missing_fields}. "
+                    f"Skipping product generation for this volume."
+                )
+                # Skip this volume but don't raise an error - mark it as having missing fields
+                raise ValueError(f"Volume has missing required fields: {missing_fields}")
             else:
                 logger.debug("Complete volume.")
 
@@ -1786,9 +1827,12 @@ class ProductGenerationDaemon:
                 gc.collect()
 
             if not field_plotted:
-                raise RuntimeError("No fields were successfully plotted")
-
-            logger.info(f"Product generation completed successfully for {filename_stem}")
+                logger.warning(
+                    f"No fields were successfully plotted for PNG generation for {filename_stem}. "
+                    f"This may indicate an incomplete volume with missing fields. PNG output is deprecated anyway."
+                )
+            else:
+                logger.info(f"PNG product generation completed successfully for {filename_stem}")
 
         finally:
             # Cleanup - ensure all matplotlib figures are closed
