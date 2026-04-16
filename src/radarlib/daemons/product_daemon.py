@@ -1102,10 +1102,11 @@ class ProductGenerationDaemon:
             if missing_fields:
                 logger.warning(
                     f"Incomplete volume {filename_stem}, missing fields: {missing_fields}. "
-                    f"Skipping product generation for this volume."
+                    f"Skipping product generation for this volume (will retry in next cycle if volume receives more fields)."
                 )
-                # Skip this volume but don't raise an error - mark it as having missing fields
-                raise ValueError(f"Volume has missing required fields: {missing_fields}")
+                # Skip this volume - don't raise an error, just return to allow next volume processing
+                # This volume will be retried on the next daemon cycle
+                return
             else:
                 logger.debug("Complete volume.")
 
@@ -1619,10 +1620,11 @@ class ProductGenerationDaemon:
             if missing_fields:
                 logger.warning(
                     f"Incomplete volume {filename_stem}, missing fields: {missing_fields}. "
-                    f"Skipping product generation for this volume."
+                    f"Skipping product generation for this volume (will retry in next cycle if volume receives more fields)."
                 )
-                # Skip this volume but don't raise an error - mark it as having missing fields
-                raise ValueError(f"Volume has missing required fields: {missing_fields}")
+                # Skip this volume - don't raise an error, just return to allow next volume processing
+                # This volume will be retried on the next daemon cycle
+                return
             else:
                 logger.debug("Complete volume.")
 

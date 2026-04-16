@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from radarlib import config
-from radarlib.io.ftp import RadarFTPClientAsync
+from radarlib.io.ftp import RadarFTPClientAsync, FTPError
 from radarlib.state.sqlite_tracker import SQLiteStateTracker
 
 logger = logging.getLogger(__name__)
