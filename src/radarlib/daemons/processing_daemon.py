@@ -295,6 +295,12 @@ class ProcessingDaemon:
                 )
                 conn.commit()
 
+                # Reset product generation status so the product daemon
+                # will regenerate COGs with the newly available fields.
+                self.state_tracker.reset_product_generation_for_volume(
+                    inc_vol["volume_id"]
+                )
+
         except Exception as e:
             logger.error(f"Error retrying incomplete volumes: {e}", exc_info=True)
 

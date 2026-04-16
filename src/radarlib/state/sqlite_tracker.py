@@ -1053,6 +1053,47 @@ class SQLiteStateTracker:
         conn.commit()
         logger.debug(f"Marked {product_type} for {volume_id} with status: {status}")
 
+    def reset_product_generation_for_volume(self, volume_id: str) -> int:
+        """
+        Reset all product_generation entries for a volume back to 'pending'.
+
+        Used when an incomplete volume has been re-processed with additional
+        fields so that the product daemon regenerates COGs with the full
+        field set.
+
+        Args:
+            volume_id: Volume identifier
+
+        Returns:
+            Number of product_generation rows reset.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute(
+            """
+            UPDATE product_generation
+            SET status = 'pending',
+                error_message = NULL,
+                error_type = NULL,
+                generated_at = NULL,
+                updated_at = ?
+            WHERE volume_id = ?
+              AND status = 'completed'
+            """,
+            (now, volume_id),
+        )
+        rows_reset = cursor.rowcount
+        conn.commit()
+
+        if rows_reset > 0:
+            logger.info(
+                f"Reset {rows_reset} product generation entries to 'pending' "
+                f"for volume {volume_id} (volume recovered with additional fields)"
+            )
+        return rows_reset
+
     def get_volumes_for_product_generation(self, product_type: str = "image") -> List[Dict]:
         """
         Get volumes that are ready for product generation.

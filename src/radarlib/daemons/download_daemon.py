@@ -49,6 +49,7 @@ class DownloadDaemonConfig:
     bufr_download_max_delay: float = 30
     failed_file_retry_interval: int = 600  # Retry failed files every 10 minutes (in seconds)
     failed_file_retention_days: int = 1  # Keep retrying for up to 1 day
+    ftp_cycle_timeout: int = 120  # Max seconds for a single FTP poll cycle before timeout
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -100,6 +101,7 @@ class DownloadDaemon:
         }
         self._running = False
         self._last_failed_retry_time: Optional[datetime] = None
+        self._last_heartbeat: Optional[datetime] = None
 
     @property
     def vol_types(self):
@@ -119,6 +121,9 @@ class DownloadDaemon:
         while True:
             try:
                 await self.run_service()
+            except asyncio.CancelledError:
+                logger.info(f"[{self.radar_name}] Download daemon cancelled, shutting down...")
+                break
             except Exception as e:
                 logger.exception("Radar process error: %s", e)
             await asyncio.sleep(interval)
@@ -127,126 +132,169 @@ class DownloadDaemon:
         """
         Run the daemon indefinitely, checking for new files every poll_interval seconds.
         """
+        self._running = True
         logger.info(f"[{self.radar_name}] Starting continuous daemon with poll interval: {self.poll_interval} seconds")
 
         # Memory monitoring setup (per copilot-instructions.md Rule 5)
         _cycle_count = 0
         log_memory_usage(f"[{self.radar_name}] DownloadDaemon startup")
 
-        while True:
-            try:
-                # Determine resume date: use latest downloaded file if available and newer than start_date
-                resume_date: datetime = self.start_date  # type: ignore
-                latest_bufr_file = self.state_tracker.get_latest_downloaded_file(self.radar_name)
-                if latest_bufr_file and latest_bufr_file.get("observation_datetime"):
-                    latest_bufr_date_str = latest_bufr_file["observation_datetime"]
-                    # Parse ISO format datetime string if needed
-                    if isinstance(latest_bufr_date_str, str):
-                        latest_bufr_date = datetime.fromisoformat(latest_bufr_date_str.replace("Z", "+00:00"))
-                    else:
-                        latest_bufr_date = latest_bufr_date_str
+        try:
+            while self._running:
+                try:
+                    # Update heartbeat at start of each cycle
+                    self._last_heartbeat = datetime.now(timezone.utc)
 
-                    if resume_date and latest_bufr_date > resume_date:
-                        resume_date = latest_bufr_date
-                        logger.info(f"[{self.radar_name}] Resuming from last bufr file date: {resume_date.isoformat()}")
-                    else:
-                        logger.info(
-                            f"[{self.radar_name}] Starting from configured start date: {resume_date.isoformat()}"
-                        )
+                    await self._run_ftp_poll_cycle(_cycle_count)
+                    _cycle_count += 1
+
+                    # Wait before next check — INSIDE try/except so CancelledError is caught
+                    await asyncio.sleep(self.poll_interval)
+
+                except asyncio.CancelledError:
+                    logger.info(f"[{self.radar_name}] Download daemon cancelled during cycle")
+                    raise  # Re-raise to be caught by outer CancelledError handler
+                except Exception as e:
+                    logger.exception(f"[{self.radar_name}] Error during FTP poll cycle: {e}")
+                    await asyncio.sleep(self.poll_interval)
+
+        except asyncio.CancelledError:
+            logger.info(f"[{self.radar_name}] Download daemon cancelled, shutting down...")
+        finally:
+            self._running = False
+            logger.info(f"[{self.radar_name}] Download daemon stopped")
+
+    async def _run_ftp_poll_cycle(self, _cycle_count: int) -> None:
+        """
+        Execute a single FTP poll cycle with a timeout guard.
+
+        Wraps the entire FTP connection + traversal + download in an
+        asyncio.wait_for to prevent indefinite hangs on stale connections.
+        """
+        try:
+            await asyncio.wait_for(
+                self._ftp_poll_cycle_inner(_cycle_count),
+                timeout=self.config.ftp_cycle_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"[{self.radar_name}] FTP poll cycle timed out after {self.config.ftp_cycle_timeout}s. "
+                f"This likely indicates a hung FTP connection. Will retry next cycle."
+            )
+
+    async def _ftp_poll_cycle_inner(self, _cycle_count: int) -> None:
+        """Inner FTP poll cycle — connection, traversal, download, retry."""
+        try:
+            # Determine resume date: use latest downloaded file if available and newer than start_date
+            resume_date: datetime = self.start_date  # type: ignore
+            latest_bufr_file = self.state_tracker.get_latest_downloaded_file(self.radar_name)
+            if latest_bufr_file and latest_bufr_file.get("observation_datetime"):
+                latest_bufr_date_str = latest_bufr_file["observation_datetime"]
+                # Parse ISO format datetime string if needed
+                if isinstance(latest_bufr_date_str, str):
+                    latest_bufr_date = datetime.fromisoformat(latest_bufr_date_str.replace("Z", "+00:00"))
                 else:
-                    if resume_date:
-                        logger.info(
-                            f"[{self.radar_name}] No previous downloads found, starting from: {resume_date.isoformat()}"
-                        )
-                    else:
-                        logger.warning(f"[{self.radar_name}] No start date configured")
+                    latest_bufr_date = latest_bufr_date_str
 
-                async with RadarFTPClientAsync(
-                    self.config.host,
-                    self.config.username,
-                    self.config.password,
-                    max_workers=self.config.max_concurrent_downloads,
-                ) as client:
-                    logger.debug(f"[{self.radar_name}] Connected to FTP server. Checking for new files...")
-                    files = self.new_bufr_files(
-                        ftp_client=client, start_date=resume_date, end_date=None, vol_types=self.vol_types
+                if resume_date and latest_bufr_date > resume_date:
+                    resume_date = latest_bufr_date
+                    logger.info(f"[{self.radar_name}] Resuming from last bufr file date: {resume_date.isoformat()}")
+                else:
+                    logger.info(
+                        f"[{self.radar_name}] Starting from configured start date: {resume_date.isoformat()}"
                     )
-                    if files:
-                        tasks = []
-                        for remote, local, fname, dt, status in files:
+            else:
+                if resume_date:
+                    logger.info(
+                        f"[{self.radar_name}] No previous downloads found, starting from: {resume_date.isoformat()}"
+                    )
+                else:
+                    logger.warning(f"[{self.radar_name}] No start date configured")
 
-                            async def download_one(
-                                remote_path=remote, local_path=local, fname=fname, dt=dt, status=status
-                            ):
-                                components = extract_bufr_filename_components(fname)
-                                try:
-                                    await exponential_backoff_retry(
-                                        lambda: client.download_file_async(remote_path, local_path),
-                                        max_retries=self.config.bufr_download_max_retries,
-                                        base_delay=self.config.bufr_download_base_delay,
-                                        max_delay=self.config.bufr_download_max_delay,
-                                    )
-                                    # success → update DB
-                                    # Calculate checksum if enabled
-                                    checksum = None
-                                    # TODO: implement checksum calculation asynchronously
-                                    # Get file size
-                                    file_size = local_path.stat().st_size
+            async with RadarFTPClientAsync(
+                self.config.host,
+                self.config.username,
+                self.config.password,
+                max_workers=self.config.max_concurrent_downloads,
+            ) as client:
+                logger.debug(f"[{self.radar_name}] Connected to FTP server. Checking for new files...")
+                files = self.new_bufr_files(
+                    ftp_client=client, start_date=resume_date, end_date=None, vol_types=self.vol_types
+                )
+                if files:
+                    tasks = []
+                    for remote, local, fname, dt, status in files:
 
-                                    self.state_tracker.mark_downloaded(
-                                        fname,
-                                        str(remote_path),
-                                        str(local_path),
-                                        file_size=file_size,
-                                        checksum=checksum,
-                                        radar_name=self.radar_name,
-                                        strategy=components["strategy"],
-                                        vol_nr=components["vol_nr"],
-                                        field_type=components["field_type"],
-                                        observation_datetime=dt.isoformat(),
-                                    )
-                                    logger.info(f"[{self.radar_name}] Downloaded {fname}")
-                                except FTPError as e:
-                                    self.state_tracker.mark_failed(
-                                        fname,
-                                        str(remote_path),
-                                        str(local_path),
-                                        radar_name=self.radar_name,
-                                        strategy=components["strategy"],
-                                        vol_nr=components["vol_nr"],
-                                        field_type=components["field_type"],
-                                        observation_datetime=dt.isoformat(),
-                                    )
-                                    logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
-                                finally:
-                                    # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
-                                    if "components" in locals():
-                                        del components
-                                    gc.collect()
+                        async def download_one(
+                            remote_path=remote, local_path=local, fname=fname, dt=dt, status=status
+                        ):
+                            components = extract_bufr_filename_components(fname)
+                            try:
+                                await exponential_backoff_retry(
+                                    lambda: client.download_file_async(remote_path, local_path),
+                                    max_retries=self.config.bufr_download_max_retries,
+                                    base_delay=self.config.bufr_download_base_delay,
+                                    max_delay=self.config.bufr_download_max_delay,
+                                )
+                                # success → update DB
+                                # Calculate checksum if enabled
+                                checksum = None
+                                # TODO: implement checksum calculation asynchronously
+                                # Get file size
+                                file_size = local_path.stat().st_size
 
-                            tasks.append(asyncio.create_task(download_one()))
+                                self.state_tracker.mark_downloaded(
+                                    fname,
+                                    str(remote_path),
+                                    str(local_path),
+                                    file_size=file_size,
+                                    checksum=checksum,
+                                    radar_name=self.radar_name,
+                                    strategy=components["strategy"],
+                                    vol_nr=components["vol_nr"],
+                                    field_type=components["field_type"],
+                                    observation_datetime=dt.isoformat(),
+                                )
+                                logger.info(f"[{self.radar_name}] Downloaded {fname}")
+                            except FTPError as e:
+                                self.state_tracker.mark_failed(
+                                    fname,
+                                    str(remote_path),
+                                    str(local_path),
+                                    radar_name=self.radar_name,
+                                    strategy=components["strategy"],
+                                    vol_nr=components["vol_nr"],
+                                    field_type=components["field_type"],
+                                    observation_datetime=dt.isoformat(),
+                                )
+                                logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
+                            finally:
+                                # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
+                                if "components" in locals():
+                                    del components
+                                gc.collect()
 
-                        await asyncio.gather(*tasks)
-                        logger.info(f"[{self.radar_name}] Processed {len(files)} files.")
+                    tasks.append(asyncio.create_task(download_one()))
 
-                        # Cleanup task list to release closure references (per copilot-instructions.md Rules 1, 3)
-                        tasks = []
-                        gc.collect()
+                    await asyncio.gather(*tasks)
+                    logger.info(f"[{self.radar_name}] Processed {len(files)} files.")
 
-                        _cycle_count += 1
-                        if _cycle_count % 5 == 0:  # Every 5 cycles, same cadence as other daemons
-                            log_memory_usage(f"[{self.radar_name}] DownloadDaemon cycle {_cycle_count}")
-                            aggressive_cleanup(f"DownloadDaemon cycle {_cycle_count}")
-                    else:
-                        logger.info(f"[{self.radar_name}] No new files.")
+                    # Cleanup task list to release closure references (per copilot-instructions.md Rules 1, 3)
+                    tasks = []
+                    gc.collect()
 
-                    # Periodically retry failed downloads
-                    await self._retry_failed_downloads_async()
+                    _cycle_count += 1
+                    if _cycle_count % 5 == 0:  # Every 5 cycles, same cadence as other daemons
+                        log_memory_usage(f"[{self.radar_name}] DownloadDaemon cycle {_cycle_count}")
+                        aggressive_cleanup(f"DownloadDaemon cycle {_cycle_count}")
+                else:
+                    logger.info(f"[{self.radar_name}] No new files.")
 
-            except Exception as e:
-                logger.exception(f"[{self.radar_name}] Error during check_latest_folder: {e}")
+                # Periodically retry failed downloads
+                await self._retry_failed_downloads_async()
 
-            await asyncio.sleep(self.poll_interval)
+        except Exception as e:
+            logger.exception(f"[{self.radar_name}] Error during FTP poll cycle: {e}")
 
     def new_bufr_files(
         self,

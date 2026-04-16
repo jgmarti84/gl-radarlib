@@ -40,6 +40,7 @@ def create_gate_coords_file(
     ftp_user: Optional[str] = None,
     ftp_pass: Optional[str] = None,
     lookback_hours: int = 72,
+    max_download_attempts: int = 3,
 ):
     """Fetch one random BUFR file and save gate coordinates as compressed .npz.
 
@@ -115,9 +116,8 @@ def create_gate_coords_file(
         for dt, fname, full_remote in client.traverse_radar(
             radar_name, dt_start=dt_start, dt_end=dt_end, vol_types=pattern
         ):
-            # with just one candidate, we can break early and avoid traversing more directories
             candidates.append((dt, fname, full_remote))
-            if candidates:
+            if len(candidates) >= max_download_attempts * 2:
                 break
 
         if not candidates:
@@ -125,44 +125,71 @@ def create_gate_coords_file(
                 f"No BUFR files found for {radar_name} {strategy_name} {vol_nr} in last {lookback_hours}h"
             )
 
-        # pick a random candidate
-        dt, fname, remote_path = random.choice(candidates)
+        # Shuffle so successive retries try different files
+        random.shuffle(candidates)
+        last_error: Optional[Exception] = None
 
-        with tempfile.TemporaryDirectory(prefix=f"bufr_{radar_name}_{vol_nr}_") as tmpdir:
-            tmpdir = Path(tmpdir)
-            local_bufr = tmpdir / Path(remote_path).name
-            logger.info("Downloading %s to %s", remote_path, local_bufr)
-            client.download_file(remote_path.as_posix(), local_bufr)
+        for attempt, (dt, fname, remote_path) in enumerate(
+            candidates[:max_download_attempts], start=1
+        ):
+            try:
+                with tempfile.TemporaryDirectory(prefix=f"bufr_{radar_name}_{vol_nr}_") as tmpdir:
+                    tmpdir = Path(tmpdir)
+                    local_bufr = tmpdir / Path(remote_path).name
+                    logger.info(
+                        "Attempt %d/%d: downloading %s to %s",
+                        attempt,
+                        min(max_download_attempts, len(candidates)),
+                        remote_path,
+                        local_bufr,
+                    )
+                    client.download_file(remote_path.as_posix(), local_bufr)
 
-            # convert to pyart Radar (in-memory)
-            radar = bufr_paths_to_pyart([str(local_bufr)], save_path=None)
+                    # convert to pyart Radar (in-memory)
+                    radar = bufr_paths_to_pyart([str(local_bufr)], save_path=None)
 
-            # ensure output dir exists
-            out = Path(output_dir)
-            out.mkdir(parents=True, exist_ok=True)
+                    # ensure output dir exists
+                    out = Path(output_dir)
+                    out.mkdir(parents=True, exist_ok=True)
 
-            # extract gate coordinates and save
-            gate_x, gate_y, gate_z = get_gate_coordinates(radar)
-            out_fname = f"{radar_name}_{strategy_name}_{vol_nr}_gate_coordinates.npz"
-            out_path = out / out_fname
+                    # extract gate coordinates and save
+                    gate_x, gate_y, gate_z = get_gate_coordinates(radar)
+                    out_fname = f"{radar_name}_{strategy_name}_{vol_nr}_gate_coordinates.npz"
+                    out_path = out / out_fname
 
-            # blind range
-            blind_range_m = infer_blind_range_m(radar)
+                    # blind range
+                    blind_range_m = infer_blind_range_m(radar)
 
-            # Extraer elevación mínima para below-beam mask
-            lowest_elev_deg = float(np.min(radar.fixed_angle["data"]))
+                    # Extraer elevación mínima para below-beam mask
+                    lowest_elev_deg = float(np.min(radar.fixed_angle["data"]))
 
-            np.savez_compressed(
-                out_path,
-                gate_x=gate_x,
-                gate_y=gate_y,
-                gate_z=gate_z,
-                blind_range_m=blind_range_m,
-                lowest_elev_deg=lowest_elev_deg,
-            )
+                    np.savez_compressed(
+                        out_path,
+                        gate_x=gate_x,
+                        gate_y=gate_y,
+                        gate_z=gate_z,
+                        blind_range_m=blind_range_m,
+                        lowest_elev_deg=lowest_elev_deg,
+                    )
 
-            logger.info("Wrote gate coordinates to %s", out_path)
-            return out_path
+                    logger.info("Wrote gate coordinates to %s", out_path)
+                    return out_path
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    "Attempt %d/%d failed for %s: %s. %s",
+                    attempt,
+                    min(max_download_attempts, len(candidates)),
+                    fname,
+                    e,
+                    "Trying next candidate..." if attempt < min(max_download_attempts, len(candidates)) else "No more candidates.",
+                )
+
+        # All attempts exhausted
+        raise RuntimeError(
+            f"Failed to create gate coordinates after {min(max_download_attempts, len(candidates))} "
+            f"attempts for {radar_name} {strategy_name} {vol_nr}: {last_error}"
+        ) from last_error
 
 
 if __name__ == "__main__":

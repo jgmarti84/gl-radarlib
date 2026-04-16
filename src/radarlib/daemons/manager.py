@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Watchdog constants
+_WATCHDOG_INTERVAL_S: int = 120  # Check daemon health every 2 minutes
+_HEARTBEAT_STALE_THRESHOLD_S: int = 300  # Daemon is considered hung after 5 minutes without heartbeat
+
 from radarlib.daemons.cleanup_daemon import CleanupDaemon, CleanupDaemonConfig
 from radarlib.daemons.download_daemon import DownloadDaemon, DownloadDaemonConfig
 from radarlib.daemons.processing_daemon import ProcessingDaemon, ProcessingDaemonConfig
@@ -231,7 +235,7 @@ class DaemonManager:
         # Create and start download daemon
         if self.config.enable_download_daemon:
             self.download_daemon = self._create_download_daemon()
-            task = asyncio.create_task(self.download_daemon.run_service())
+            task = asyncio.create_task(self.download_daemon.start())
             self._tasks.append(("download", task))
             logger.info("Started download daemon")
 
@@ -244,17 +248,20 @@ class DaemonManager:
 
         # Create and start product generation daemon
         if self.config.enable_product_daemon:
-            self.product_daemon = self._create_product_daemon()
-            task = asyncio.create_task(self.product_daemon.run())
+            try:
+                self.product_daemon = self._create_product_daemon()
+            except Exception as e:
+                logger.error(
+                    f"Failed to create product daemon (geometry init may have failed): {e}. "
+                    f"Product daemon will NOT start. Other daemons continue.",
+                    exc_info=True,
+                )
+                self.product_daemon = None
 
-            # Validate configuration for geotiff products
-            if self.config.product_type == "geotiff" and self.product_daemon.geometry is None:
-                logger.error("Geotiff product requires 'geometry' configuration; stopping daemons")
-                self.stop()
-                raise RuntimeError("Geotiff product generation requires 'geometry' that is not None.")
-
-            self._tasks.append(("product", task))
-            logger.info("Started product generation daemon")
+            if self.product_daemon is not None:
+                task = asyncio.create_task(self.product_daemon.run())
+                self._tasks.append(("product", task))
+                logger.info("Started product generation daemon")
 
         # Create and start cleanup daemon
         if self.config.enable_cleanup_daemon:
@@ -266,6 +273,11 @@ class DaemonManager:
         if not self._tasks:
             logger.warning("No daemons enabled in configuration")
             return
+
+        # Start watchdog to monitor daemon health
+        watchdog_task = asyncio.create_task(self._watchdog())
+        self._tasks.append(("watchdog", watchdog_task))
+        logger.info("Started daemon watchdog")
 
         # Wait for all tasks to complete
         try:
@@ -314,6 +326,78 @@ class DaemonManager:
 
         self._running = False
 
+    async def _watchdog(self) -> None:
+        """
+        Periodically check daemon health via heartbeat timestamps.
+
+        If a daemon's heartbeat is stale beyond the threshold, it is considered
+        hung (e.g., blocked on a stale FTP socket) and will be restarted.
+        Currently monitors the download daemon only, since it is the daemon
+        most susceptible to FTP connection hangs.
+        """
+        logger.info(
+            f"Watchdog started: checking every {_WATCHDOG_INTERVAL_S}s, "
+            f"stale threshold {_HEARTBEAT_STALE_THRESHOLD_S}s"
+        )
+        try:
+            while self._running:
+                await asyncio.sleep(_WATCHDOG_INTERVAL_S)
+
+                # --- Download daemon health check ---
+                if self.download_daemon and self.download_daemon._last_heartbeat:
+                    elapsed = (
+                        datetime.now(timezone.utc) - self.download_daemon._last_heartbeat
+                    ).total_seconds()
+
+                    if elapsed > _HEARTBEAT_STALE_THRESHOLD_S:
+                        logger.warning(
+                            f"[{self.config.radar_name}] Watchdog: download daemon heartbeat "
+                            f"stale for {elapsed:.0f}s (threshold {_HEARTBEAT_STALE_THRESHOLD_S}s). "
+                            f"Restarting download daemon..."
+                        )
+                        try:
+                            await self.restart_download_daemon()
+                            logger.info(
+                                f"[{self.config.radar_name}] Watchdog: download daemon restarted successfully"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"[{self.config.radar_name}] Watchdog: failed to restart download daemon: {e}",
+                                exc_info=True,
+                            )
+                    else:
+                        logger.debug(
+                            f"[{self.config.radar_name}] Watchdog: download daemon healthy "
+                            f"(last heartbeat {elapsed:.0f}s ago)"
+                        )
+
+                # --- Check if download daemon task has died silently ---
+                # Also detect other crashed daemon tasks for visibility
+                for name, task in list(self._tasks):
+                    if name == "watchdog" or not task.done():
+                        continue
+                    exc = task.exception() if not task.cancelled() else None
+                    logger.warning(
+                        f"[{self.config.radar_name}] Watchdog: '{name}' daemon task "
+                        f"unexpectedly finished (exception={exc})."
+                    )
+                    if name == "download":
+                        logger.info(f"[{self.config.radar_name}] Watchdog: restarting download daemon...")
+                        try:
+                            await self.restart_download_daemon()
+                        except Exception as e:
+                            logger.error(
+                                f"[{self.config.radar_name}] Watchdog: restart download daemon failed: {e}",
+                                exc_info=True,
+                            )
+                    # For other daemons, just log — they don't have the FTP hang issue
+                    # and their crashes need investigation rather than blind restart
+
+        except asyncio.CancelledError:
+            logger.info("Watchdog cancelled, shutting down...")
+        except Exception as e:
+            logger.error(f"Watchdog error: {e}", exc_info=True)
+
     async def restart_download_daemon(self, new_config: Optional[Dict] = None) -> None:
         """
         Restart download daemon with optional new configuration.
@@ -346,7 +430,7 @@ class DaemonManager:
 
         # Create and start new download daemon
         self.download_daemon = self._create_download_daemon()
-        task = asyncio.create_task(self.download_daemon.run_service())
+        task = asyncio.create_task(self.download_daemon.start())
         self._tasks.append(("download", task))
         logger.info("Download daemon restarted")
 
