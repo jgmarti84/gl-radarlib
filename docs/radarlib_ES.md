@@ -225,28 +225,39 @@ Ver [Referencias de Configuración](#3-referencias-de-configuración) para detal
 
 # 3. Referencias de Configuración {#ch3-config}
 
-## Sistema de Configuración
+## Sistema de Configuración (Arquitectura de dos capas)
 
-radarlib utiliza un sistema de configuración flexible con múltiples niveles:
+radarlib tiene dos sistemas de configuración independientes:
 
-1. **Variables de entorno** (prioridad máxima)
-2. **Archivo de configuración JSON** (vía env var `RADARLIB_CONFIG`)
-3. **Archivo YAML** (`genpro25.yml`, si está presente)
-4. **Valores por defecto integrados** (prioridad mínima)
+### Capa de Biblioteca: `radarlib.config` (Autónoma)
+Controla configuraciones internas: mapas de color, umbrales COLMAX, parámetros de geometría.
+- Accesible con `from radarlib import config`
+- Orden de prioridad:
+  1. Variables de entorno (prioridad máxima)
+  2. Archivo JSON (vía env var `RADARLIB_CONFIG`)
+  3. Valores por defecto integrados (prioridad mínima)
 
-## Carga de Configuración
+### Capa de Servicio: `app.config` (Servicio Genpro25)
+Controla el comportamiento de los daemons: credenciales FTP, intervalos de sondeo, políticas de retención, formato de salida.
+- Accesible con `from config import ...` (desde app/main.py)
+- Usada únicamente por la capa de servicio Genpro25
+- Orden de prioridad:
+  1. Variables de entorno (prioridad máxima)
+  2. Archivo YAML (`genpro25.yml` — sección GENPRO25_ENV)
+  3. Valores por defecto en `_DEFAULTS` dict (prioridad mínima)
+
+### Carga de Configuración
 
 ```python
+# Ejemplo capa de biblioteca
 from radarlib import config
-
-# Obtener un valor de configuración
-valor = config.get("CLAVE")
-
-# Obtener con valor por defecto
+valor = config.get("COLMAX_THRESHOLD")
 valor = config.get("CLAVE", default="fallback")
 
-# Recargar desde archivo
-config.reload("/ruta/a/config.json")
+# Ejemplo capa de servicio (desde app/main.py)
+import config  # Esto importa app/config.py
+host_ftp = config.FTP_HOST  # Acceso directo a atributos
+tipo_producto = config.PRODUCT_TYPE
 ```
 
 ## Variables de Entorno Clave
@@ -272,7 +283,61 @@ config.reload("/ruta/a/config.json")
 | `FTP_USER` | Usuario FTP | `str` | `"ejemplo_usuario"` |
 | `FTP_PASS` | Contraseña FTP | `str` | `"secreto"` |
 
+### Configuración de Daemons de la Capa de Servicio
+
+Estas variables controlan el comportamiento de los daemons de la capa de servicio Genpro25 y se definen en `app/config.py`:
+
+#### Interruptores de Daemons
+
+| Variable | Descripción | Tipo | Por Defecto |
+|---|---|---|---|
+| `ENABLE_DOWNLOAD_DAEMON` | Iniciar daemon de descarga FTP | `bool` | `True` |
+| `ENABLE_PROCESSING_DAEMON` | Iniciar daemon de procesamiento BUFR | `bool` | `True` |
+| `ENABLE_PRODUCT_DAEMON` | Iniciar daemon de generación de productos | `bool` | `True` |
+| `ENABLE_CLEANUP_DAEMON` | Iniciar daemon de limpieza ⚠️ **Deshabilitado por defecto** | `bool` | `False` |
+
+#### Intervalos de Sondeo (segundos)
+
+| Variable | Descripción | Tipo | Por Defecto |
+|---|---|---|---|
+| `DOWNLOAD_POLL_INTERVAL` | Segundos entre verificaciones FTP | `int` | `60` |
+| `PROCESSING_POLL_INTERVAL` | Segundos entre verificaciones de procesamiento | `int` | `30` |
+| `PRODUCT_POLL_INTERVAL` | Segundos entre generaciones de productos | `int` | `30` |
+| `CLEANUP_POLL_INTERVAL` | Segundos entre ciclos de limpieza | `int` | `1800` (30 minutos) |
+
+#### Procesamiento y Generación de Productos
+
+| Variable | Descripción | Tipo | Por Defecto |
+|---|---|---|---|
+| `PRODUCT_TYPE` | Formato de salida (ver abajo) | `str` | `"raw_cog"` |
+| `ADD_COLMAX` | Generar máximo columnar (solo PNG) | `bool` | `True` |
+| `START_DATE` | Iniciar descargas desde esta fecha (UTC) | `datetime` o `None` | `None` |
+
+#### Retención de Datos
+
+| Variable | Descripción | Tipo | Por Defecto |
+|---|---|---|---|
+| `BUFR_RETENTION_DAYS` | Mantener archivos BUFR N días | `float` | `30.0` |
+| `NETCDF_RETENTION_DAYS` | Mantener archivos NetCDF N días | `float` | `30.0` |
+| `GEOMETRY_BUFR_LOOKBACK_HOURS` | Buscar atrás N horas para BUFR de geometría | `int` | `72` |
+
+#### Tipo de Producto de Salida
+
+La variable `PRODUCT_TYPE` controla qué formato se genera:
+
+| Valor | Formato | Descripción |
+|-------|---------|-------------|
+| `"image"` | PNG | Archivos PNG de visualización (modo heredado) |
+| `"geotiff"` | COG | GeoTIFF multi-banda RGBA (mapa de color incrustado en píxeles como uint8) |
+| `"raw_cog"` | COG | **Estándar de producción.** GeoTIFF mono-banda float32 con mapa de color y rango de valores como metadatos, permitiendo remapeo dinámico de mapas de color vía rio-tiler |
+
+**Recomendación:** Use `"raw_cog"` para todos los nuevos despliegues.
+
+**Nota:** La configuración `ADD_COLMAX` solo se aplica cuando `PRODUCT_TYPE="image"`. COLMAX no se genera para modos COG.
+
 ### Procesamiento COLMAX (Máximo Columnar)
+
+⚠️ **Nota:** Estas configuraciones solo se aplican cuando `PRODUCT_TYPE="image"` (modo PNG). En modos `raw_cog` o `geotiff`, no se genera COLMAX.
 
 | Variable | Descripción | Tipo | Por Defecto |
 |---|---|---|---|
@@ -322,7 +387,42 @@ config.reload("/ruta/a/config.json")
 ## Ejemplo: genpro25.yml
 
 ```yaml
+# Ejemplo de Configuración del Servicio Genpro25
+# Colocar en app/genpro25.yml o referenciado vía env var GENPRO25_ENV
+
 local:
+  # Configuración de Conexión FTP
+  FTP:
+    FTP_HOST: "200.16.116.24"
+    FTP_USER: "tu_usuario_ftp"
+    FTP_PASS: "tu_contraseña_ftp"
+
+  # Interruptores de Toggleado Daemon
+  DAEMON_PARAMS:
+    ENABLE_DOWNLOAD_DAEMON: true
+    ENABLE_PROCESSING_DAEMON: true
+    ENABLE_PRODUCT_DAEMON: true
+    ENABLE_CLEANUP_DAEMON: true        # ADVERTENCIA: Deshabilitado por defecto
+
+  # Intervalos de Sondeo (segundos)
+  INTERVALS:
+    DOWNLOAD_POLL_INTERVAL: 60         # Verificar FTP cada 60 seg
+    PROCESSING_POLL_INTERVAL: 30       # Verificar NetCDF cada 30 seg
+    PRODUCT_POLL_INTERVAL: 30          # Generar productos cada 30 seg
+    CLEANUP_POLL_INTERVAL: 1800        # Limpiar cada 30 minutos
+
+  # Salida de Generación de Productos
+  PRODUCT_OUTPUT:
+    PRODUCT_TYPE: "raw_cog"            # Opciones: "image" (PNG), "geotiff", "raw_cog" (recomendado)
+    ADD_COLMAX: true                   # Generar max columnar (solo PNG)
+
+  # Retención de Datos (días)
+  RETENTION:
+    BUFR_RETENTION_DAYS: 30.0
+    NETCDF_RETENTION_DAYS: 30.0
+    GEOMETRY_BUFR_LOOKBACK_HOURS: 72
+
+  # Configuración de Reflectividad COLMAX (Máximo Columnar)
   COLMAX:
     COLMAX_THRESHOLD: -3
     COLMAX_ELEV_LIMIT1: 0.65
@@ -330,19 +430,35 @@ local:
     COLMAX_RHOHV_UMBRAL: 0.8
     COLMAX_WRAD_FILTER: true
     COLMAX_WRAD_UMBRAL: 4.6
-  FTP:
-    FTP_HOST: "200.16.116.24"
-    FTP_USER: "tu_usuario"
-    FTP_PASS: "tu_contraseña"
-  PNG_PLOTS:
-    FIELDS_TO_PLOT: ["DBZH", "RHOHV", "ZDR"]
+    COLMAX_TDR_FILTER: true
+    COLMAX_TDR_UMBRAL: 8.5
+
+  # Visualización (Datos Sin Filtrar)
+  VISUALIZATION_NOFILTERS:
+    VMIN_REFL_NOFILTERS: -20
+    VMAX_REFL_NOFILTERS: 70
+    CMAP_REFL_NOFILTERS: "grc_th"
+    VMIN_ZDR_NOFILTERS: -7.5
+    VMAX_ZDR_NOFILTERS: 7.5
+    CMAP_ZDR_NOFILTERS: "grc_zdr"
+
+  # Visualización (Datos Filtrados)
+  VISUALIZATION_FILTERED:
     VMIN_REFL: -20
     VMAX_REFL: 70
     CMAP_REFL: "grc_th"
+    VMIN_ZDR: -2.0
+    VMAX_ZDR: 7.5
+    CMAP_ZDR: "grc_zdr"
+
+  # Filtros de Calidad GRC
   GRC_FILTER:
-    RHV:
-      GRC_RHV_FILTER: true
-      GRC_RHV_THRESHOLD: 0.8
+    GRC_RHV_FILTER: true
+    GRC_RHV_THRESHOLD: 0.55
+    GRC_WRAD_FILTER: true
+    GRC_WRAD_THRESHOLD: 4.6
+    GRC_ZDR_FILTER: true
+    GRC_ZDR_THRESHOLD: 8.5
 ```
 
 ---
