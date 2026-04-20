@@ -274,10 +274,12 @@ class TestProductGenerationDaemonRawCog:
         daemon.state_tracker.register_product_generation = MagicMock()
         daemon.state_tracker.mark_product_status = MagicMock()
 
-        with _patch.object(daemon, "_generate_raw_cog_products_sync") as mock_raw_cog:
-            with _patch.object(daemon, "_generate_cog_products_sync") as mock_legacy_cog:
-                with _patch.object(daemon, "_generate_products_sync") as mock_image:
-                    result = asyncio.run(daemon._generate_product_async(volume_info))
+        with _patch.object(daemon, "_ensure_geometry", return_value=MagicMock()):
+            daemon.geometry = {"0315-01": object()}  # or MagicMock(), or whatever fits
+            with _patch.object(daemon, "_generate_raw_cog_products_sync") as mock_raw_cog:
+                with _patch.object(daemon, "_generate_cog_products_sync") as mock_legacy_cog:
+                    with _patch.object(daemon, "_generate_products_sync") as mock_image:
+                        result = asyncio.run(daemon._generate_product_async(volume_info))
 
         mock_raw_cog.assert_called_once()
         mock_legacy_cog.assert_not_called()
@@ -320,10 +322,11 @@ class TestProductGenerationDaemonRawCog:
         daemon.state_tracker.register_product_generation = MagicMock()
         daemon.state_tracker.mark_product_status = MagicMock()
 
-        with _patch.object(daemon, "_generate_cog_products_sync") as mock_legacy_cog:
-            with _patch.object(daemon, "_generate_raw_cog_products_sync") as mock_raw_cog:
-                with _patch.object(daemon, "_generate_products_sync") as mock_image:
-                    result = asyncio.run(daemon._generate_product_async(volume_info))
+        with _patch.object(daemon, "_ensure_geometry", return_value=MagicMock()):
+            with _patch.object(daemon, "_generate_cog_products_sync") as mock_legacy_cog:
+                with _patch.object(daemon, "_generate_raw_cog_products_sync") as mock_raw_cog:
+                    with _patch.object(daemon, "_generate_products_sync") as mock_image:
+                        result = asyncio.run(daemon._generate_product_async(volume_info))
 
         mock_legacy_cog.assert_called_once()
         mock_raw_cog.assert_not_called()
