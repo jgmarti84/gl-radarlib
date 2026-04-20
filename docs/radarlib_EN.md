@@ -225,28 +225,39 @@ See [Configuration Reference](#3-configuration-reference) for details on using `
 
 # 3. Configuration Reference {#3-configuration-reference}
 
-## Configuration System
+## Configuration System (Two-Layer Architecture)
 
-radarlib uses a flexible multi-level configuration system:
+radarlib has two independent configuration systems:
 
-1. **Environment variables** (highest priority)
-2. **JSON configuration file** (via `RADARLIB_CONFIG` env var)
-3. **YAML file** (`genpro25.yml`, if present)
-4. **Built-in defaults** (lowest priority)
+### Library Layer: `radarlib.config` (Standalone)
+Controls core library settings: colormaps, COLMAX thresholds, geometry parameters.
+- Accessible with `from radarlib import config`
+- Priority order:
+  1. Environment variables (highest priority)
+  2. JSON file (via `RADARLIB_CONFIG` env var)
+  3. Built-in defaults (lowest priority)
 
-## Configuration Loading
+### Service Layer: `app.config` (Genpro25 Service)
+Controls daemon behavior: FTP credentials, poll intervals, retention policies, output format.
+- Accessible with `from config import ...` (from app/main.py)
+- Used by Genpro25 service layer only
+- Priority order:
+  1. Environment variables (highest priority)
+  2. YAML file (`genpro25.yml` — GENPRO25_ENV section)
+  3. Built-in defaults in `_DEFAULTS` dict (lowest priority)
+
+### Configuration Loading
 
 ```python
+# Library layer example
 from radarlib import config
-
-# Get a config value
-value = config.get("CKEY")
-
-# Get with default
+value = config.get("COLMAX_THRESHOLD")
 value = config.get("KEY", default="fallback")
 
-# Reload from file
-config.reload("/path/to/config.json")
+# Service layer example (from app/main.py)
+import config  # This imports app/config.py
+ftp_host = config.FTP_HOST  # Direct attribute access
+product_type = config.PRODUCT_TYPE
 ```
 
 ## Key Environment Variables
@@ -272,7 +283,61 @@ config.reload("/path/to/config.json")
 | `FTP_USER` | FTP username | `str` | `"example_user"` |
 | `FTP_PASS` | FTP password | `str` | `"secret"` |
 
+### Service-Layer Daemon Configuration
+
+These variables control the Genpro25 service layer daemon behavior and are defined in `app/config.py`:
+
+#### Daemon Toggles
+
+| Variable | Description | Type | Default |
+|---|---|---|---|
+| `ENABLE_DOWNLOAD_DAEMON` | Start FTP download daemon | `bool` | `True` |
+| `ENABLE_PROCESSING_DAEMON` | Start BUFR processing daemon | `bool` | `True` |
+| `ENABLE_PRODUCT_DAEMON` | Start product generation daemon | `bool` | `True` |
+| `ENABLE_CLEANUP_DAEMON` | Start cleanup daemon ⚠️ **Disabled by default** | `bool` | `False` |
+
+#### Poll Intervals (seconds)
+
+| Variable | Description | Type | Default |
+|---|---|---|---|
+| `DOWNLOAD_POLL_INTERVAL` | Seconds between FTP checks | `int` | `60` |
+| `PROCESSING_POLL_INTERVAL` | Seconds between processing checks | `int` | `30` |
+| `PRODUCT_POLL_INTERVAL` | Seconds between product generation checks | `int` | `30` |
+| `CLEANUP_POLL_INTERVAL` | Seconds between cleanup cycles | `int` | `1800` (30 minutes) |
+
+#### Processing & Product Generation
+
+| Variable | Description | Type | Default |
+|---|---|---|---|
+| `PRODUCT_TYPE` | Output format (see below) | `str` | `"raw_cog"` |
+| `ADD_COLMAX` | Generate column-max reflectivity (PNG only) | `bool` | `True` |
+| `START_DATE` | Begin downloads from this date (UTC) | `datetime` or `None` | `None` |
+
+#### Data Retention
+
+| Variable | Description | Type | Default |
+|---|---|---|---|
+| `BUFR_RETENTION_DAYS` | Keep BUFR files for N days | `float` | `30.0` |
+| `NETCDF_RETENTION_DAYS` | Keep NetCDF files for N days | `float` | `30.0` |
+| `GEOMETRY_BUFR_LOOKBACK_HOURS` | Look back N hours for geometry BUFR | `int` | `72` |
+
+#### Output Product Type
+
+The `PRODUCT_TYPE` variable controls what format is generated:
+
+| Value | Format | Description |
+|-------|--------|-------------|
+| `"image"` | PNG | PNG visualization files (legacy, legacy mode) |
+| `"geotiff"` | COG | Multi-band RGBA GeoTIFF (colormap baked into pixels as uint8) |
+| `"raw_cog"` | COG | **Production standard.** Single-band float32 GeoTIFF with colormap and value-range as metadata, enabling dynamic colormap remapping via rio-tiler |
+
+**Recommendation:** Use `"raw_cog"` for all new deployments.
+
+**Note:** The `ADD_COLMAX` setting only applies when `PRODUCT_TYPE="image"`. COLMAX is not generated for COG modes.
+
 ### COLMAX (Column Maximum) Processing
+
+⚠️ **Note:** These settings only apply when `PRODUCT_TYPE="image"` (PNG mode). In `raw_cog` or `geotiff` modes, COLMAX is not generated.
 
 | Variable | Description | Type | Default |
 |---|---|---|---|
@@ -322,7 +387,42 @@ config.reload("/path/to/config.json")
 ## Example: genpro25.yml
 
 ```yaml
+# Genpro25 Service Configuration Example
+# Place in app/genpro25.yml or referenced via GENPRO25_ENV env var
+
 local:
+  # FTP Connection Settings
+  FTP:
+    FTP_HOST: "200.16.116.24"
+    FTP_USER: "your_ftp_username"
+    FTP_PASS: "your_ftp_password"
+
+  # Daemon Toggle Switches
+  DAEMON_PARAMS:
+    ENABLE_DOWNLOAD_DAEMON: true
+    ENABLE_PROCESSING_DAEMON: true
+    ENABLE_PRODUCT_DAEMON: true
+    ENABLE_CLEANUP_DAEMON: true        # WARNING: Disabled by default!
+
+  # Poll Intervals (seconds)
+  INTERVALS:
+    DOWNLOAD_POLL_INTERVAL: 60         # Check FTP every 60 sec
+    PROCESSING_POLL_INTERVAL: 30       # Check for NetCDF every 30 sec
+    PRODUCT_POLL_INTERVAL: 30          # Generate products every 30 sec
+    CLEANUP_POLL_INTERVAL: 1800        # Cleanup every 30 minutes
+
+  # Product Generation Output
+  PRODUCT_OUTPUT:
+    PRODUCT_TYPE: "raw_cog"            # Options: "image" (PNG), "geotiff", "raw_cog" (recommended)
+    ADD_COLMAX: true                   # Generate column-max reflectivity (PNG only)
+
+  # Data Retention (days)
+  RETENTION:
+    BUFR_RETENTION_DAYS: 30.0
+    NETCDF_RETENTION_DAYS: 30.0
+    GEOMETRY_BUFR_LOOKBACK_HOURS: 72
+
+  # COLMAX (Column Maximum) Reflectivity Settings
   COLMAX:
     COLMAX_THRESHOLD: -3
     COLMAX_ELEV_LIMIT1: 0.65
@@ -330,19 +430,35 @@ local:
     COLMAX_RHOHV_UMBRAL: 0.8
     COLMAX_WRAD_FILTER: true
     COLMAX_WRAD_UMBRAL: 4.6
-  FTP:
-    FTP_HOST: "200.16.116.24"
-    FTP_USER: "your_user"
-    FTP_PASS: "your_password"
-  PNG_PLOTS:
-    FIELDS_TO_PLOT: ["DBZH", "RHOHV", "ZDR"]
+    COLMAX_TDR_FILTER: true
+    COLMAX_TDR_UMBRAL: 8.5
+
+  # Visualization (Unfiltered Data)
+  VISUALIZATION_NOFILTERS:
+    VMIN_REFL_NOFILTERS: -20
+    VMAX_REFL_NOFILTERS: 70
+    CMAP_REFL_NOFILTERS: "grc_th"
+    VMIN_ZDR_NOFILTERS: -7.5
+    VMAX_ZDR_NOFILTERS: 7.5
+    CMAP_ZDR_NOFILTERS: "grc_zdr"
+
+  # Visualization (Filtered Data)
+  VISUALIZATION_FILTERED:
     VMIN_REFL: -20
     VMAX_REFL: 70
     CMAP_REFL: "grc_th"
+    VMIN_ZDR: -2.0
+    VMAX_ZDR: 7.5
+    CMAP_ZDR: "grc_zdr"
+
+  # GRC Quality Filters
   GRC_FILTER:
-    RHV:
-      GRC_RHV_FILTER: true
-      GRC_RHV_THRESHOLD: 0.8
+    GRC_RHV_FILTER: true
+    GRC_RHV_THRESHOLD: 0.55
+    GRC_WRAD_FILTER: true
+    GRC_WRAD_THRESHOLD: 4.6
+    GRC_ZDR_FILTER: true
+    GRC_ZDR_THRESHOLD: 8.5
 ```
 
 ---
