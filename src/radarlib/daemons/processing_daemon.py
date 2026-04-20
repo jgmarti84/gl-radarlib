@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Processing daemon for monitoring and processing complete BUFR volumes."""
 
+
 import asyncio
 import logging
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from radarlib import config
-from radarlib.io.ftp import RadarFTPClientAsync, FTPError
+from radarlib.io.ftp import FTPError, RadarFTPClientAsync
 from radarlib.state.sqlite_tracker import SQLiteStateTracker
 
 logger = logging.getLogger(__name__)
@@ -198,7 +199,7 @@ class ProcessingDaemon:
     async def _retry_incomplete_volumes(self) -> None:
         """
         Retry downloading missing fields for incomplete volumes with attempt limiting.
-        
+
         For each missing field, tracks retry attempts and stops after reaching the
         configured limit. Specifically looks for 550 FTP errors (file not found) to
         determine if a file is permanently missing.
@@ -230,7 +231,7 @@ class ProcessingDaemon:
 
                         # Query current retry attempt count for this file
                         retry_count = self.state_tracker.get_retry_count_for_failed_file(file_name)
-                        
+
                         # Check if this field has already exceeded max retry attempts
                         if retry_count >= self.config.incomplete_field_max_retries:
                             logger.warning(
@@ -246,7 +247,7 @@ class ProcessingDaemon:
                             f"for incomplete volume {inc_vol['volume_id']} "
                             f"(attempt {retry_count + 1}/{self.config.incomplete_field_max_retries})"
                         )
-                        
+
                         try:
                             client.download_file(remote_path, local_path)
 
@@ -267,11 +268,11 @@ class ProcessingDaemon:
                                 observation_datetime=inc_vol["observation_datetime"],
                             )
                             logger.info(f"[{self.config.radar_name}] Successfully recovered missing field: {file_name}")
-                            
+
                         except FTPError as e:
                             # Increment retry attempt count
                             self.state_tracker.increment_retry_count(file_name, str(e))
-                            
+
                             # Log the specific error type
                             if "550" in str(e):
                                 logger.warning(
@@ -297,9 +298,7 @@ class ProcessingDaemon:
 
                 # Reset product generation status so the product daemon
                 # will regenerate COGs with the newly available fields.
-                self.state_tracker.reset_product_generation_for_volume(
-                    inc_vol["volume_id"]
-                )
+                self.state_tracker.reset_product_generation_for_volume(inc_vol["volume_id"])
 
         except Exception as e:
             logger.error(f"Error retrying incomplete volumes: {e}", exc_info=True)
