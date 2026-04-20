@@ -20,5 +20,6 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY src/ /app/src/
 COPY tests/ /app/tests/
 COPY app/ /app/app/
+COPY examples/ /app/examples/
 
 ENV PYTHONPATH=/app/src/

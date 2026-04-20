@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Processing daemon for monitoring and processing complete BUFR volumes."""
 
+
 import asyncio
 import logging
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from radarlib import config
-from radarlib.io.ftp import RadarFTPClientAsync
+from radarlib.io.ftp import FTPError, RadarFTPClientAsync
 from radarlib.state.sqlite_tracker import SQLiteStateTracker
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,9 @@ class ProcessingDaemonConfig:
         incomplete_timeout_hours: Hours to wait before processing incomplete volumes
         stuck_volume_timeout_minutes: Minutes to wait before resetting a stuck volume from
                                       'processing' status back to 'pending' for retry
+        incomplete_field_max_retries: Maximum number of retry attempts per missing field
+                                      before marking it as permanently failed.
+                                      Default: 3 attempts
         start_date: Minimum observation datetime to process. Only volumes with
                    observation_datetime >= start_date will be considered. If None, all dates
                    are processed. Format: ISO 8601 string or datetime object.
@@ -50,6 +54,7 @@ class ProcessingDaemonConfig:
     allow_incomplete: bool = False
     incomplete_timeout_hours: int = 24
     stuck_volume_timeout_minutes: int = 60
+    incomplete_field_max_retries: int = 3
     start_date: Optional[datetime] = None
     ftp_host: Optional[str] = config.FTP_HOST
     ftp_user: Optional[str] = config.FTP_USER
@@ -192,6 +197,13 @@ class ProcessingDaemon:
         logger.info("Daemon stop requested")
 
     async def _retry_incomplete_volumes(self) -> None:
+        """
+        Retry downloading missing fields for incomplete volumes with attempt limiting.
+
+        For each missing field, tracks retry attempts and stops after reaching the
+        configured limit. Specifically looks for 550 FTP errors (file not found) to
+        determine if a file is permanently missing.
+        """
         try:
             incomplete_volumes = self.state_tracker.get_incomplete_volumes()
             for inc_vol in incomplete_volumes:
@@ -216,29 +228,59 @@ class ProcessingDaemon:
                         )
                         remote_path = str(Path(remote_dir) / file_name)
                         local_path = local_dir / file_name
+
+                        # Query current retry attempt count for this file
+                        retry_count = self.state_tracker.get_retry_count_for_failed_file(file_name)
+
+                        # Check if this field has already exceeded max retry attempts
+                        if retry_count >= self.config.incomplete_field_max_retries:
+                            logger.warning(
+                                f"Giving up on field '{field}' for volume {inc_vol['volume_id']} "
+                                f"after {retry_count} attempts. Marking as permanently failed."
+                            )
+                            # Mark as permanently failed so we don't keep trying
+                            self.state_tracker.mark_download_permanently_failed(file_name)
+                            continue
+
                         logger.info(
                             f"Retrying download of missing field '{file_name}' "
-                            f"for incomplete volume {inc_vol['volume_id']}"
+                            f"for incomplete volume {inc_vol['volume_id']} "
+                            f"(attempt {retry_count + 1}/{self.config.incomplete_field_max_retries})"
                         )
-                        client.download_file(remote_path, local_path)
 
-                        # After downloading, we should update the state tracker with the new file information
-                        checksum = None
-                        file_size = local_path.stat().st_size
+                        try:
+                            client.download_file(remote_path, local_path)
 
-                        self.state_tracker.mark_downloaded(
-                            file_name,
-                            str(remote_path),
-                            str(local_path),
-                            file_size=file_size,
-                            checksum=checksum,
-                            radar_name=self.config.radar_name,
-                            strategy=inc_vol["strategy"],
-                            vol_nr=inc_vol["vol_nr"],
-                            field_type=field,
-                            observation_datetime=inc_vol["observation_datetime"],
-                        )
-                        logger.info(f"[{self.config.radar_name}] Downloaded {file_name}")
+                            # After downloading, update the state tracker with the new file information
+                            checksum = None
+                            file_size = local_path.stat().st_size
+
+                            self.state_tracker.mark_downloaded(
+                                file_name,
+                                str(remote_path),
+                                str(local_path),
+                                file_size=file_size,
+                                checksum=checksum,
+                                radar_name=self.config.radar_name,
+                                strategy=inc_vol["strategy"],
+                                vol_nr=inc_vol["vol_nr"],
+                                field_type=field,
+                                observation_datetime=inc_vol["observation_datetime"],
+                            )
+                            logger.info(f"[{self.config.radar_name}] Successfully recovered missing field: {file_name}")
+
+                        except FTPError as e:
+                            # Increment retry attempt count
+                            self.state_tracker.increment_retry_count(file_name, str(e))
+
+                            # Log the specific error type
+                            if "550" in str(e):
+                                logger.warning(
+                                    f"FTP 550 error (file not found) for {file_name} - "
+                                    f"field may be permanently unavailable (attempt {retry_count + 1})"
+                                )
+                            else:
+                                logger.warning(f"FTP error retrying {file_name}: {e} (attempt {retry_count + 1})")
 
                 conn = self.state_tracker._get_connection()
                 cursor = conn.cursor()
@@ -253,6 +295,10 @@ class ProcessingDaemon:
                     (now, inc_vol["volume_id"]),
                 )
                 conn.commit()
+
+                # Reset product generation status so the product daemon
+                # will regenerate COGs with the newly available fields.
+                self.state_tracker.reset_product_generation_for_volume(inc_vol["volume_id"])
 
         except Exception as e:
             logger.error(f"Error retrying incomplete volumes: {e}", exc_info=True)

@@ -117,9 +117,9 @@ local:
     ENABLE_PROCESSING_DAEMON: True # Set to True to enable the processing daemon
     ENABLE_PRODUCT_DAEMON: True # Set to True to enable the product generation daemon
     ENABLE_CLEANUP_DAEMON: True # Set to True to enable the cleanup daemon
-    DOWNLOAD_POLL_INTERVAL: 60 # in seconds
-    PROCESSING_POLL_INTERVAL: 30 # in seconds
-    PRODUCT_POLL_INTERVAL: 30 # in seconds
+    DOWNLOAD_POLL_INTERVAL: 200 # in seconds
+    PROCESSING_POLL_INTERVAL: 150 # in seconds
+    PRODUCT_POLL_INTERVAL: 150 # in seconds
     CLEANUP_POLL_INTERVAL: 1800 # in seconds
     PRODUCT_TYPE: "raw_cog" # "image", "geotiff" or "raw_cog"
     ADD_COLMAX: True # Set to True to add Colmax products

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Product generation daemon for monitoring and generating visualization products from processed NetCDF volumes."""
+
 import asyncio
 import gc
 import json
@@ -216,91 +217,7 @@ class ProductGenerationDaemon:
 
                 # Strategy 2: build geometry from gate coordinates file
                 try:
-                    gate_coords_filename = f"{self.config.radar_name}_{strategy}_{vol_num}_gate_coordinates.npz"
-                    gate_coords_file_path = os.path.join(config.ROOT_GATE_COORDS_PATH, gate_coords_filename)
-                    if Path(gate_coords_file_path).exists():
-                        logger.debug(f"Using gate coordinates file: {gate_coords_file_path}")
-                    else:
-                        from radarlib.utils.grid_utils import create_gate_coords_file
-
-                        # Pass the field names from vol_types so the FTP search
-                        # only considers BUFR files for fields that will actually
-                        # be interpolated (e.g. ['VRAD', 'WRAD'] for vol 02).
-                        # This prevents downloading a BUFR with different scan
-                        # geometry than the fields used in product generation.
-                        vol_field_names = self.config.volume_types.get(strategy, {}).get(vol_num, [])
-
-                        created_coords_file_path = create_gate_coords_file(
-                            self.config.radar_name,
-                            strategy,
-                            vol_num,
-                            output_dir=config.ROOT_GATE_COORDS_PATH,
-                            field_names=vol_field_names or None,
-                            ftp_host=self.config.ftp_host,
-                            ftp_user=self.config.ftp_user,
-                            ftp_pass=self.config.ftp_password,
-                            lookback_hours=config.GEOMETRY_BUFR_LOOKBACK_HOURS,
-                        )
-                        msg = "Created gate coordinates file path does not match expected path. "
-                        msg += "Check create_gate_coords_file implementation."
-                        assert str(created_coords_file_path) == gate_coords_file_path, logger.warning(msg)
-                        gate_coords_file_path = str(created_coords_file_path)
-                        logger.info(f"Created gate coordinates file: {gate_coords_file_path}")
-
-                    try:
-                        gate_coords = np.load(gate_coords_file_path)
-                        logger.info(f"Loaded gate coordinates from file: {gate_coords_file_path}")
-
-                    except Exception as e:
-                        raise Exception(f"Failed to load gate coordinates from {gate_coords_file_path}: {e}")
-
-                    # Get gate coordinates
-                    gate_x = gate_coords["gate_x"]
-                    gate_y = gate_coords["gate_y"]
-                    gate_z = gate_coords["gate_z"]
-
-                    z_grid_limits = (0.0, roi_params["toa"])
-                    y_grid_limits = (gate_y.min(), gate_y.max())
-                    x_grid_limits = (gate_x.min(), gate_x.max())
-
-                    # z_points = int(np.ceil(z_grid_limits[1] / roi_params["res_z"])) + 1
-                    # y_points = int((y_grid_limits[1] - y_grid_limits[0]) / roi_params["res_xy"])
-                    # x_points = int((x_grid_limits[1] - x_grid_limits[0]) / roi_params["res_xy"])
-                    z_points, y_points, x_points = calculate_grid_points(
-                        z_grid_limits, y_grid_limits, x_grid_limits, roi_params["res_xy"], roi_params["res_z"]
-                    )
-
-                    grid_shape = (z_points, y_points, x_points)
-                    grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
-
-                    # Create temporary directory for intermediate processing
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        # Compute geometry
-                        logger.debug("Computing grid geometry...")
-                        geometry = compute_grid_geometry(
-                            gate_x,
-                            gate_y,
-                            gate_z,
-                            grid_shape,
-                            grid_limits,
-                            temp_dir=temp_dir,
-                            toa=roi_params["toa"],
-                            min_radius=roi_params["min_radius"],
-                            radar_altitude=0,
-                            h_factor=roi_params["hfac"],
-                            nb=roi_params["nb"],
-                            bsp=roi_params["bsp"],
-                            weighting=roi_params["weight_function"],
-                            max_neighbors=roi_params["max_neighbors"],
-                            blind_range_m=gate_coords.get("blind_range_m", None),
-                            lowest_elev_deg=gate_coords.get("lowest_elev_deg", None),
-                            n_workers=8,
-                        )
-
-                    logger.info(f"Successfully built geometry for {self.config.radar_name} {strategy}-{vol_num}")
-                    os.makedirs(config.ROOT_GEOMETRY_PATH, exist_ok=True)
-
-                    save_geometry(geometry, file_path)
+                    geometry = self._build_geometry_for_vol(strategy, vol_num, roi_params, file_path)
                     result_geometry[strategy][vol_num] = geometry
                     continue
                 except Exception as e:
@@ -308,10 +225,191 @@ class ProductGenerationDaemon:
                         f"Failed to build geometry for {self.config.radar_name} {strategy}-{vol_num}: {e}",
                         exc_info=True,
                     )
-                    msg = "Exhausted all strategies for geometry initialization  "
-                    msg += f"{self.config.radar_name} ({strategy}-{vol_num}): {e}"
-                    raise Exception(msg) from e
+                    logger.warning(
+                        f"Geometry unavailable for {self.config.radar_name} {strategy}-{vol_num}. "
+                        f"Products requiring geometry will be skipped for this volume type "
+                        f"until geometry can be built (e.g. after a successful FTP download)."
+                    )
+                    result_geometry[strategy][vol_num] = None
         return result_geometry
+
+    def _build_geometry_for_vol(
+        self,
+        strategy: str,
+        vol_num: str,
+        roi_params: Dict[str, Any],
+        geometry_save_path: str,
+    ) -> GridGeometry:
+        """
+        Build geometry for a single strategy/vol_num from gate coordinates.
+
+        Downloads a sample BUFR via FTP (with retry on different files), extracts
+        gate coordinates, computes the grid geometry, and saves it to disk.
+
+        Args:
+            strategy: Strategy code (e.g. '0315')
+            vol_num: Volume number (e.g. '01')
+            roi_params: Region-of-interest / grid parameters dict
+            geometry_save_path: Path to save the resulting .npz geometry file
+
+        Returns:
+            GridGeometry object
+
+        Raises:
+            Exception: If gate coordinate creation or geometry computation fails
+        """
+        gate_coords_filename = f"{self.config.radar_name}_{strategy}_{vol_num}_gate_coordinates.npz"
+        gate_coords_file_path = os.path.join(config.ROOT_GATE_COORDS_PATH, gate_coords_filename)
+        if Path(gate_coords_file_path).exists():
+            logger.debug(f"Using existing gate coordinates file: {gate_coords_file_path}")
+        else:
+            from radarlib.utils.grid_utils import create_gate_coords_file
+
+            # Pass the field names from vol_types so the FTP search
+            # only considers BUFR files for fields that will actually
+            # be interpolated (e.g. ['VRAD', 'WRAD'] for vol 02).
+            vol_field_names = self.config.volume_types.get(strategy, {}).get(vol_num, [])
+
+            created_coords_file_path = create_gate_coords_file(
+                self.config.radar_name,
+                strategy,
+                vol_num,
+                output_dir=config.ROOT_GATE_COORDS_PATH,
+                field_names=vol_field_names or None,
+                ftp_host=self.config.ftp_host,
+                ftp_user=self.config.ftp_user,
+                ftp_pass=self.config.ftp_password,
+                lookback_hours=config.GEOMETRY_BUFR_LOOKBACK_HOURS,
+            )
+            gate_coords_file_path = str(created_coords_file_path)
+            logger.info(f"Created gate coordinates file: {gate_coords_file_path}")
+
+        gate_coords = np.load(gate_coords_file_path)
+        logger.info(f"Loaded gate coordinates from file: {gate_coords_file_path}")
+
+        gate_x = gate_coords["gate_x"]
+        gate_y = gate_coords["gate_y"]
+        gate_z = gate_coords["gate_z"]
+
+        z_grid_limits = (0.0, roi_params["toa"])
+        y_grid_limits = (gate_y.min(), gate_y.max())
+        x_grid_limits = (gate_x.min(), gate_x.max())
+
+        z_points, y_points, x_points = calculate_grid_points(
+            z_grid_limits, y_grid_limits, x_grid_limits, roi_params["res_xy"], roi_params["res_z"]
+        )
+
+        grid_shape = (z_points, y_points, x_points)
+        grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            logger.debug("Computing grid geometry...")
+            geometry = compute_grid_geometry(
+                gate_x,
+                gate_y,
+                gate_z,
+                grid_shape,
+                grid_limits,
+                temp_dir=temp_dir,
+                toa=roi_params["toa"],
+                min_radius=roi_params["min_radius"],
+                radar_altitude=0,
+                h_factor=roi_params["hfac"],
+                nb=roi_params["nb"],
+                bsp=roi_params["bsp"],
+                weighting=roi_params["weight_function"],
+                max_neighbors=roi_params["max_neighbors"],
+                blind_range_m=gate_coords.get("blind_range_m", None),
+                lowest_elev_deg=gate_coords.get("lowest_elev_deg", None),
+                n_workers=8,
+            )
+
+        logger.info(f"Successfully built geometry for {self.config.radar_name} {strategy}-{vol_num}")
+        os.makedirs(config.ROOT_GEOMETRY_PATH, exist_ok=True)
+        save_geometry(geometry, geometry_save_path)
+        return geometry
+
+    def _ensure_geometry(self, strategy: str, vol_num: str) -> Optional[GridGeometry]:
+        """
+        Return geometry for the given strategy/vol, rebuilding lazily if it was None.
+
+        Called before each product generation attempt. If the geometry was not
+        available at daemon startup (e.g. FTP was down), this method retries
+        the build. On success the geometry dict is updated so future calls are
+        instant. On failure it returns None and logs a warning.
+        """
+        if self.geometry is None:
+            self.geometry = {}
+        if strategy not in self.geometry:
+            self.geometry[strategy] = {}
+
+        geom = self.geometry[strategy].get(vol_num)
+        if geom is not None:
+            return geom
+
+        # Geometry is None — attempt lazy rebuild
+        logger.info(
+            f"[{self.config.radar_name}] Geometry for {strategy}-{vol_num} is not available. "
+            f"Attempting lazy rebuild..."
+        )
+        try:
+            roi_params = self._get_roi_params(vol_num)
+            metadata = {
+                "radar_name": self.config.radar_name,
+                "strategy": strategy,
+                "volume_nr": vol_num,
+                "grid_resolution_xy": roi_params["res_xy"],
+                "grid_resolution_z": roi_params["res_z"],
+                "toa": roi_params["toa"],
+                "h_factor": roi_params["hfac"],
+                "min_radius": roi_params["min_radius"],
+                "max_neighbors": roi_params["max_neighbors"],
+                "nb": roi_params["nb"],
+                "bsp": roi_params["bsp"],
+                "weighting": roi_params["weight_function"],
+            }
+            file_name = f"{build_geometry_filename(metadata)}.npz"
+            file_path = os.path.join(config.ROOT_GEOMETRY_PATH, file_name)
+
+            # Try loading from disk first (another process may have built it)
+            if Path(file_path).exists():
+                geom = load_geometry(file_path)
+                logger.info(f"[{self.config.radar_name}] Loaded geometry from file: {file_path}")
+            else:
+                geom = self._build_geometry_for_vol(strategy, vol_num, roi_params, file_path)
+
+            self.geometry[strategy][vol_num] = geom
+            logger.info(f"[{self.config.radar_name}] Geometry for {strategy}-{vol_num} rebuilt successfully")
+            return geom
+        except Exception as e:
+            logger.warning(
+                f"[{self.config.radar_name}] Lazy geometry rebuild failed for {strategy}-{vol_num}: {e}. "
+                f"Will retry on next cycle."
+            )
+            return None
+
+    def _get_roi_params(self, vol_num: str) -> Dict[str, Any]:
+        """Return ROI params for a volume number, merging defaults with overrides."""
+        default_roi_params = {
+            "res_xy": config.GEOMETRY_RES_XY,
+            "res_z": config.GEOMETRY_RES_Z,
+            "toa": config.GEOMETRY_TOA,
+            "hfac": config.GEOMETRY_HFAC,
+            "nb": config.GEOMETRY_NB,
+            "bsp": config.GEOMETRY_BSP,
+            "min_radius": config.GEOMETRY_MIN_RADIUS,
+            "max_neighbors": config.MAX_NEIGHBORS,
+            "weight_function": config.WEIGHT_FUNCTION,
+        }
+        try:
+            roi_params_env = os.environ.get(f"ROI_PARAMS_VOL{vol_num}")
+            if roi_params_env is not None:
+                overrides = json.loads(roi_params_env)
+            else:
+                overrides = getattr(config, f"ROI_PARAMS_VOL{vol_num}", None) or {}
+            return dict(default_roi_params, **overrides)
+        except Exception:
+            return default_roi_params
 
     async def run(self) -> None:
         """
@@ -487,6 +585,26 @@ class ProductGenerationDaemon:
         # Mark as processing
         self.state_tracker.mark_product_status(volume_id, self.config.product_type, "processing")
 
+        # For geometry-dependent product types, ensure geometry is available (lazy rebuild)
+        if self.config.product_type in ("geotiff", "raw_cog"):
+            strategy = volume_info.get("strategy")
+            vol_nr = volume_info.get("vol_nr")
+            if strategy and vol_nr:
+                geom = self._ensure_geometry(strategy, vol_nr)
+                if geom is None:
+                    logger.warning(
+                        f"Geometry not available for {strategy}-{vol_nr}. "
+                        f"Marking volume {volume_id} as pending — will retry when geometry is built."
+                    )
+                    self.state_tracker.mark_product_status(
+                        volume_id,
+                        self.config.product_type,
+                        "pending",
+                        error_message="Geometry not yet available",
+                        error_type="GEOMETRY_UNAVAILABLE",
+                    )
+                    return False
+
         try:
             # Generate products synchronously (no threading to avoid issues)
             # Route to appropriate generation method based on product_type
@@ -572,15 +690,25 @@ class ProductGenerationDaemon:
 
             filename_stem = Path(filename).stem
 
-            # Verify volume completeness
-            fields_to_check = vol_types[filename_stem.split("_")[1]][filename_stem.split("_")[2]][:]
-            radar_fields = radar.fields.keys()
-            missing_fields = set(fields_to_check) - set(radar_fields)
+            # Verify volume completeness - log missing fields but don't reject volume
+            try:
+                strategy = filename_stem.split("_")[1]
+                vol_nr = filename_stem.split("_")[2]
+                fields_expected = vol_types[strategy][vol_nr][:]
+                radar_fields = set(radar.fields.keys())
+                missing_fields = set(fields_expected) - radar_fields
 
-            if missing_fields:
-                logger.debug(f"Incomplete volume, missing: {missing_fields}")
-            else:
-                logger.debug("Complete volume.")
+                if missing_fields:
+                    logger.info(
+                        f"Incomplete volume {filename_stem}: missing {missing_fields}. "
+                        f"Will generate COGs for available fields: {radar_fields & set(fields_expected)}"
+                    )
+                else:
+                    logger.debug("Complete volume - all expected fields present.")
+            except (IndexError, KeyError) as e:
+                logger.debug(
+                    f"Could not parse volume structure from {filename_stem}: {e}. Proceeding with available fields."
+                )
 
             # Get lowest sweep for PPI products
             sweep = get_lowest_nsweep(radar)
@@ -600,8 +728,15 @@ class ProductGenerationDaemon:
                 if "COLMAX" in config.FIELDS_TO_PLOT:
                     logger.debug(f"Generating COLMAX for {filename_stem}")
                     try:
-                        # COLMAX is generated from the reflectivity field
-                        colmax_data = get_field_data(radar, hrefl_field)
+                        # Validate field exists before accessing
+                        if hrefl_field not in radar.fields:
+                            logger.warning(
+                                f"Cannot generate COLMAX: Reflectivity field '{hrefl_field}' not found. "
+                                f"Available fields: {set(radar.fields.keys())}. Skipping COLMAX."
+                            )
+                        else:
+                            # COLMAX is generated from the reflectivity field
+                            colmax_data = get_field_data(radar, hrefl_field)
 
                         temp_dir = tempfile.mkdtemp()
                         vmin_key = "VMIN_REFL_NOFILTERS"
@@ -986,9 +1121,13 @@ class ProductGenerationDaemon:
                 log_memory_usage(f"After saved geotiff for filtered {plot_field}")
 
             if not cog_generated:
-                raise RuntimeError("No COG products were successfully generated")
-
-            logger.info(f"COG product generation completed successfully for {filename_stem}")
+                logger.warning(
+                    f"No filtered COG products were successfully generated for {filename_stem}. "
+                    f"This may indicate an incomplete volume with missing fields. "
+                    f"Will retry on next iteration if volume is being processed."
+                )
+            else:
+                logger.info(f"Filtered COG product generation completed successfully for {filename_stem}")
 
         finally:
             # Cleanup radar object if it was created
@@ -1075,15 +1214,18 @@ class ProductGenerationDaemon:
 
             filename_stem = Path(filename).stem
 
-            # Verify volume completeness
+            # Verify volume completeness and check for missing critical fields
             fields_to_check = vol_types[filename_stem.split("_")[1]][filename_stem.split("_")[2]][:]
             radar_fields = radar.fields.keys()
             missing_fields = set(fields_to_check) - set(radar_fields)
 
             if missing_fields:
-                logger.debug(f"Incomplete volume, missing: {missing_fields}")
+                logger.info(
+                    f"Incomplete volume {filename_stem}: missing {missing_fields}. "
+                    f"Will generate raw COGs for available fields: {set(radar_fields) & set(fields_to_check)}"
+                )
             else:
-                logger.debug("Complete volume.")
+                logger.debug("Complete volume - all expected fields present.")
 
             # Get lowest sweep for PPI products
             sweep = get_lowest_nsweep(radar)
@@ -1094,6 +1236,14 @@ class ProductGenerationDaemon:
                 if "COLMAX" in config.FIELDS_TO_PLOT:
                     logger.debug(f"Generating raw COLMAX for {filename_stem}")
                     try:
+                        # Validate field exists before accessing
+                        if hrefl_field not in radar.fields:
+                            logger.error(
+                                f"Reflectivity field '{hrefl_field}' not found in radar. "
+                                f"Available fields: {set(radar.fields.keys())}"
+                            )
+                            raise KeyError(f"Reflectivity field '{hrefl_field}' not found")
+
                         colmax_data = get_field_data(radar, hrefl_field)
 
                         vmin_key = "VMIN_REFL_NOFILTERS"
@@ -1500,9 +1650,13 @@ class ProductGenerationDaemon:
                 log_memory_usage(f"After saved geotiff for filtered {plot_field}")
 
             if not raw_cog_generated:
-                raise RuntimeError("No raw COG products were successfully generated")
-
-            logger.info(f"Raw COG product generation completed successfully for {filename_stem}")
+                logger.warning(
+                    f"No raw COG products were successfully generated for {filename_stem}. "
+                    f"This may indicate an incomplete volume with missing fields. "
+                    f"Will retry on next iteration if volume is being processed."
+                )
+            else:
+                logger.info(f"Raw COG product generation completed successfully for {filename_stem}")
 
         finally:
             # Cleanup radar object if it was created
@@ -1575,15 +1729,18 @@ class ProductGenerationDaemon:
             # eliminamos la extension .nc
             filename_stem = Path(filename).stem
 
-            # Verificamos el volúmen
+            # Verificamos el volúmen and check for missing critical fields
             fields_to_check = vol_types[filename_stem.split("_")[1]][filename_stem.split("_")[2]][:]
             radar_fields = radar.fields.keys()
             missing_fields = set(fields_to_check) - set(radar_fields)
 
             if missing_fields:
-                logger.debug(f"Incomplete volume, missing: {missing_fields}")
+                logger.info(
+                    f"Incomplete volume {filename_stem}: missing {missing_fields}. "
+                    f"Will generate products for available fields: {set(radar_fields) & set(fields_to_check)}"
+                )
             else:
-                logger.debug("Complete volume.")
+                logger.debug("Complete volume - all expected fields present.")
 
             # --- Generate COLMAX -----------------------------------------------------------
             if self.config.add_colmax:
@@ -1786,9 +1943,12 @@ class ProductGenerationDaemon:
                 gc.collect()
 
             if not field_plotted:
-                raise RuntimeError("No fields were successfully plotted")
-
-            logger.info(f"Product generation completed successfully for {filename_stem}")
+                logger.warning(
+                    f"No fields were successfully plotted for PNG generation for {filename_stem}. "
+                    f"This may indicate an incomplete volume with missing fields. PNG output is deprecated anyway."
+                )
+            else:
+                logger.info(f"PNG product generation completed successfully for {filename_stem}")
 
         finally:
             # Cleanup - ensure all matplotlib figures are closed
