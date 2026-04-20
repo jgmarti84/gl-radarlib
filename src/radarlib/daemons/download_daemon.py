@@ -213,7 +213,9 @@ class DownloadDaemon:
                             latest_by_vol[vol_nr] = latest_date
                             logger.debug(f"[{self.radar_name}]   vol{vol_nr}: {latest_date.isoformat()}")
                         except (ValueError, TypeError) as e:
-                            logger.warning(f"[{self.radar_name}] Failed to parse observation_datetime for vol{vol_nr}: {e}")
+                            logger.warning(
+                                f"[{self.radar_name}] Failed to parse observation_datetime for vol{vol_nr}: {e}"
+                            )
 
             # Use the MINIMUM observation_datetime from all volumes as resume point
             if latest_by_vol:
@@ -243,9 +245,7 @@ class DownloadDaemon:
                     tasks = []
                     for remote, local, fname, dt, status in files:
 
-                        async def download_one(
-                            remote_path=remote, local_path=local, fname=fname, dt=dt, status=status
-                        ):
+                        async def download_one(remote_path=remote, local_path=local, fname=fname, dt=dt, status=status):
                             components = extract_bufr_filename_components(fname)
                             try:
                                 await exponential_backoff_retry(
@@ -368,7 +368,7 @@ class DownloadDaemon:
         try:
             conn = self.state_tracker._get_connection()
             cursor = conn.cursor()
-            cutoff_datetime = (now.timestamp() - (self.config.failed_file_retention_days * 86400))
+            cutoff_datetime = now.timestamp() - (self.config.failed_file_retention_days * 86400)
 
             cursor.execute(
                 """
@@ -405,10 +405,7 @@ class DownloadDaemon:
                     observation_datetime = failed_file[4]
 
                     try:
-                        logger.debug(
-                            f"[{self.radar_name}] Retrying failed download: {filename} "
-                            f"from {remote_path}"
-                        )
+                        logger.debug(f"[{self.radar_name}] Retrying failed download: {filename} " f"from {remote_path}")
 
                         # Remove local file if it partially exists
                         if local_path.exists():
@@ -417,9 +414,18 @@ class DownloadDaemon:
                             except OSError:
                                 pass
 
-                        # Retry download with exponential backoff
+                        # # Retry download with exponential backoff
+                        # await exponential_backoff_retry(
+                        #     lambda: client.download_file_async(remote_path, str(local_path)),
+                        #     max_retries=self.config.bufr_download_max_retries,
+                        #     base_delay=self.config.bufr_download_base_delay,
+                        #     max_delay=self.config.bufr_download_max_delay,
+                        # )
+                        current_remote = remote_path
+                        current_local = str(local_path)
+
                         await exponential_backoff_retry(
-                            lambda: client.download_file_async(remote_path, str(local_path)),
+                            lambda cr=current_remote, cl=current_local: client.download_file_async(cr, cl),
                             max_retries=self.config.bufr_download_max_retries,
                             base_delay=self.config.bufr_download_base_delay,
                             max_delay=self.config.bufr_download_max_delay,
