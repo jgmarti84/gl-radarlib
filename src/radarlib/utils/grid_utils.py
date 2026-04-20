@@ -129,9 +129,7 @@ def create_gate_coords_file(
         random.shuffle(candidates)
         last_error: Optional[Exception] = None
 
-        for attempt, (dt, fname, remote_path) in enumerate(
-            candidates[:max_download_attempts], start=1
-        ):
+        for attempt, (_, fname, remote_path) in enumerate(candidates[:max_download_attempts], start=1):
             try:
                 with tempfile.TemporaryDirectory(prefix=f"bufr_{radar_name}_{vol_nr}_") as tmpdir:
                     tmpdir = Path(tmpdir)
@@ -182,7 +180,11 @@ def create_gate_coords_file(
                     min(max_download_attempts, len(candidates)),
                     fname,
                     e,
-                    "Trying next candidate..." if attempt < min(max_download_attempts, len(candidates)) else "No more candidates.",
+                    (
+                        "Trying next candidate..."
+                        if attempt < min(max_download_attempts, len(candidates))
+                        else "No more candidates."
+                    ),
                 )
 
         # All attempts exhausted

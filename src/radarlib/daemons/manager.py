@@ -8,14 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Watchdog constants
-_WATCHDOG_INTERVAL_S: int = 120  # Check daemon health every 2 minutes
-_HEARTBEAT_STALE_THRESHOLD_S: int = 300  # Daemon is considered hung after 5 minutes without heartbeat
-
 from radarlib.daemons.cleanup_daemon import CleanupDaemon, CleanupDaemonConfig
 from radarlib.daemons.download_daemon import DownloadDaemon, DownloadDaemonConfig
 from radarlib.daemons.processing_daemon import ProcessingDaemon, ProcessingDaemonConfig
 from radarlib.daemons.product_daemon import ProductGenerationDaemon, ProductGenerationDaemonConfig
+
+# Watchdog constants
+_WATCHDOG_INTERVAL_S: int = 120  # Check daemon health every 2 minutes
+_HEARTBEAT_STALE_THRESHOLD_S: int = 300  # Daemon is considered hung after 5 minutes without heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -345,9 +345,7 @@ class DaemonManager:
 
                 # --- Download daemon health check ---
                 if self.download_daemon and self.download_daemon._last_heartbeat:
-                    elapsed = (
-                        datetime.now(timezone.utc) - self.download_daemon._last_heartbeat
-                    ).total_seconds()
+                    elapsed = (datetime.now(timezone.utc) - self.download_daemon._last_heartbeat).total_seconds()
 
                     if elapsed > _HEARTBEAT_STALE_THRESHOLD_S:
                         logger.warning(
@@ -357,9 +355,7 @@ class DaemonManager:
                         )
                         try:
                             await self.restart_download_daemon()
-                            logger.info(
-                                f"[{self.config.radar_name}] Watchdog: download daemon restarted successfully"
-                            )
+                            logger.info(f"[{self.config.radar_name}] Watchdog: download daemon restarted successfully")
                         except Exception as e:
                             logger.error(
                                 f"[{self.config.radar_name}] Watchdog: failed to restart download daemon: {e}",
