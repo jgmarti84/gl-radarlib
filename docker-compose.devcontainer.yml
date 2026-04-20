@@ -1,6 +1,6 @@
 services:
-  genpro25-rma1:
-    command: [ "tail", "-f", "/dev/null" ]
+  # genpro25-rma1:
+  #   command: [ "tail", "-f", "/dev/null" ]
 
   # ==========================================================================
   # TESTING SERVICE (devcontainer only)
@@ -14,5 +14,8 @@ services:
       PYTHONPATH: /app/src/
     volumes:
       - ./tests:/app/tests
+      - ./examples:/app/examples
+      - ./src:/app/src
+      - ./app:/app/app
       - ./genpro25.yml:/app/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
     command: [ "tail", "-f", "/dev/null" ]

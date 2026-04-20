@@ -84,6 +84,8 @@ class DownloadDaemon:
         self.poll_interval = daemon_config.poll_interval
         self.start_date = daemon_config.start_date
         self.vol_types = daemon_config.vol_types
+        # Store original vol_types dict for extracting volume numbers
+        self._vol_types_config = daemon_config.vol_types if isinstance(daemon_config.vol_types, dict) else None
 
         try:
             self.state_tracker = SQLiteStateTracker(daemon_config.state_db)
@@ -185,31 +187,47 @@ class DownloadDaemon:
     async def _ftp_poll_cycle_inner(self, _cycle_count: int) -> None:
         """Inner FTP poll cycle — connection, traversal, download, retry."""
         try:
-            # Determine resume date: use latest downloaded file if available and newer than start_date
+            # Determine resume date: use latest downloaded file per volume, then take minimum
             resume_date: datetime = self.start_date  # type: ignore
-            latest_bufr_file = self.state_tracker.get_latest_downloaded_file(self.radar_name)
-            if latest_bufr_file and latest_bufr_file.get("observation_datetime"):
-                latest_bufr_date_str = latest_bufr_file["observation_datetime"]
-                # Parse ISO format datetime string if needed
-                if isinstance(latest_bufr_date_str, str):
-                    latest_bufr_date = datetime.fromisoformat(latest_bufr_date_str.replace("Z", "+00:00"))
-                else:
-                    latest_bufr_date = latest_bufr_date_str
 
-                if resume_date and latest_bufr_date > resume_date:
-                    resume_date = latest_bufr_date
-                    logger.info(f"[{self.radar_name}] Resuming from last bufr file date: {resume_date.isoformat()}")
-                else:
-                    logger.info(
-                        f"[{self.radar_name}] Starting from configured start date: {resume_date.isoformat()}"
-                    )
+            # Multi-volume resume logic: get latest for each volume and use the oldest
+            latest_by_vol: Dict[str, datetime] = {}
+            if self._vol_types_config and isinstance(self._vol_types_config, dict):
+                # Extract all unique volume numbers from all strategies
+                all_volumes = set()
+                for strategy_dict in self._vol_types_config.values():
+                    if isinstance(strategy_dict, dict):
+                        all_volumes.update(strategy_dict.keys())
+
+                logger.debug(f"[{self.radar_name}] Checking latest downloads for volumes: {sorted(all_volumes)}")
+
+                for vol_nr in sorted(all_volumes):
+                    latest = self.state_tracker.get_latest_downloaded_file_by_volume(self.radar_name, vol_nr)
+                    if latest and latest.get("observation_datetime"):
+                        try:
+                            latest_str = latest["observation_datetime"]
+                            if isinstance(latest_str, str):
+                                latest_date = datetime.fromisoformat(latest_str.replace("Z", "+00:00"))
+                            else:
+                                latest_date = latest_str
+                            latest_by_vol[vol_nr] = latest_date
+                            logger.debug(f"[{self.radar_name}]   vol{vol_nr}: {latest_date.isoformat()}")
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"[{self.radar_name}] Failed to parse observation_datetime for vol{vol_nr}: {e}")
+
+            # Use the MINIMUM observation_datetime from all volumes as resume point
+            if latest_by_vol:
+                resume_date = min(latest_by_vol.values())
+                logger.info(
+                    f"[{self.radar_name}] Resuming from oldest volume's latest download: {resume_date.isoformat()} "
+                    f"(vol{sorted(latest_by_vol.keys(), key=lambda k: latest_by_vol[k])[0]})"
+                )
+            elif resume_date:
+                logger.info(
+                    f"[{self.radar_name}] No previous downloads found, starting from: {resume_date.isoformat()}"
+                )
             else:
-                if resume_date:
-                    logger.info(
-                        f"[{self.radar_name}] No previous downloads found, starting from: {resume_date.isoformat()}"
-                    )
-                else:
-                    logger.warning(f"[{self.radar_name}] No start date configured")
+                logger.warning(f"[{self.radar_name}] No start date configured")
 
             async with RadarFTPClientAsync(
                 self.config.host,
@@ -319,6 +337,11 @@ class DownloadDaemon:
         for dt, fname, remote in ftp_client.traverse_radar(
             self.radar_name, start_date, end_date, include_start=False, vol_types=vol_types
         ):
+            # Skip already-downloaded files (deduplication for multi-volume race condition fix)
+            if self.state_tracker.is_file_downloaded(fname, self.radar_name):
+                logger.debug(f"[{self.radar_name}] Already downloaded, skipping: {fname}")
+                continue
+
             local_path = self.local_dir / fname
             candidates.append((remote, local_path, fname, dt, "new"))
         return candidates

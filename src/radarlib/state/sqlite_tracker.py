@@ -605,6 +605,68 @@ class SQLiteStateTracker:
         row = cursor.fetchone()
         return dict(row) if row else None
 
+    def get_latest_downloaded_file_by_volume(self, radar_name: str, vol_nr: str) -> Optional[Dict]:
+        """
+        Get the latest downloaded BUFR file for a specific volume type.
+
+        Args:
+            radar_name: Radar name (e.g., "RMA1")
+            vol_nr: Volume number (e.g., "01", "02")
+
+        Returns:
+            Dictionary with file info or None if no files found for this volume.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT * FROM downloads
+            WHERE status = 'completed' AND radar_name = ? AND vol_nr = ?
+            ORDER BY observation_datetime DESC
+            LIMIT 1
+        """,
+            (radar_name, vol_nr),
+        )
+
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def is_file_downloaded(self, filename: str, radar_name: Optional[str] = None) -> bool:
+        """
+        Check if a file has already been downloaded.
+
+        Args:
+            filename: Name of the BUFR file (e.g., "RMA1_0315_01_DBZH_20260417T000606Z.BUFR")
+            radar_name: Optional radar name. If provided, only checks for that radar.
+
+        Returns:
+            True if file exists in downloads table with status='completed', False otherwise.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        if radar_name:
+            cursor.execute(
+                """
+                SELECT 1 FROM downloads
+                WHERE status = 'completed' AND filename = ? AND radar_name = ?
+                LIMIT 1
+            """,
+                (filename, radar_name),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT 1 FROM downloads
+                WHERE status = 'completed' AND filename = ?
+                LIMIT 1
+            """,
+                (filename,),
+            )
+
+        return cursor.fetchone() is not None
+
     # Volume processing methods
 
     def get_volume_id(self, radar_name: str, strategy: str, vol_nr: str, observation_datetime: str) -> str:
