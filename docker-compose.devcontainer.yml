@@ -11,7 +11,8 @@ services:
       dockerfile: tests/Dockerfile
     container_name: radarlib_tests
     environment:
-      PYTHONPATH: /app/src/
+      PYTHONPATH: "/app/src:/app/app:${PYTHONPATH}"
+      GENPRO25_CONFIG: "/app/app/genpro25.yml"
     volumes:
       - ./tests:/app/tests
       - ./examples:/app/examples
