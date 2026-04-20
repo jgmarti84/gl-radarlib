@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Product generation daemon for monitoring and generating visualization products from processed NetCDF volumes."""
+
 import asyncio
 import gc
 import json
@@ -705,7 +706,9 @@ class ProductGenerationDaemon:
                 else:
                     logger.debug("Complete volume - all expected fields present.")
             except (IndexError, KeyError) as e:
-                logger.debug(f"Could not parse volume structure from {filename_stem}: {e}. Proceeding with available fields.")
+                logger.debug(
+                    f"Could not parse volume structure from {filename_stem}: {e}. Proceeding with available fields."
+                )
 
             # Get lowest sweep for PPI products
             sweep = get_lowest_nsweep(radar)
