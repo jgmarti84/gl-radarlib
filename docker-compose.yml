@@ -9,6 +9,7 @@ services:
       - ../product_output/RMA1:/workspace/app/product_output/RMA1
       - ../logs/RMA1:/workspace/app/logs/RMA1
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA1"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -48,6 +49,7 @@ services:
       - ../product_output/RMA2:/workspace/app/product_output/RMA2
       - ../logs/RMA2:/workspace/app/logs/RMA2
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA2"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -87,6 +89,7 @@ services:
       - ../product_output/RMA16:/workspace/app/product_output/RMA16
       - ../logs/RMA16:/workspace/app/logs/RMA16
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA16"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -126,6 +129,7 @@ services:
       - ../product_output/RMA17:/workspace/app/product_output/RMA17
       - ../logs/RMA17:/workspace/app/logs/RMA17
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA17"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -165,6 +169,7 @@ services:
       - ../product_output/RMA6:/workspace/app/product_output/RMA6
       - ../logs/RMA6:/workspace/app/logs/RMA6
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA6"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
