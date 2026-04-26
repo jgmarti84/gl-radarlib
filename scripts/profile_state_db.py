@@ -28,9 +28,9 @@ import logging
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 # Setup logging
 logging.basicConfig(
@@ -62,9 +62,7 @@ class StateDBRecord:
         # Parse datetimes
         try:
             self.obs_dt = datetime.fromisoformat(
-                observation_datetime.replace("Z", "+00:00")
-                if "Z" in observation_datetime
-                else observation_datetime
+                observation_datetime.replace("Z", "+00:00") if "Z" in observation_datetime else observation_datetime
             )
         except Exception as e:
             logger.warning(f"Failed to parse obs datetime '{observation_datetime}': {e}")
@@ -72,9 +70,7 @@ class StateDBRecord:
 
         try:
             self.created_dt = datetime.fromisoformat(
-                created_at.replace("Z", "+00:00")
-                if "Z" in created_at
-                else created_at
+                created_at.replace("Z", "+00:00") if "Z" in created_at else created_at
             )
         except Exception as e:
             logger.warning(f"Failed to parse created_at '{created_at}': {e}")
@@ -161,7 +157,7 @@ def query_downloads(
 
         # Build query with optional hour filtering
         query = """
-            SELECT 
+            SELECT
                 filename,
                 observation_datetime,
                 created_at,
@@ -213,7 +209,7 @@ def query_downloads(
 
             # Same query with fallback connection
             query = """
-                SELECT 
+                SELECT
                     filename,
                     observation_datetime,
                     created_at,
@@ -319,9 +315,7 @@ def print_results(
         print("\n✗ No records found matching criteria.")
         return
 
-    print(
-        f"\nFound {len(records)} downloads (sorted by download time / created_at):\n"
-    )
+    print(f"\nFound {len(records)} downloads (sorted by download time / created_at):\n")
 
     # Header
     print(
@@ -339,16 +333,8 @@ def print_results(
     prev_record: Optional[StateDBRecord] = None
 
     for i, record in enumerate(records, 1):
-        obs_str = (
-            record.obs_dt.strftime("%Y-%m-%d %H:%M:%S")
-            if record.obs_dt
-            else "—"
-        )
-        created_str = (
-            record.created_dt.strftime("%Y-%m-%d %H:%M:%S")
-            if record.created_dt
-            else "—"
-        )
+        obs_str = record.obs_dt.strftime("%Y-%m-%d %H:%M:%S") if record.obs_dt else "—"
+        created_str = record.created_dt.strftime("%Y-%m-%d %H:%M:%S") if record.created_dt else "—"
         delay_str = format_delay(record.delay_seconds)
         size_str = format_size(record.file_size)
 
@@ -404,24 +390,14 @@ def print_results(
 
         # Alerts
         if out_of_order_count > 0:
-            print(
-                f"\n  ✗ ALERT: {out_of_order_count} file(s) downloaded out of chronological order!"
-            )
-            print(
-                f"     This indicates temporal aliasing or FTP timing irregularities."
-            )
-            print(
-                f"     Files with older observation times were downloaded AFTER files with newer times."
-            )
+            print(f"\n  ✗ ALERT: {out_of_order_count} file(s) downloaded out of chronological order!")
+            print("     This indicates temporal aliasing or FTP timing irregularities.")
+            print("     Files with older observation times were downloaded AFTER files with newer times.")
 
         if delays and max(delays) - min(delays) > 600:  # More than 10 minutes variance
             variance = max(delays) - min(delays)
-            print(
-                f"\n  ⚠ WARNING: High variance in download delays ({format_delay(variance)})"
-            )
-            print(
-                f"     Download times are irregular. This could impact volume completeness detection."
-            )
+            print(f"\n  ⚠ WARNING: High variance in download delays ({format_delay(variance)})")
+            print("     Download times are irregular. This could impact volume completeness detection.")
 
     print()
 
@@ -435,11 +411,11 @@ Examples:
   # Profile vol01 DBZH downloads for 2026-04-17 with strategy 0315
   python3 scripts/profile_state_db.py \\
     --radar RMA1 --date 2026-04-17 --strategy 0315 --vol 01 --field DBZH
-  
+
   # Profile vol02 VRAD downloads only during hour 12 (noon)
   python3 scripts/profile_state_db.py \\
     --radar RMA2 --date 2026-04-17 --strategy 0315 --vol 02 --field VRAD --hour 12
-  
+
   # Docker execution (from host):
   docker exec genpro25-rma1 python3 /workspace/scripts/profile_state_db.py \\
     --radar RMA1 --date 2026-04-17 --strategy 0315 --vol 01 --field DBZH
@@ -539,6 +515,7 @@ Examples:
     except Exception as e:
         print(f"✗ Unexpected error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
