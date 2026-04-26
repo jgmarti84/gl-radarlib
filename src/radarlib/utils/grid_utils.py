@@ -94,6 +94,10 @@ def create_gate_coords_file(
 
     # build filename regex — restrict to specific fields if provided
     if field_names:
+        if "KDP" in field_names:
+            logger.warning("KDP is not well suited for building gate coordinates files, excluding it from field filter")
+            field_names = [f for f in field_names if f.upper() != "KDP"]
+        if not field_names:
         fields_alt = "|".join(re.escape(f) for f in field_names)
         pattern = re.compile(
             rf"^.*_{re.escape(strategy_name)}_{re.escape(vol_nr)}_({fields_alt})_.*\.BUFR$",
