@@ -220,7 +220,9 @@ class DownloadDaemon:
             # Use the MINIMUM observation_datetime from all volumes as resume point
             if latest_by_vol:
                 resume_date = min(latest_by_vol.values())
-                resume_date = resume_date - timedelta(minutes=60)  # Add buffer to ensure we don't miss files due to clock skew
+                resume_date = resume_date - timedelta(
+                    minutes=60  # Add buffer to ensure we don't miss files due to clock skew
+                )
                 logger.info(
                     f"[{self.radar_name}] Resuming from oldest volume's latest download: {resume_date.isoformat()} "
                     f"(vol{sorted(latest_by_vol.keys(), key=lambda k: latest_by_vol[k])[0]})"
