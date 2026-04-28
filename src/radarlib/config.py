@@ -144,6 +144,11 @@ DEFAULTS: Dict[str, Any] = {
     "MAX_NEIGHBORS": 1,
     "WEIGHT_FUNCTION": "nearest",
     "GEOMETRY_BUFR_LOOKBACK_HOURS": 72,
+    # Convective core detection thresholds
+    "CORES_MIN_Z": 52.0,
+    "CORES_MIN_Z_UPDRAFT": 56.0,
+    "CORES_MIN_RANGE": 12000.0,
+    "CORES_DEDUP_RADIUS": 8000.0,
 }
 
 _config: Dict[str, Any] = DEFAULTS.copy()
@@ -290,6 +295,11 @@ GEOMETRY_MIN_RADIUS: float = get("GEOMETRY_MIN_RADIUS")
 MAX_NEIGHBORS: int = get("MAX_NEIGHBORS")
 WEIGHT_FUNCTION: str = get("WEIGHT_FUNCTION")
 GEOMETRY_BUFR_LOOKBACK_HOURS: int = get("GEOMETRY_BUFR_LOOKBACK_HOURS")
+# Convective core detection thresholds
+CORES_MIN_Z: float = get("CORES_MIN_Z")
+CORES_MIN_Z_UPDRAFT: float = get("CORES_MIN_Z_UPDRAFT")
+CORES_MIN_RANGE: float = get("CORES_MIN_RANGE")
+CORES_DEDUP_RADIUS: float = get("CORES_DEDUP_RADIUS")
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)
 # Format: RADAR_VOLCODE_VOLNR_FIELD_TIMESTAMP.BUFR

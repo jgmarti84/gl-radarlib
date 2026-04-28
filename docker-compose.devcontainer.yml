@@ -1,14 +1,14 @@
 services:
-  genpro25-rma1:
-    command: [ "tail", "-f", "/dev/null" ]
-    environment:
-      PYTHONPATH: "/workspace/src:/workspace/app:${PYTHONPATH}"
-      # volumes:
-      # - ./tests:/workspace/tests
-      # - ./examples:/workspace/examples
-      # - ./scripts:/workspace/scripts
-      # - ./src:/workspace/src
-    working_dir: /workspace
+  # genpro25-rma1:
+  #   command: [ "tail", "-f", "/dev/null" ]
+  #   environment:
+  #     PYTHONPATH: "/workspace/src:/workspace/app:${PYTHONPATH}"
+  #     # volumes:
+  #     # - ./tests:/workspace/tests
+  #     # - ./examples:/workspace/examples
+  #     # - ./scripts:/workspace/scripts
+  #     # - ./src:/workspace/src
+  #   working_dir: /workspace
 
   # ==========================================================================
   # TESTING SERVICE (devcontainer only)
