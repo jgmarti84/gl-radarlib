@@ -180,30 +180,70 @@ class RadarFTPClient:
         strategy: Optional[str] = None,
         volume_nr: Optional[int] = None,
         field: Optional[str] = None,
+        search_from_time: Optional[datetime] = None,
     ) -> Optional[BUFRFileInfo]:
         """
         Encuentra el último archivo BUFR para un radar dado, con opciones de filtrado.
-        - strategy: filtra por estrategia de radar si se proporciona.
-        - volume_nr: filtra por número de volumen si se proporciona.
-        - field: filtra por campo específico si se proporciona.
+        
+        Busca hacia atrás desde `search_from_time` (por defecto ahora).
+        
+        Parameters
+        ----------
+        radar : str
+            Identificador del radar
+        strategy : str, optional
+            Filtra por estrategia de radar si se proporciona
+        volume_nr : int, optional
+            Filtra por número de volumen si se proporciona
+        field : str, optional
+            Filtra por campo específico si se proporciona
+        search_from_time : datetime, optional
+            Hora desde la cual buscar hacia atrás (por defecto: ahora)
+            
+        Returns
+        -------
+        BUFRFileInfo or None
+            Primer archivo encontrado (más reciente), o None si no hay coincidencias
         """
+        if search_from_time is None:
+            search_from_time = datetime.now(timezone.utc)
 
         base_path = f"/{self.base_dir}/{radar}"
         try:
             years = sorted(self.list_dir(base_path), reverse=True)
             for y in years:
+                yi = int(y)
+                if yi > search_from_time.year:
+                    continue
                 year_path = f"{base_path}/{y}"
                 months = sorted(self.list_dir(year_path), reverse=True)
                 for m in months:
+                    mi = int(m)
+                    if yi == search_from_time.year and mi > search_from_time.month:
+                        continue
                     month_path = f"{year_path}/{m}"
                     days = sorted(self.list_dir(month_path), reverse=True)
                     for d in days:
+                        di = int(d)
+                        if yi == search_from_time.year and mi == search_from_time.month and di > search_from_time.day:
+                            continue
                         day_path = f"{month_path}/{d}"
                         hours = sorted(self.list_dir(day_path), reverse=True)
                         for h in hours:
+                            hi = int(h)
+                            if (yi == search_from_time.year and mi == search_from_time.month and 
+                                di == search_from_time.day and hi > search_from_time.hour):
+                                continue
                             hour_path = f"{day_path}/{h}"
                             minutes = sorted(self.list_dir(hour_path), reverse=True)
                             for ms in minutes:
+                                mi_val = int(ms[:2])
+                                sec_val = int(ms[2:]) if len(ms) > 2 else 0
+                                if (yi == search_from_time.year and mi == search_from_time.month and 
+                                    di == search_from_time.day and hi == search_from_time.hour and
+                                    mi_val > search_from_time.minute):
+                                    continue
+                                
                                 minute_path = f"{hour_path}/{ms}"
                                 files = self.list_dir(minute_path)
                                 for fname in sorted(files, reverse=True):
@@ -214,9 +254,7 @@ class RadarFTPClient:
                                         continue
                                     if field and field != bufr_file.field:
                                         continue
-                                    # full_remote = Path(f"{minute_path}/{fname}")
                                     return BUFRFileInfo(fname, minute_path, True, None, None)
-                                    # return BUFRFileInfo.from_filename(fname, full_remote.as_posix())
         except FTPError as e:
             logger.error(f"Error finding last BUFR file for radar {radar}: {e}")
             return None

@@ -149,6 +149,12 @@ DEFAULTS: Dict[str, Any] = {
     "CORES_MIN_Z_UPDRAFT": 56.0,
     "CORES_MIN_RANGE": 12000.0,
     "CORES_DEDUP_RADIUS": 8000.0,
+    # Storm tops detection thresholds
+    "TOPS_MIN_RANGE_M": 25000.0,
+    "TOPS_MIN_DEV_M": 9000.0,
+    "TOPS_MIN_Z": 20.0,
+    "TOPS_RHOHV_THRESHOLD": 0.94,
+    "TOPS_DEDUP_RADIUS_M": 17000.0,
 }
 
 _config: Dict[str, Any] = DEFAULTS.copy()
@@ -300,6 +306,12 @@ CORES_MIN_Z: float = get("CORES_MIN_Z")
 CORES_MIN_Z_UPDRAFT: float = get("CORES_MIN_Z_UPDRAFT")
 CORES_MIN_RANGE: float = get("CORES_MIN_RANGE")
 CORES_DEDUP_RADIUS: float = get("CORES_DEDUP_RADIUS")
+# Storm tops detection thresholds
+TOPS_MIN_RANGE_M: float = get("TOPS_MIN_RANGE_M")
+TOPS_MIN_DEV_M: float = get("TOPS_MIN_DEV_M")
+TOPS_MIN_Z: float = get("TOPS_MIN_Z")
+TOPS_RHOHV_THRESHOLD: float = get("TOPS_RHOHV_THRESHOLD")
+TOPS_DEDUP_RADIUS_M: float = get("TOPS_DEDUP_RADIUS_M")
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)
 # Format: RADAR_VOLCODE_VOLNR_FIELD_TIMESTAMP.BUFR

@@ -7,6 +7,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Tuple
+from zipfile import BadZipFile
 
 import numpy as np
 
@@ -184,17 +185,33 @@ def peek_geometry_metadata(filepath: str) -> Dict[str, Any]:
         The metadata dict that was stored when the geometry was saved.
         Returns an empty dict if the file has no metadata entry (legacy file).
 
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    BadZipFile
+        If the file is not a valid numpy .npz archive.
+
     Examples
     --------
     >>> meta = peek_geometry_metadata("RMA1_geometry.npz")
     >>> print(meta["weighting"], meta["nb"])
     barnes2 1.4
     """
-    with np.load(filepath, allow_pickle=False) as data:
-        if "metadata" not in data:
-            logger.warning("No metadata found in %s (legacy file)", filepath)
-            return {}
-        return json.loads(str(data["metadata"]))
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Geometry file not found: {filepath}")
+
+    try:
+        with np.load(filepath, allow_pickle=False) as data:
+            if "metadata" not in data:
+                logger.warning("No metadata found in %s (legacy file)", filepath)
+                return {}
+            return json.loads(str(data["metadata"]))
+    except (BadZipFile, ValueError, OSError) as e:
+        raise BadZipFile(
+            f"Cannot read geometry file {filepath}: file is not a valid numpy archive. "
+            f"The file may be corrupted, incomplete, or not a valid .npz file. Original error: {e}"
+        ) from e
 
 
 def save_geometry(geometry: GridGeometry, filepath: str) -> None:
@@ -242,18 +259,34 @@ def load_geometry(filepath: str) -> GridGeometry:
     -------
     GridGeometry
         The loaded geometry object
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    BadZipFile
+        If the file is not a valid numpy .npz archive.
     """
-    data = np.load(filepath, allow_pickle=False)
-    metadata = json.loads(str(data["metadata"])) if "metadata" in data else {}
-    geometry = GridGeometry(
-        grid_shape=tuple(data["grid_shape"]),
-        grid_limits=(tuple(data["grid_limits_z"]), tuple(data["grid_limits_y"]), tuple(data["grid_limits_x"])),
-        indptr=data["indptr"],
-        gate_indices=data["gate_indices"],
-        weights=data["weights"],
-        toa=float(data["toa"][0]) if "toa" in data else np.inf,
-        radar_altitude=float(data["radar_altitude"][0]) if "radar_altitude" in data else 0.0,
-        metadata=metadata,
-    )
-    logger.info(f"Loaded geometry: {geometry.memory_usage_mb():.1f} MB in memory, toa={geometry.toa}m")
-    return geometry
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Geometry file not found: {filepath}")
+
+    try:
+        data = np.load(filepath, allow_pickle=False)
+        metadata = json.loads(str(data["metadata"])) if "metadata" in data else {}
+        geometry = GridGeometry(
+            grid_shape=tuple(data["grid_shape"]),
+            grid_limits=(tuple(data["grid_limits_z"]), tuple(data["grid_limits_y"]), tuple(data["grid_limits_x"])),
+            indptr=data["indptr"],
+            gate_indices=data["gate_indices"],
+            weights=data["weights"],
+            toa=float(data["toa"][0]) if "toa" in data else np.inf,
+            radar_altitude=float(data["radar_altitude"][0]) if "radar_altitude" in data else 0.0,
+            metadata=metadata,
+        )
+        logger.info(f"Loaded geometry: {geometry.memory_usage_mb():.1f} MB in memory, toa={geometry.toa}m")
+        return geometry
+    except (BadZipFile, ValueError, OSError) as e:
+        raise BadZipFile(
+            f"Cannot load geometry from {filepath}: file is not a valid numpy archive. "
+            f"The file may be corrupted, incomplete, or not a valid .npz file. Original error: {e}"
+        ) from e

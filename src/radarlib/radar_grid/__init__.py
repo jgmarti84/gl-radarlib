@@ -4,6 +4,7 @@ radar_grid - Fast radar gridding with precomputed geometry
 
 from .compute import compute_grid_geometry
 from .cores import detect_cores_from_colmax
+from .tops import detect_tops_from_3d_grid
 from .filters import GateFilter, GridFilter, create_mask_from_filter
 from .geometry import GridGeometry, build_geometry_filename, load_geometry, peek_geometry_metadata, save_geometry
 from .geotiff import (
@@ -96,4 +97,6 @@ __all__ = [
     "convert_rgba_cog_to_raw",
     # Core detection
     "detect_cores_from_colmax",
+    # Tops detection
+    "detect_tops_from_3d_grid",
 ]
