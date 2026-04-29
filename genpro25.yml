@@ -123,5 +123,7 @@ local:
     CLEANUP_POLL_INTERVAL: 1800 # in seconds
     PRODUCT_TYPE: "raw_cog" # "image", "geotiff" or "raw_cog"
     ADD_COLMAX: True # Set to True to add Colmax products
+    ADD_TOPS_AND_CORES: false # Set to True to generate cores+tops GeoJSON products
+    TOPS_AND_CORES_OUTPUT_DIR: None # Override output path; defaults to {base_path}/tops_and_cores
     NETCDF_RETENTION_DAYS: 0.333333333333333 # in days
     BUFR_RETENTION_DAYS: 0.333333333333333 # in days

@@ -7,6 +7,7 @@ services:
     container_name: genpro25-rma1
     volumes:
       - ../product_output/RMA1:/workspace/app/product_output/RMA1
+      - ../tops_and_cores/RMA1:/workspace/app/tops_and_cores/RMA1 # Mount tops_and_cores output dir for RMA1
       - ../logs/RMA1:/workspace/app/logs/RMA1
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
@@ -52,6 +53,7 @@ services:
     container_name: genpro25-rma2
     volumes:
       - ../product_output/RMA2:/workspace/app/product_output/RMA2
+      - ../tops_and_cores/RMA2:/workspace/app/tops_and_cores/RMA2 # Mount tops_and_cores output dir for RMA2
       - ../logs/RMA2:/workspace/app/logs/RMA2
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
@@ -97,6 +99,7 @@ services:
     container_name: genpro25-rma6
     volumes:
       - ../product_output/RMA6:/workspace/app/product_output/RMA6
+      - ../tops_and_cores/RMA6:/workspace/app/tops_and_cores/RMA6 # Mount tops_and_cores output dir for RMA6
       - ../logs/RMA6:/workspace/app/logs/RMA6
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
@@ -142,6 +145,7 @@ services:
     container_name: genpro25-rma9
     volumes:
       - ../product_output/RMA9:/workspace/app/product_output/RMA9
+      - ../tops_and_cores/RMA9:/workspace/app/tops_and_cores/RMA9 # Mount tops_and_cores output dir for RMA9
       - ../logs/RMA9:/workspace/app/logs/RMA9
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
@@ -187,6 +191,7 @@ services:
     container_name: genpro25-rma10
     volumes:
       - ../product_output/RMA10:/workspace/app/product_output/RMA10
+      - ../tops_and_cores/RMA10:/workspace/app/tops_and_cores/RMA10 # Mount tops_and_cores output dir for RMA10
       - ../logs/RMA10:/workspace/app/logs/RMA10
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
@@ -232,6 +237,7 @@ services:
     container_name: genpro25-rma11
     volumes:
       - ../product_output/RMA11:/workspace/app/product_output/RMA11
+      - ../tops_and_cores/RMA11:/workspace/app/tops_and_cores/RMA11 # Mount tops_and_cores output dir for RMA11
       - ../logs/RMA11:/workspace/app/logs/RMA11
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
@@ -277,6 +283,7 @@ services:
     container_name: genpro25-rma12
     volumes:
       - ../product_output/RMA12:/workspace/app/product_output/RMA12
+      - ../tops_and_cores/RMA12:/workspace/app/tops_and_cores/RMA12 # Mount tops_and_cores output dir for RMA12
       - ../logs/RMA12:/workspace/app/logs/RMA12
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
@@ -322,6 +329,7 @@ services:
     container_name: genpro25-rma16
     volumes:
       - ../product_output/RMA16:/workspace/app/product_output/RMA16
+      - ../tops_and_cores/RMA16:/workspace/app/tops_and_cores/RMA16 # Mount tops_and_cores output dir for RMA16
       - ../logs/RMA16:/workspace/app/logs/RMA16
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
@@ -367,6 +375,7 @@ services:
     container_name: genpro25-rma17
     volumes:
       - ../product_output/RMA17:/workspace/app/product_output/RMA17
+      - ../tops_and_cores/RMA17:/workspace/app/tops_and_cores/RMA17 # Mount tops_and_cores output dir for RMA17
       - ../logs/RMA17:/workspace/app/logs/RMA17
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts

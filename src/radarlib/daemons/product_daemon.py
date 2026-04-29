@@ -70,6 +70,8 @@ class ProductGenerationDaemonConfig:
     max_concurrent_processing: int = 2  # Deprecated - processing is now sequential for stability
     product_type: str = "image"
     add_colmax: bool = True
+    add_tops_and_cores: bool = False
+    tops_and_cores_output_dir: Optional[Path] = None
     stuck_volume_timeout_minutes: int = 60
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
     ftp_host: Optional[str] = config.FTP_HOST
@@ -80,6 +82,8 @@ class ProductGenerationDaemonConfig:
         # Validate product type
         if self.geometry_types is None:
             self.geometry_types = {}
+        if self.tops_and_cores_output_dir is None:
+            self.tops_and_cores_output_dir = self.local_product_dir.parent / "tops_and_cores"
 
 
 class ProductGenerationDaemon:
@@ -1527,6 +1531,93 @@ class ProductGenerationDaemon:
                         del ppi
 
                 log_memory_usage(f"After saved geotiff for unfiltered {plot_field}")
+
+            # --- Convective cores & storm tops detection --------------------------------
+            # NOTE: All large 3D grids computed in the unfiltered COG loop above are
+            # deleted inside each iteration's cleanup block (``del field_data,
+            # grid_data, ppi``) to prevent memory accumulation in this long-running
+            # daemon.  The three grids required for convective analysis (DBZH 3D,
+            # COLMAX 2D, RhoHV 3D) therefore do not exist at this point and are
+            # recomputed here as a deliberate, documented exception.  The extra cost
+            # is two to three additional apply_geometry + column_max calls and is
+            # only incurred when add_tops_and_cores is True.
+            if self.config.add_tops_and_cores:
+                from radarlib.io.pyart.cores_and_tops import generate_cores_and_tops
+                from radarlib.utils.names_utils import get_time_from_RMA_filename
+
+                geom = self.geometry[volume_info["strategy"]][volume_info["vol_nr"]]
+                _ct_dbzh_3d = None
+                _ct_colmax_2d = None
+                _ct_rhohv_3d = None
+                try:
+                    # Recompute DBZH 3D + derive COLMAX 2D from it
+                    if hrefl_field in radar.fields:
+                        _ct_fd = get_field_data(radar, hrefl_field)
+                        _ct_dbzh_3d = apply_geometry(geom, _ct_fd)
+                        del _ct_fd
+                        _ct_colmax_2d = column_max(
+                            _ct_dbzh_3d,
+                            geometry=geom,
+                        )
+                    else:
+                        logger.warning(
+                            f"[{self.config.radar_name}] Tops/cores: reflectivity field "
+                            f"'{hrefl_field}' absent — skipping detection."
+                        )
+
+                    # Recompute RhoHV 3D (None when the field is absent from this volume)
+                    if rhv_field in radar.fields:
+                        _ct_rhv_fd = get_field_data(radar, rhv_field)
+                        _ct_rhohv_3d = apply_geometry(geom, _ct_rhv_fd)
+                        del _ct_rhv_fd
+                    else:
+                        logger.warning(
+                            f"[{self.config.radar_name}] Tops/cores: RhoHV field "
+                            f"'{rhv_field}' absent — proceeding without RhoHV quality gate."
+                        )
+
+                    if _ct_dbzh_3d is not None and _ct_colmax_2d is not None:
+                        # Build 2D x/y meshgrids and 1D z levels from the geometry object
+                        _ct_nz, _ct_ny, _ct_nx = geom.grid_shape
+                        _ct_y_min, _ct_y_max = geom.grid_limits[1]
+                        _ct_x_min, _ct_x_max = geom.grid_limits[2]
+                        _ct_x_1d = np.linspace(_ct_x_min, _ct_x_max, _ct_nx, dtype=np.float32)
+                        _ct_y_1d = np.linspace(_ct_y_min, _ct_y_max, _ct_ny, dtype=np.float32)
+                        _ct_yy, _ct_xx = np.meshgrid(_ct_y_1d, _ct_x_1d, indexing="ij")
+                        _ct_z_1d = geom.z_levels().astype(np.float32)
+
+                        observation_time = get_time_from_RMA_filename(filename_stem)
+
+                        generate_cores_and_tops(
+                            colmax_2d=_ct_colmax_2d,
+                            dbzh_3d=_ct_dbzh_3d,
+                            x_coords=_ct_xx,
+                            y_coords=_ct_yy,
+                            z_coords=_ct_z_1d,
+                            radar_lat=float(radar.latitude["data"].data[0]),
+                            radar_lon=float(radar.longitude["data"].data[0]),
+                            observation_time=observation_time,
+                            radar_code=self.config.radar_name,
+                            strategy=volume_info["strategy"],
+                            vol_nr=volume_info["vol_nr"],
+                            output_dir=self.config.tops_and_cores_output_dir,
+                            rhohv_3d=_ct_rhohv_3d,
+                        )
+
+                except Exception as _ct_exc:
+                    logger.error(
+                        f"[{self.config.radar_name}] Tops/cores detection failed "
+                        f"for {filename_stem}: {_ct_exc}",
+                        exc_info=True,
+                    )
+                finally:
+                    if _ct_dbzh_3d is not None:
+                        del _ct_dbzh_3d
+                    if _ct_colmax_2d is not None:
+                        del _ct_colmax_2d
+                    if _ct_rhohv_3d is not None:
+                        del _ct_rhohv_3d
+                    gc.collect()
 
             # --- Raw COG generation block (filtered) ------------------------------------
             logger.info(f"Generating filtered raw COG products for {filename_stem}")

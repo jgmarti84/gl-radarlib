@@ -49,6 +49,8 @@ _DEFAULTS: Dict[str, Any] = {
     "START_DATE": None,
     "PRODUCT_TYPE": "raw_cog",
     "ADD_COLMAX": True,
+    "ADD_TOPS_AND_CORES": False,
+    "TOPS_AND_CORES_OUTPUT_DIR": None,
     "GEOMETRY_BUFR_LOOKBACK_HOURS": 72,
     # Data retention periods (days)
     "NETCDF_RETENTION_DAYS": 30.0,

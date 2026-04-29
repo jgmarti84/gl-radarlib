@@ -27,4 +27,7 @@ services:
       - ./src:/app/src
       - ./app:/app/app
       - ./genpro25.yml:/app/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
-    command: [ "tail", "-f", "/dev/null" ]
+      # Mount tops_and_cores output dir so GeoJSON products written by the
+      # product daemon are visible on the host and persist across container restarts.
+      - ./tests/data/tops_and_cores:/app/tops_and_cores
+command: [ "tail", "-f", "/dev/null" ]

@@ -112,6 +112,8 @@ def main():
         product_dir=Path(os.path.join(config.ROOT_RADAR_PRODUCTS_PATH, radar_name)),  # type: ignore
         product_type=config.PRODUCT_TYPE,  # type: ignore
         add_colmax=config.ADD_COLMAX,  # type: ignore
+        add_tops_and_cores=config.ADD_TOPS_AND_CORES,  # type: ignore
+        tops_and_cores_dir=Path(config.TOPS_AND_CORES_OUTPUT_DIR) if config.TOPS_AND_CORES_OUTPUT_DIR else None,  # type: ignore
         enable_cleanup_daemon=config.ENABLE_CLEANUP_DAEMON,  # type: ignore
         netcdf_retention_days=config.NETCDF_RETENTION_DAYS,  # type: ignore
         bufr_retention_days=config.BUFR_RETENTION_DAYS,  # type: ignore
