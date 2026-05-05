@@ -111,15 +111,15 @@ class ProductGenerationDaemon:
         >>> asyncio.run(daemon.run())
     """
 
-    def __init__(self, config: ProductGenerationDaemonConfig):
+    def __init__(self, dconfig: ProductGenerationDaemonConfig):
         """
         Initialize the product generation daemon.
 
         Args:
             config: Daemon configuration
         """
-        self.config = config
-        self.state_tracker = SQLiteStateTracker(config.state_db)
+        self.config = dconfig
+        self.state_tracker = SQLiteStateTracker(dconfig.state_db)
         self._running = False
 
         # Ensure output directory exists
@@ -1569,6 +1569,11 @@ class ProductGenerationDaemon:
                     if rhv_field in radar.fields:
                         _ct_rhv_fd = get_field_data(radar, rhv_field)
                         _ct_rhohv_3d = apply_geometry(geom, _ct_rhv_fd)
+                        elevation_angle = radar.get_elevation(sweep)
+                        elevation_angle = float(np.unique(elevation_angle)[0])
+                        _ct_rhohv_2d = constant_elevation_ppi(
+                            _ct_rhohv_3d, geom, elevation_angle=elevation_angle, interpolation="linear"
+                        )
                         del _ct_rhv_fd
                     else:
                         logger.warning(
@@ -1602,12 +1607,12 @@ class ProductGenerationDaemon:
                             vol_nr=volume_info["vol_nr"],
                             output_dir=self.config.tops_and_cores_output_dir,
                             rhohv_3d=_ct_rhohv_3d,
+                            rhohv_2d=_ct_rhohv_2d,
                         )
 
                 except Exception as _ct_exc:
                     logger.error(
-                        f"[{self.config.radar_name}] Tops/cores detection failed "
-                        f"for {filename_stem}: {_ct_exc}",
+                        f"[{self.config.radar_name}] Tops/cores detection failed " f"for {filename_stem}: {_ct_exc}",
                         exc_info=True,
                     )
                 finally:
@@ -1617,6 +1622,8 @@ class ProductGenerationDaemon:
                         del _ct_colmax_2d
                     if _ct_rhohv_3d is not None:
                         del _ct_rhohv_3d
+                    if _ct_rhohv_2d is not None:
+                        del _ct_rhohv_2d
                     gc.collect()
 
             # --- Raw COG generation block (filtered) ------------------------------------

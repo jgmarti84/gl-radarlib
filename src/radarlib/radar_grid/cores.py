@@ -31,9 +31,9 @@ def detect_cores_from_colmax(
     min_dbz_updraft: float = config.CORES_MIN_Z_UPDRAFT,
     min_range_m: float = config.CORES_MIN_RANGE,
     dedup_radius_m: float = config.CORES_DEDUP_RADIUS,
-    rhohv_threshold: float = 0.85,
-    min_pixels: int = 2,
-    min_pixels_updraft: int = 5,
+    rhohv_threshold: float = config.CORES_RHOHV_THRESHOLD,
+    min_pixels: int = config.CORES_MIN_PIXELS,
+    min_pixels_updraft: int = config.CORES_MIN_PIXELS_UPDRAFT,
 ) -> list:
     """
     Detect convective core centroids from a 2D COLMAX reflectivity grid.
@@ -199,8 +199,7 @@ def detect_cores_from_colmax(
 
             if not (rhohv_ok or updraft_ok):
                 logger.debug(
-                    "Blob %d rejected: quality gate failed "
-                    "(rhohv_ok=%s, updraft_ok=%s, max_dbz=%.1f, pixels=%d)",
+                    "Blob %d rejected: quality gate failed " "(rhohv_ok=%s, updraft_ok=%s, max_dbz=%.1f, pixels=%d)",
                     label_id,
                     rhohv_ok,
                     updraft_ok,
@@ -239,8 +238,7 @@ def detect_cores_from_colmax(
                 deduplicated.append(candidate)
 
         logger.debug(
-            "detect_cores_from_colmax: %d core(s) accepted after deduplication "
-            "(%d before)",
+            "detect_cores_from_colmax: %d core(s) accepted after deduplication " "(%d before)",
             len(deduplicated),
             len(accepted),
         )

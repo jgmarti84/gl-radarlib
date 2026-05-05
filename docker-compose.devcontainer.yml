@@ -1,18 +1,22 @@
 services:
-  # genpro25-rma1:
-  #   command: [ "tail", "-f", "/dev/null" ]
-  #   environment:
-  #     PYTHONPATH: "/workspace/src:/workspace/app:${PYTHONPATH}"
-  #     # volumes:
-  #     # - ./tests:/workspace/tests
-  #     # - ./examples:/workspace/examples
-  #     # - ./scripts:/workspace/scripts
-  #     # - ./src:/workspace/src
-  #   working_dir: /workspace
+  genpro25-rma2:
+    environment:
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
+    volumes:
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
+    command: [ "tail", "-f", "/dev/null" ]
+    # environment:
+    # PYTHONPATH: "/workspace/src:/workspace/app:${PYTHONPATH}"
+    # volumes:
+    #   - ./tests:/workspace/tests
+    #   - ./examples:/workspace/examples
+    #   - ./scripts:/workspace/scripts
+    #   - ./src:/workspace/src
+    # working_dir: /workspace
 
-  # ==========================================================================
-  # TESTING SERVICE (devcontainer only)
-  # ==========================================================================
+    # ==========================================================================
+    # TESTING SERVICE (devcontainer only)
+    # ==========================================================================
   tests:
     build:
       context: ./
@@ -30,4 +34,4 @@ services:
       # Mount tops_and_cores output dir so GeoJSON products written by the
       # product daemon are visible on the host and persist across container restarts.
       - ./tests/data/tops_and_cores:/app/tops_and_cores
-command: [ "tail", "-f", "/dev/null" ]
+    command: [ "tail", "-f", "/dev/null" ]

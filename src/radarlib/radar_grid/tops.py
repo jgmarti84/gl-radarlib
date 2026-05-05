@@ -38,7 +38,7 @@ def detect_tops_from_3d_grid(
     min_range_m: float = config.TOPS_MIN_RANGE_M,
     dedup_radius_m: float = config.TOPS_DEDUP_RADIUS_M,
     rhohv_threshold: float = config.TOPS_RHOHV_THRESHOLD,
-    min_pixels: int = 2,
+    min_pixels: int = config.TOPS_MIN_PIXELS,
 ) -> list:
     """
     Detect storm top centroids from a 3D Cartesian reflectivity grid.
@@ -164,9 +164,7 @@ def detect_tops_from_3d_grid(
             _z_3d = z_arr.astype(np.float32)
             _z_1d = None  # type: ignore[assignment]
         else:
-            raise ValueError(
-                f"z_coords must be 1D (NZ,) or 3D (NZ, NY, NX); got shape {z_arr.shape}"
-            )
+            raise ValueError(f"z_coords must be 1D (NZ,) or 3D (NZ, NY, NX); got shape {z_arr.shape}")
 
         # ------------------------------------------------------------------
         # Step 1 — Pre-compute horizontal range mask (same for all levels)
@@ -191,7 +189,7 @@ def detect_tops_from_3d_grid(
         # Step 3 — Process each level independently
         # ------------------------------------------------------------------
         for k in range(nz):
-            slice_2d: np.ndarray = data_3d[k]           # (NY, NX)
+            slice_2d: np.ndarray = data_3d[k]  # (NY, NX)
             invalid_2d: np.ndarray = mask_3d_invalid[k]  # (NY, NX)
 
             # z-value for this level (scalar or 2D)
@@ -209,7 +207,9 @@ def detect_tops_from_3d_grid(
 
             logger.debug(
                 "detect_tops_from_3d_grid: level %d — %d raw blob(s) above %.1f dBZ",
-                k, n_labels, min_dbz,
+                k,
+                n_labels,
+                min_dbz,
             )
 
             for label_id in range(1, n_labels + 1):
@@ -225,7 +225,10 @@ def detect_tops_from_3d_grid(
                 if mean_alt <= min_dev_m:
                     logger.debug(
                         "Level %d blob %d rejected: mean_alt %.0f m <= min_dev_m %.0f m",
-                        k, label_id, mean_alt, min_dev_m,
+                        k,
+                        label_id,
+                        mean_alt,
+                        min_dev_m,
                     )
                     continue
 
@@ -236,7 +239,10 @@ def detect_tops_from_3d_grid(
                 if range_c < min_range_m:
                     logger.debug(
                         "Level %d blob %d rejected: centroid range %.0f m < min_range %.0f m",
-                        k, label_id, range_c, min_range_m,
+                        k,
+                        label_id,
+                        range_c,
+                        min_range_m,
                     )
                     continue
 
@@ -247,7 +253,10 @@ def detect_tops_from_3d_grid(
                     if mean_rhohv <= rhohv_threshold:
                         logger.debug(
                             "Level %d blob %d rejected: mean_rhohv %.3f <= threshold %.3f",
-                            k, label_id, mean_rhohv, rhohv_threshold,
+                            k,
+                            label_id,
+                            mean_rhohv,
+                            rhohv_threshold,
                         )
                         continue
 
@@ -283,9 +292,9 @@ def detect_tops_from_3d_grid(
                 accepted.append(candidate)
 
         logger.debug(
-            "detect_tops_from_3d_grid: %d top(s) accepted after deduplication "
-            "(%d candidates before)",
-            len(accepted), len(candidates),
+            "detect_tops_from_3d_grid: %d top(s) accepted after deduplication " "(%d candidates before)",
+            len(accepted),
+            len(candidates),
         )
         # Already sorted descending by altitude_m
         return accepted

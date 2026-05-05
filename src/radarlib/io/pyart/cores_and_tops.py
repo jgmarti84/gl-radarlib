@@ -77,6 +77,7 @@ def generate_cores_and_tops(
     vol_nr: str,
     output_dir: Path,
     rhohv_3d: Optional[np.ndarray] = None,
+    rhohv_2d: Optional[np.ndarray] = None,
 ) -> Optional[Path]:
     """
     Detect convective cores and storm tops and write one GeoJSON file per volume.
@@ -117,6 +118,8 @@ def generate_cores_and_tops(
         Co-registered 3D cross-correlation ratio grid for quality gating.
         Pass ``None`` when the RhoHV field is absent from the volume; detection
         will run with the quality gate disabled.
+    rhohv_2d : np.ndarray (NY, NX) or None, optional
+        2D RhoHV grid, used for core detection and quality gating.
 
     Returns
     -------
@@ -144,6 +147,7 @@ def generate_cores_and_tops(
             vol_nr=vol_nr,
             output_dir=output_dir,
             rhohv_3d=rhohv_3d,
+            rhohv_2d=rhohv_2d,
             t0=t0,
         )
     except Exception as exc:
@@ -178,12 +182,14 @@ def _run(
     vol_nr: str,
     output_dir: Path,
     rhohv_3d: Optional[np.ndarray],
+    rhohv_2d: Optional[np.ndarray],
     t0: float,
 ) -> Optional[Path]:
     """Internal worker — called exclusively from :func:`generate_cores_and_tops`."""
     # Lazy imports: only pulled in when actually called, keeping daemon startup fast.
-    from radarlib.radar_grid import detect_cores_from_colmax, detect_tops_from_3d_grid
     from pyart.core.transforms import cartesian_to_geographic_aeqd
+
+    from radarlib.radar_grid import detect_cores_from_colmax, detect_tops_from_3d_grid
 
     obs_time_str = observation_time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -192,9 +198,9 @@ def _run(
     # The cores function works on a 2D COLMAX grid, so only one level
     # of RhoHV is needed as a spatial quality gate.
     # ------------------------------------------------------------------
-    rhohv_2d: Optional[np.ndarray] = None
     if rhohv_3d is not None:
-        rhohv_2d = rhohv_3d[0]
+        if rhohv_2d is None:
+            rhohv_2d = rhohv_3d[0]
 
     # ------------------------------------------------------------------
     # Convective core detection
@@ -209,8 +215,7 @@ def _run(
         )
     except Exception as exc:
         logger.warning(
-            "CORES_TOPS radar=%s: core detection raised %s: %s — "
-            "skipping cores, still attempting tops.",
+            "CORES_TOPS radar=%s: core detection raised %s: %s — " "skipping cores, still attempting tops.",
             radar_code,
             type(exc).__name__,
             exc,

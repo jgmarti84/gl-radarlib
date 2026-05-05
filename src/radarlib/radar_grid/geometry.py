@@ -5,11 +5,14 @@ GridGeometry class and serialization functions.
 import json
 import logging
 import os
+import tempfile
 from dataclasses import dataclass, field
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from zipfile import BadZipFile
 
 import numpy as np
+
+from radarlib import config
 
 logger = logging.getLogger(__name__)
 
@@ -290,3 +293,138 @@ def load_geometry(filepath: str) -> GridGeometry:
             f"Cannot load geometry from {filepath}: file is not a valid numpy archive. "
             f"The file may be corrupted, incomplete, or not a valid .npz file. Original error: {e}"
         ) from e
+
+
+class GeometryHandler:
+    # Default geometry parameters (can be overridden by specific geometry types in config)
+    RES_XY = config.GEOMETRY_RES_XY or 1000
+    RES_Z = config.GEOMETRY_RES_Z or 1000
+    TOA = config.GEOMETRY_TOA or 12000
+    HFAC = config.GEOMETRY_HFAC or 0.0175
+    NB = config.GEOMETRY_NB or 1.4
+    BSP = config.GEOMETRY_BSP or 1.2
+    MIN_RADIUS = config.GEOMETRY_MIN_RADIUS or 900
+    MAX_NEIGHBORS = config.MAX_NEIGHBORS or 1
+    WEIGHT_FUNCTION = config.WEIGHT_FUNCTION or "nearest"
+
+    def __init__(
+        self,
+        radar_name: str,
+        strategy: str,
+        volume_nr: str,
+        fields: List[str],
+        roi_params: Optional[Dict[str, Any]] = None,
+    ):
+        self.radar_name = radar_name
+        self.strategy = strategy
+        self.volume_nr = volume_nr
+        self.fields = fields
+        roi_params = roi_params or {}
+        # use roi_param keys to override defaults, but fall back to class-level defaults if not provided
+        self.roi_params = dict(self.default_roi_params, **roi_params)
+
+    @property
+    def default_roi_params(self) -> Dict[str, Any]:
+        return {
+            "res_xy": self.RES_XY,
+            "res_z": self.RES_Z,
+            "toa": self.TOA,
+            "hfac": self.HFAC,
+            "nb": self.NB,
+            "bsp": self.BSP,
+            "min_radius": self.MIN_RADIUS,
+            "max_neighbors": self.MAX_NEIGHBORS,
+            "weight_function": self.WEIGHT_FUNCTION,
+        }
+
+    @property
+    def geometry_metadata(self) -> Dict[str, Any]:
+        # Attach build parameters as metadata so the file is self-describing
+        return {
+            "radar_name": self.radar_name,
+            "strategy": self.strategy,
+            "volume_nr": self.volume_nr,
+            "grid_resolution_xy": self.roi_params["res_xy"],
+            "grid_resolution_z": self.roi_params["res_z"],
+            "toa": self.roi_params["toa"],
+            "h_factor": self.roi_params["hfac"],
+            "min_radius": self.roi_params["min_radius"],
+            "max_neighbors": self.roi_params["max_neighbors"],
+            "nb": self.roi_params["nb"],
+            "bsp": self.roi_params["bsp"],
+            "weighting": self.roi_params["weight_function"],
+        }
+
+    @property
+    def geometry_filename(self) -> str:
+        file_name = build_geometry_filename(self.geometry_metadata)
+        return f"{file_name}.npz"
+
+    def load_from_path(self, directory: str) -> GridGeometry:
+        filepath = os.path.join(directory, self.geometry_filename)
+        return load_geometry(filepath)
+
+    def build_from_gates(
+        self,
+        gate_x: np.ndarray,
+        gate_y: np.ndarray,
+        gate_z: np.ndarray,
+        blind_range_m: float,
+        lowest_elev_deg: float,
+        n_workers: int = None,
+    ) -> GridGeometry:
+        from radarlib.radar_grid import compute_grid_geometry
+        from radarlib.radar_grid.utils import calculate_grid_points
+
+        z_grid_limits = (0.0, self.roi_params["toa"])
+        y_grid_limits = (gate_y.min(), gate_y.max())
+        x_grid_limits = (gate_x.min(), gate_x.max())
+
+        z_points, y_points, x_points = calculate_grid_points(
+            z_grid_limits, y_grid_limits, x_grid_limits, self.roi_params["res_xy"], self.roi_params["res_z"]
+        )
+
+        grid_shape = (z_points, y_points, x_points)
+        grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            logger.debug("Computing grid geometry...")
+            geometry = compute_grid_geometry(
+                gate_x,
+                gate_y,
+                gate_z,
+                grid_shape,
+                grid_limits,
+                temp_dir=temp_dir,
+                toa=self.roi_params["toa"],
+                min_radius=self.roi_params["min_radius"],
+                radar_altitude=0,
+                h_factor=self.roi_params["hfac"],
+                nb=self.roi_params["nb"],
+                bsp=self.roi_params["bsp"],
+                weighting=self.roi_params["weight_function"],
+                max_neighbors=self.roi_params["max_neighbors"],
+                blind_range_m=blind_range_m,
+                lowest_elev_deg=lowest_elev_deg,
+                n_workers=n_workers,
+            )
+        return geometry
+
+    def build_from_bufr(self, bufr_file: str) -> GridGeometry:
+        from radarlib.io.bufr.pyart_writer import bufr_paths_to_pyart
+        from radarlib.radar_grid import get_gate_coordinates
+        from radarlib.radar_grid.utils import infer_blind_range_m
+
+        # create a pyart Radar object from the BUFR file, then extract gate coordinates to build the geometry
+        radar = bufr_paths_to_pyart([str(bufr_file)], save_path=None)
+        gate_x, gate_y, gate_z = get_gate_coordinates(radar)
+
+        # blind range
+        blind_range_m = infer_blind_range_m(radar)
+
+        # Extraer elevación mínima para below-beam mask
+        lowest_elev_deg = float(np.min(radar.fixed_angle["data"]))
+
+        return self.build_from_gates(
+            gate_x, gate_y, gate_z, blind_range_m=blind_range_m, lowest_elev_deg=lowest_elev_deg
+        )
