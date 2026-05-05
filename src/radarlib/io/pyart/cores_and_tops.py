@@ -43,7 +43,7 @@ GeoJSON schema reference
 
 Output file path
 ----------------
-``{output_dir}/{radar_code}/YYYY/MM/DD/{radar_code}_{strategy}_{vol_nr}_{timestamp}_TOPS_CORES.geojson``
+``{output_dir}/YYYY/MM/DD/{radar_code}_{strategy}_{vol_nr}_{timestamp}_TOPS_CORES.geojson``
 
 where ``{timestamp}`` follows the same ``%Y%m%dT%H%M%SZ`` format used for COG
 filenames throughout this codebase.
@@ -113,7 +113,7 @@ def generate_cores_and_tops(
     output_dir : Path
         Root directory for GeoJSON output.  Subdirectories are created
         automatically following the pattern
-        ``{output_dir}/{radar_code}/YYYY/MM/DD/``.
+        ``{output_dir}/YYYY/MM/DD/``.
     rhohv_3d : np.ndarray (NZ, NY, NX) or None, optional
         Co-registered 3D cross-correlation ratio grid for quality gating.
         Pass ``None`` when the RhoHV field is absent from the volume; detection
@@ -309,14 +309,13 @@ def _run(
 
     # ------------------------------------------------------------------
     # Build output path:
-    # {output_dir}/{radar_code}/YYYY/MM/DD/
+    # {output_dir}/YYYY/MM/DD/
     # {radar_code}_{strategy}_{vol_nr}_{timestamp}_TOPS_CORES.geojson
     # The timestamp format matches the COG filename convention: %Y%m%dT%H%M%SZ
     # ------------------------------------------------------------------
     timestamp_str = observation_time.strftime("%Y%m%dT%H%M%SZ")
     subdir = (
         Path(output_dir)
-        / radar_code
         / f"{observation_time.year:04d}"
         / f"{observation_time.month:02d}"
         / f"{observation_time.day:02d}"
