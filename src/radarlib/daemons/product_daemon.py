@@ -1576,6 +1576,7 @@ class ProductGenerationDaemon:
                         )
                         del _ct_rhv_fd
                     else:
+                        _ct_rhohv_2d = None
                         logger.warning(
                             f"[{self.config.radar_name}] Tops/cores: RhoHV field "
                             f"'{rhv_field}' absent — proceeding without RhoHV quality gate."
