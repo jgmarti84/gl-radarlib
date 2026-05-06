@@ -43,6 +43,14 @@ corresponding section in `docs/radarlib_EN.md`:
 > `copilot-instructions.md`. If you change this,
 > update that file too.
 
+### Output Types Overview
+
+| Output | Format | Status | Description |
+|---|---|---|---|
+| COG | GeoTIFF Float32 | ✅ Primary | One per radar field per volume |
+| GeoJSON | FeatureCollection | ✅ Active | Tops & cores, one per volume (gated by config) |
+| PNG | RGBA uint8 | ⚠️ Deprecated | Backward compatibility only |
+
 ### Primary Output Format
 - **GeoTIFF (COG):** This is the primary and current output format.
   Cloud-Optimized GeoTIFF is the production standard.
@@ -82,6 +90,40 @@ ROOT_RADAR_PRODUCTS_PATH/
                 ├── RMA1_20260401T205000Z_ZDRo_00.tif
                 └── RMA1_20260401T205000Z_ZDR_00.png ← deprecated
 ```
+
+### Tops & Cores GeoJSON Convention
+```text
+tops_and_cores/
+└── {radar_code}/
+    └── YYYY/
+        └── MM/
+            └── DD/
+                └── {radar_code}_{strategy}_{vol_nr}_{timestamp}_TOPS_CORES.geojson
+```
+Example: `RMA6_A_00_20260505163854_TOPS_CORES.geojson`
+
+GeoJSON schema per feature:
+```json
+{
+  "type": "Feature",
+  "geometry": { "type": "Point", "coordinates": [lon, lat] },
+  "properties": {
+    "type": "core",          ← "core" or "top"
+    "intensity_dbz": 52,     ← cores only (int)
+    "altitude_m": 11200,     ← tops only (int)
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:38:54Z"
+  }
+}
+```
+
+Critical rules:
+- File is NOT written if both core list and top list are empty.
+- `observation_time` is always ISO 8601 UTC.
+- Coordinates are [lon, lat] — GeoJSON standard order.
+- Timestamp format in filename is `YYYYMMDDTHHMMSSZ` — same as COG filenames.
+- webmet25 indexer depends on this filename pattern — never change it without
+updating TopsAndCoresFilenameParser in the webmet25 repo.
 
 ### GeoTIFF Metadata Fields
 
@@ -251,6 +293,47 @@ If you suspect a memory leak:
 
 ---
 
+### Tops & Cores Detection Module
+File: app/io/cores_and_tops.py
+Entry point: generate_cores_and_tops(radargrid, config, output_dir)
+Called from: ProductGenerationDaemon after all COG products are written for a volume.
+Gate: config.ADD_TOPS_AND_CORES must be True — otherwise function is never called.
+
+**Algorithm Summary**
+
+Input: pyart.core.Grid (Cartesian, shape nz × ny × nx, 1000m/pixel typical)
+
+**Core detection (level 0):**
+1. Threshold VAR_CORE field at level 0 ≥ MIN_Z_CORE
+2. scipy.ndimage.label() for connected-component labelling
+3. Per blob: compute centroid (xc, yc) from grid.x['data'], grid.y['data']
+4. Reject blobs with range < MIN_RANGE
+5. RhoHV filter (if field present): mean RhoHV > 0.85 AND count > 2,
+OR max dBZ > MIN_Z_UP AND count > 5
+6. Deduplication: blobs within R_NUCLEOS → keep higher mean dBZ
+
+**Top detection:**
+1. Per level: threshold DBZH ≥ MIN_Z_TOP, mask range < 25000m
+2. scipy.ndimage.label() per level
+3. Per blob: zt = grid.z['data'][iz] (scalar altitude for that level)
+4. Filter: zt > MIN_DEV AND mean RhoHV > 0.94 (if present) AND count > 2
+5. Deduplication: blobs within R_TOPES → keep higher zt
+
+**Coordinate conversion:**
+pyart.core.cartesian_to_geographic_aeqd(x, y, origin_lon, origin_lat) → (lon, lat)
+
+**Important Implementation Notes**
+- Uses scipy.ndimage.label() — NOT pyart.correct.find_objects() (which requires polar Radar objects)
+- Top detection loops per level, not 3D — preserves per-altitude semantics
+- grid.z['data'][iz] is a scalar (all pixels at level iz share the same altitude)
+- RhoHV field name resolved via pyart.config.get_field_name('cross_correlation_ratio')
+- Missing RhoHV → WARNING logged once, detection continues with relaxed filter
+- Missing VAR_CORE field → WARNING logged, function returns early
+- GeoJSON write failure → ERROR logged with traceback, never re-raised
+- Log at INFO: "CORES_TOPS radar={} time={} cores={} tops={} elapsed={}ms"
+
+---
+
 ## Known Gaps & Risks (Quick Reference)
 > Do not replicate these patterns. Suggest fixes when touching
 > these areas. Full details in `docs/radarlib_EN.md`.
@@ -303,6 +386,25 @@ VOLUME_TYPES:                  →   VOLUME_TYPES: {"0315": {...}}  # kept intac
   "0315":
     "01": [...]
 ```
+
+### Tops & Cores Config Keys
+The following keys were added to `_DEFAULTS` in `app/config.py` and to `genpro25.yaml`.
+They follow the standard two-layer config system — YAML overrides defaults, env vars
+override YAML.
+
+Key	Default	Type	Description
+ADD_TOPS_AND_CORES	False	bool	Gate flag — enables GeoJSON generation
+MIN_RANGE	12000	int	Min range from radar to process [m]
+MIN_DEV	9000	int	Min vertical development for tops [m]
+MIN_Z_TOP	20.0	float	Reflectivity threshold for tops [dBZ]
+MIN_Z_CORE	52.0	float	Reflectivity threshold for cores [dBZ]
+MIN_Z_UP	56.0	float	Violent updraft core threshold [dBZ]
+VAR_CORE	"COLMAX"	str	Field for core detection ("COLMAX" or "DBZH")
+R_NUCLEOS	8000	int	Deduplication radius for cores [m]
+R_TOPES	17000	int	Deduplication radius for tops [m]
+
+These are service-layer settings (rule 1) — they belong in `app/config.py` `_DEFAULTS` only,
+not in `src/radarlib/config.py`.
 
 ### Rules When Adding New Config Keys
 1. **Service-layer settings** (daemon toggles, poll intervals, retention days, paths, FTP):
