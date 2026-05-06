@@ -7,13 +7,9 @@ Horizontal coordinates span ±150 000 m so centroids at the grid edge are
 easily beyond any reasonable min_range threshold.
 """
 
-import math
-
 import numpy as np
-import pytest
 
 from radarlib.radar_grid.tops import detect_tops_from_3d_grid
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -60,8 +56,8 @@ class TestDetectTopsFrom3dGrid:
         min_dev_m=9 000 m and min_range_m=0 m.
         """
         grid = _make_grid(0.0)
-        row_sl, col_sl = slice(14, 18), slice(14, 18)   # 4×4 = 16 pixels
-        grid[3, row_sl, col_sl] = 30.0                  # level 3 = 12 000 m
+        row_sl, col_sl = slice(14, 18), slice(14, 18)  # 4×4 = 16 pixels
+        grid[3, row_sl, col_sl] = 30.0  # level 3 = 12 000 m
 
         result = detect_tops_from_3d_grid(
             grid,
@@ -96,8 +92,7 @@ class TestDetectTopsFrom3dGrid:
         grid[0, 14:18, 14:18] = 30.0
 
         result = detect_tops_from_3d_grid(
-            grid, _XX, _YY, _Z_1D, rhohv_3d=None,
-            min_dbz=20.0, min_range_m=0.0, min_dev_m=9000.0
+            grid, _XX, _YY, _Z_1D, rhohv_3d=None, min_dbz=20.0, min_range_m=0.0, min_dev_m=9000.0
         )
         assert result == [], f"Expected no tops (blob below min_dev_m), got {result}"
 
@@ -112,8 +107,7 @@ class TestDetectTopsFrom3dGrid:
         grid[3, 8:12, 8:12] = 30.0
 
         result = detect_tops_from_3d_grid(
-            grid, _XX, _YY, _Z_1D, rhohv_3d=None,
-            min_dbz=20.0, min_range_m=100_000.0, min_dev_m=0.0
+            grid, _XX, _YY, _Z_1D, rhohv_3d=None, min_dbz=20.0, min_range_m=100_000.0, min_dev_m=0.0
         )
         assert result == [], f"Expected no tops (inside min_range), got {result}"
 
@@ -149,9 +143,9 @@ class TestDetectTopsFrom3dGrid:
         )
 
         assert len(result) == 1, f"Expected 1 top after dedup, got {len(result)}: {result}"
-        assert result[0]["level_index"] == 3, (
-            f"Expected surviving top to be at level 3, got level {result[0]['level_index']}"
-        )
+        assert (
+            result[0]["level_index"] == 3
+        ), f"Expected surviving top to be at level 3, got level {result[0]['level_index']}"
         assert abs(result[0]["altitude_m"] - 12000.0) < 1e-3
 
     def test_two_distinct_tops(self):
@@ -186,13 +180,10 @@ class TestDetectTopsFrom3dGrid:
         grid[3, 14:18, 14:18] = 25.0  # above min_dbz, at upper level
 
         result = detect_tops_from_3d_grid(
-            grid, _XX, _YY, _Z_1D, rhohv_3d=None,
-            min_dbz=20.0, min_range_m=0.0, min_dev_m=9000.0, min_pixels=2
+            grid, _XX, _YY, _Z_1D, rhohv_3d=None, min_dbz=20.0, min_range_m=0.0, min_dev_m=9000.0, min_pixels=2
         )
 
-        assert len(result) == 1, (
-            f"Expected blob accepted without RhoHV gate, got {result}"
-        )
+        assert len(result) == 1, f"Expected blob accepted without RhoHV gate, got {result}"
 
     def test_rhohv_gate_rejects_low_rhohv(self):
         """Blob with mean RhoHV below threshold is rejected."""
@@ -215,9 +206,7 @@ class TestDetectTopsFrom3dGrid:
             min_pixels=2,
         )
 
-        assert result == [], (
-            f"Expected blob rejected by RhoHV gate (mean=0.80 < 0.94), got {result}"
-        )
+        assert result == [], f"Expected blob rejected by RhoHV gate (mean=0.80 < 0.94), got {result}"
 
     def test_rhohv_gate_accepts_high_rhohv(self):
         """Blob with mean RhoHV above threshold is accepted."""
@@ -259,15 +248,14 @@ class TestDetectTopsFrom3dGrid:
         ma_grid = np.ma.array(grid, mask=mask)
 
         result = detect_tops_from_3d_grid(
-            ma_grid, _XX, _YY, _Z_1D, rhohv_3d=None,
-            min_dbz=20.0, min_range_m=0.0, min_dev_m=9000.0, min_pixels=2
+            ma_grid, _XX, _YY, _Z_1D, rhohv_3d=None, min_dbz=20.0, min_range_m=0.0, min_dev_m=9000.0, min_pixels=2
         )
 
         assert len(result) == 1, f"Expected 1 top from masked array input, got {result}"
         # Pixel count must be 15, not 16
-        assert result[0]["pixel_count"] == 15, (
-            f"Expected pixel_count=15 (masked 1 pixel), got {result[0]['pixel_count']}"
-        )
+        assert (
+            result[0]["pixel_count"] == 15
+        ), f"Expected pixel_count=15 (masked 1 pixel), got {result[0]['pixel_count']}"
 
         # Centroid must exclude the masked pixel
         unmasked_x = _XX[row_sl, col_sl][~mask[3, row_sl, col_sl]]
@@ -282,9 +270,9 @@ class TestDetectTopsFrom3dGrid:
         grid = _make_grid(0.0)
 
         # Three blobs at different levels and horizontal positions
-        grid[3, 14:18, 14:18] = 30.0   # level 3 = 12 000 m
-        grid[2, 2:6, 2:6] = 25.0       # level 2 =  9 000 m  (far from level-3 blob)
-        grid[1, 2:6, 14:18] = 22.0     # level 1 =  6 000 m  (different location)
+        grid[3, 14:18, 14:18] = 30.0  # level 3 = 12 000 m
+        grid[2, 2:6, 2:6] = 25.0  # level 2 =  9 000 m  (far from level-3 blob)
+        grid[1, 2:6, 14:18] = 22.0  # level 1 =  6 000 m  (different location)
 
         result = detect_tops_from_3d_grid(
             grid,
@@ -302,9 +290,7 @@ class TestDetectTopsFrom3dGrid:
         assert len(result) == 3, f"Expected 3 tops, got {len(result)}: {result}"
 
         altitudes = [t["altitude_m"] for t in result]
-        assert altitudes == sorted(altitudes, reverse=True), (
-            f"Tops not sorted by descending altitude: {altitudes}"
-        )
+        assert altitudes == sorted(altitudes, reverse=True), f"Tops not sorted by descending altitude: {altitudes}"
 
     def test_z_coords_3d_input(self):
         """Function handles 3D z_coords (NZ, NY, NX) correctly."""
@@ -318,8 +304,7 @@ class TestDetectTopsFrom3dGrid:
             z_3d[k, :, :] = z_val
 
         result = detect_tops_from_3d_grid(
-            grid, _XX, _YY, z_3d, rhohv_3d=None,
-            min_dbz=20.0, min_range_m=0.0, min_dev_m=9000.0, min_pixels=2
+            grid, _XX, _YY, z_3d, rhohv_3d=None, min_dbz=20.0, min_range_m=0.0, min_dev_m=9000.0, min_pixels=2
         )
 
         assert len(result) == 1

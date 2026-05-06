@@ -4,7 +4,6 @@ radar_grid - Fast radar gridding with precomputed geometry
 
 from .compute import compute_grid_geometry
 from .cores import detect_cores_from_colmax
-from .tops import detect_tops_from_3d_grid
 from .filters import GateFilter, GridFilter, create_mask_from_filter
 from .geometry import GridGeometry, build_geometry_filename, load_geometry, peek_geometry_metadata, save_geometry
 from .geotiff import (
@@ -39,6 +38,7 @@ from .products import (
     get_beam_height_difference,
     get_elevation_from_z_level,
 )
+from .tops import detect_tops_from_3d_grid
 from .utils import get_available_fields, get_field_data, get_gate_coordinates, get_radar_info
 
 __version__ = "0.1.0"

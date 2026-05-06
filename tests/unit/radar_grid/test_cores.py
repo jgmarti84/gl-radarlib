@@ -7,10 +7,8 @@ satisfy the default minimum-range requirement.
 """
 
 import numpy as np
-import pytest
 
 from radarlib.radar_grid.cores import detect_cores_from_colmax
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -39,9 +37,7 @@ class TestDetectCoresFromColmax:
     def test_empty_grid(self):
         """All-zeros grid yields no cores."""
         colmax = _make_colmax(0.0)
-        result = detect_cores_from_colmax(
-            colmax, _XX, _YY, rhohv=None, min_dbz=52.0, min_range_m=0.0
-        )
+        result = detect_cores_from_colmax(colmax, _XX, _YY, rhohv=None, min_dbz=52.0, min_range_m=0.0)
         assert result == []
 
     def test_single_blob_above_threshold(self):
@@ -127,9 +123,7 @@ class TestDetectCoresFromColmax:
         centroid_ay = float(_YY[row_a, col_a].mean())
         centroid_bx = float(_XX[row_b, col_b].mean())
         centroid_by = float(_YY[row_b, col_b].mean())
-        dist = float(
-            np.sqrt((centroid_ax - centroid_bx) ** 2 + (centroid_ay - centroid_by) ** 2)
-        )
+        dist = float(np.sqrt((centroid_ax - centroid_bx) ** 2 + (centroid_ay - centroid_by) ** 2))
 
         # Merge radius larger than actual distance → both merge
         result = detect_cores_from_colmax(
@@ -146,9 +140,9 @@ class TestDetectCoresFromColmax:
 
         assert len(result) == 1, f"Expected 1 core after dedup, got {len(result)}: {result}"
         # The surviving core should be the stronger one (Blob A)
-        assert abs(result[0]["mean_dbz"] - 62.0) < 1e-4, (
-            f"Expected surviving core to be Blob A (mean_dbz=62.0), got {result[0]['mean_dbz']}"
-        )
+        assert (
+            abs(result[0]["mean_dbz"] - 62.0) < 1e-4
+        ), f"Expected surviving core to be Blob A (mean_dbz=62.0), got {result[0]['mean_dbz']}"
 
     def test_two_distinct_cores(self):
         """Two blobs far apart are both returned when dedup_radius_m is small."""
@@ -223,9 +217,7 @@ class TestDetectCoresFromColmax:
             min_pixels=2,
         )
 
-        assert result == [], (
-            f"Expected blob to be rejected (low RhoHV, below updraft threshold), got {result}"
-        )
+        assert result == [], f"Expected blob to be rejected (low RhoHV, below updraft threshold), got {result}"
 
     def test_rhohv_gate_accepts_high_rhohv(self):
         """Blob with sufficient dBZ and high RhoHV passes the met gate."""
@@ -287,10 +279,10 @@ class TestDetectCoresFromColmax:
         unmasked_y = _YY[row_sl, col_sl][~mask[row_sl, col_sl]]
         expected_x = float(unmasked_x.mean())
         expected_y = float(unmasked_y.mean())
-        assert abs(core["x_m"] - expected_x) < 1e-3, (
-            f"Centroid x mismatch: got {core['x_m']:.2f}, expected {expected_x:.2f}"
-        )
-        assert abs(core["y_m"] - expected_y) < 1e-3, (
-            f"Centroid y mismatch: got {core['y_m']:.2f}, expected {expected_y:.2f}"
-        )
+        assert (
+            abs(core["x_m"] - expected_x) < 1e-3
+        ), f"Centroid x mismatch: got {core['x_m']:.2f}, expected {expected_x:.2f}"
+        assert (
+            abs(core["y_m"] - expected_y) < 1e-3
+        ), f"Centroid y mismatch: got {core['y_m']:.2f}, expected {expected_y:.2f}"
         assert core["pixel_count"] == 24  # 25 - 1 masked pixel

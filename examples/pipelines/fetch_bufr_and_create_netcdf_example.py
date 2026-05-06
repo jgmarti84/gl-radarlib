@@ -37,18 +37,19 @@ from typing import Dict, List, Optional
 
 import pyart
 
+from radarlib import config
+
 # ---------------------------------------------------------------------------
 # Make sure the package root is importable when run directly from the repo
 # ---------------------------------------------------------------------------
 _repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_repo_root / "src"))
 
-from radarlib import config
-from radarlib.io.bufr.bufr import bufr_to_dict
-from radarlib.io.bufr.pyart_writer import bufr_fields_to_pyart_radar
-from radarlib.io.ftp.ftp_client import RadarFTPClientAsync
-from radarlib.utils.memory_profiling import log_memory_usage
-from radarlib.utils.names_utils import (
+from radarlib.io.bufr.bufr import bufr_to_dict  # noqa: E402
+from radarlib.io.bufr.pyart_writer import bufr_fields_to_pyart_radar  # noqa: E402
+from radarlib.io.ftp.ftp_client import RadarFTPClientAsync  # noqa: E402
+from radarlib.utils.memory_profiling import log_memory_usage  # noqa: E402
+from radarlib.utils.names_utils import (  # noqa: E402
     build_vol_types_regex,
     extract_bufr_filename_components,
     get_netcdf_filename_from_bufr_filename,
@@ -60,6 +61,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration and CLI
 # ---------------------------------------------------------------------------
+
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -134,19 +136,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--lookback-hours",
         type=int,
         default=24,
-        help=(
-            "Number of hours to look back from now when searching for files "
-            "(if --timestamp is not provided)."
-        ),
+        help=("Number of hours to look back from now when searching for files " "(if --timestamp is not provided)."),
     )
     p.add_argument(
         "--max-age-minutes",
         type=int,
         default=None,
-        help=(
-            "Maximum age of files in minutes. Used to find latest timestamp. "
-            "If None, no age restriction."
-        ),
+        help=("Maximum age of files in minutes. Used to find latest timestamp. " "If None, no age restriction."),
     )
     p.add_argument(
         "--ftp-base-path",
@@ -168,6 +164,7 @@ def _build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 # Utility functions for timestamp handling and FTP traversal
 # ---------------------------------------------------------------------------
+
 
 def parse_timestamp(timestamp_str: Optional[str]) -> Optional[datetime]:
     """
@@ -356,9 +353,7 @@ async def find_nearby_timestamps(
     dict or None
         Found files, or None if not found within offset
     """
-    logger.info(
-        f"Searching nearby timestamps (±{max_offset_minutes} min) for {radar} {strategy}-{vol_nr}"
-    )
+    logger.info(f"Searching nearby timestamps (±{max_offset_minutes} min) for {radar} {strategy}-{vol_nr}")
 
     # Try offsets in both directions: 0, ±5, ±10, ±15, ±20, ±25, ±30
     offsets_to_try = [0]
@@ -369,24 +364,18 @@ async def find_nearby_timestamps(
     for offset_minutes in offsets_to_try:
         search_timestamp = target_timestamp + timedelta(minutes=offset_minutes)
 
-        logger.debug(
-            f"Searching offset {offset_minutes:+3d} min: {search_timestamp.isoformat()}"
-        )
+        logger.debug(f"Searching offset {offset_minutes:+3d} min: {search_timestamp.isoformat()}")
 
         result = await try_timestamp_directory(
             ftp_client, radar, strategy, vol_nr, fields, search_timestamp, ftp_base_path
         )
 
         if result is not None:
-            logger.info(
-                f"Found all fields at offset {offset_minutes:+d} min: "
-                f"{search_timestamp.isoformat()}"
-            )
+            logger.info(f"Found all fields at offset {offset_minutes:+d} min: " f"{search_timestamp.isoformat()}")
             return result
 
     logger.warning(
-        f"Could not find all fields within ±{max_offset_minutes} minutes of "
-        f"{target_timestamp.isoformat()}"
+        f"Could not find all fields within ±{max_offset_minutes} minutes of " f"{target_timestamp.isoformat()}"
     )
     return None
 
@@ -511,17 +500,19 @@ async def find_latest_bufr_timestamp(
     datetime
         Timestamp of latest volume with all fields
     """
-    logger.info(
-        f"Searching for latest timestamp with all fields: {radar} {strategy}-{vol_nr}"
-    )
+    logger.info(f"Searching for latest timestamp with all fields: {radar} {strategy}-{vol_nr}")
 
     # Use find_bufr_files_at_closest_time which handles this efficiently
     result = await find_bufr_files_for_timestamp(
-        ftp_client, radar, strategy, vol_nr, fields,
+        ftp_client,
+        radar,
+        strategy,
+        vol_nr,
+        fields,
         target_timestamp=None,  # Searches from now
-        lookback_hours=lookback_hours
+        lookback_hours=lookback_hours,
     )
-    
+
     # The function will raise if not found, so if we get here we found it
     # We just need the timestamp from the filename
     # For now, return the time we found it at
@@ -530,14 +521,14 @@ async def find_latest_bufr_timestamp(
         first_path = list(result.values())[0]
         logger.info(f"Found latest timestamp from path: {first_path}")
         # Parse timestamp from path: /L2/RADAR/YYYY/MM/DD/HH/MMSS/FILE.BUFR
-        parts = first_path.split('/')
+        parts = first_path.split("/")
         if len(parts) >= 8:
             year, month, day, hour, minumsec = parts[-7], parts[-6], parts[-5], parts[-4], parts[-3]
             minute = int(minumsec[:2])
             second = int(minumsec[2:]) if len(minumsec) > 2 else 0
             dt = datetime(int(year), int(month), int(day), int(hour), minute, second, tzinfo=timezone.utc)
             return dt
-    
+
     raise ValueError(f"Could not determine timestamp for {radar} {strategy}-{vol_nr}")
 
 
@@ -571,9 +562,7 @@ async def download_bufr_files(
 
         logger.info(f"Downloading {field}: {remote_path} -> {local_path}")
         try:
-            await ftp_client.download_file_async(
-                Path(remote_path), local_path
-            )
+            await ftp_client.download_file_async(Path(remote_path), local_path)
             local_paths[field] = local_path
         except Exception as e:
             logger.error(f"Failed to download {field}: {e}")
@@ -697,6 +686,7 @@ def save_radar_to_netcdf(radar: pyart.core.Radar, output_path: Path) -> Path:
 # Main workflow
 # ---------------------------------------------------------------------------
 
+
 async def fetch_bufr_and_create_netcdf(
     radar: str,
     strategy: str,
@@ -766,7 +756,9 @@ async def fetch_bufr_and_create_netcdf(
             if timestamp is None:
                 logger.info("No timestamp provided, finding latest with all fields...")
                 for field in fields:
-                    last_bufr = ftp_client.find_last_bufr_file(radar=radar, strategy=strategy, volume_nr=vol_nr, field=field, search_from_time=None)
+                    last_bufr = ftp_client.find_last_bufr_file(
+                        radar=radar, strategy=strategy, volume_nr=vol_nr, field=field, search_from_time=None
+                    )
                     if last_bufr:
                         break
                 if not last_bufr:
@@ -792,9 +784,7 @@ async def fetch_bufr_and_create_netcdf(
             # ------------------------------------------------------------------
             # Step 2 — Download BUFR files
             # ------------------------------------------------------------------
-            bufr_local_paths = await download_bufr_files(
-                ftp_client, bufr_remote_paths, temp_dir_path
-            )
+            bufr_local_paths = await download_bufr_files(ftp_client, bufr_remote_paths, temp_dir_path)
             logger.info(f"Downloaded {len(bufr_local_paths)} BUFR files")
 
         # ------------------------------------------------------------------
@@ -821,7 +811,7 @@ async def fetch_bufr_and_create_netcdf(
         save_radar_to_netcdf(radar_obj, output_path)
 
         logger.info(f"\n{'=' * 60}")
-        logger.info(f"SUCCESS: Created NetCDF file")
+        logger.info("SUCCESS: Created NetCDF file")
         logger.info(f"  Location: {output_path}")
         logger.info(f"  Radar: {radar} {strategy}-{vol_nr}")
         logger.info(f"  Timestamp: {timestamp.isoformat()}")
@@ -834,6 +824,7 @@ async def fetch_bufr_and_create_netcdf(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 async def main() -> None:
     """Main entry point."""

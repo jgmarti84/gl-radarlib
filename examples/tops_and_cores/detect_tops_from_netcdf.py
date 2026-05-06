@@ -34,8 +34,9 @@ import numpy as np
 _repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_repo_root / "src"))
 
-from radarlib import config
-from radarlib.radar_grid import (
+from radarlib import config  # noqa: E402
+from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf  # noqa: E402
+from radarlib.radar_grid import (  # noqa: E402
     apply_geometry,
     compute_grid_geometry,
     detect_tops_from_3d_grid,
@@ -44,11 +45,10 @@ from radarlib.radar_grid import (
     load_geometry,
     save_geometry,
 )
-from radarlib.radar_grid.geometry import build_geometry_filename
-from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
-from radarlib.utils.fields_utils import determine_reflectivity_fields
-from radarlib.utils.names_utils import extract_netcdf_filename_components
-from radarlib.radar_grid.utils import calculate_grid_points, get_field_data, safe_range_max_m
+from radarlib.radar_grid.geometry import build_geometry_filename  # noqa: E402
+from radarlib.radar_grid.utils import calculate_grid_points, get_field_data, safe_range_max_m  # noqa: E402
+from radarlib.utils.fields_utils import determine_reflectivity_fields  # noqa: E402
+from radarlib.utils.names_utils import extract_netcdf_filename_components  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -76,28 +76,21 @@ def _build_parser() -> argparse.ArgumentParser:
             "tests/data/geometry/"
             "RMA1_0315_01_RES1000x600_TOA15000_HF1p0000_MR900_MN1_NB1p30_BSP1p10_nearest_geometry.npz"
         ),
-        help=(
-            "Path to precomputed geometry file. "
-            "If not found, will be created from the NetCDF data."
-        ),
+        help=("Path to precomputed geometry file. " "If not found, will be created from the NetCDF data."),
     )
     p.add_argument(
         "--min-dbz",
         type=float,
         default=None,
         help=(
-            "Reflectivity threshold for tops detection (dBZ). "
-            f"Defaults to config.TOPS_MIN_Z ({config.TOPS_MIN_Z})."
+            "Reflectivity threshold for tops detection (dBZ). " f"Defaults to config.TOPS_MIN_Z ({config.TOPS_MIN_Z})."
         ),
     )
     p.add_argument(
         "--min-pixels",
         type=int,
         default=2,
-        help=(
-            "Minimum blob size in pixels. "
-            "Must be exceeded: pixel_count > min_pixels."
-        ),
+        help=("Minimum blob size in pixels. " "Must be exceeded: pixel_count > min_pixels."),
     )
     p.add_argument(
         "--min-altitude",
@@ -251,6 +244,7 @@ def _plot_grid_with_tops(
     # Try the project colormap; fall back gracefully
     try:
         import radarlib.visualization  # noqa: F401 — registers custom cmaps
+
         cmap_refl = "grc_th"
     except Exception:
         cmap_refl = "NWSRef"
@@ -303,9 +297,7 @@ def _plot_grid_with_tops(
 
     ax_left.set_xlabel("Range East (km)", fontsize=10)
     ax_left.set_ylabel("Range North (km)", fontsize=10)
-    ax_left.set_title(
-        f"{radar_name} — COLMAX with storm tops\n{timestamp}", fontsize=11
-    )
+    ax_left.set_title(f"{radar_name} — COLMAX with storm tops\n{timestamp}", fontsize=11)
     ax_left.set_aspect("equal")
     ax_left.grid(color="gray", linestyle="--", linewidth=0.4, alpha=0.5)
 
@@ -321,9 +313,7 @@ def _plot_grid_with_tops(
         colors = [_cmap((a - alt_min) / alt_range) for a in alts_km]
 
         y_positions = list(range(len(tops)))
-        bars = ax_right.barh(
-            y_positions, alts_km, color=colors, edgecolor="white", height=0.6
-        )
+        bars = ax_right.barh(y_positions, alts_km, color=colors, edgecolor="white", height=0.6)
 
         for bar, top in zip(bars, tops):
             ax_right.text(
@@ -354,12 +344,7 @@ def _plot_grid_with_tops(
 
     plt.tight_layout()
 
-    timestamp_for_file = (
-        timestamp.replace(":", "")
-        .replace("-", "")
-        .replace("T", "t")
-        .replace("Z", "")
-    )
+    timestamp_for_file = timestamp.replace(":", "").replace("-", "").replace("T", "t").replace("Z", "")
     filename = f"{radar_name}_{strategy}_{vol_nr}_{timestamp_for_file}_tops.png"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, filename)
@@ -415,7 +400,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     try:
         geometry = load_geometry(args.geometry)
-    except (FileNotFoundError, Exception) as exc:
+    except Exception as exc:
         logger.warning("Failed to load geometry from %s: %s", args.geometry, exc)
         logger.info("Attempting to create geometry from loaded radar data...")
         try:
@@ -521,9 +506,7 @@ def main() -> None:
     # Step 4 — Extract coordinate arrays from the geometry object
     # ------------------------------------------------------------------
     xx, yy, z_1d = _extract_coordinates(geometry)
-    logger.info(
-        "Grid: nz=%d levels from %.0f m to %.0f m", len(z_1d), z_1d[0], z_1d[-1]
-    )
+    logger.info("Grid: nz=%d levels from %.0f m to %.0f m", len(z_1d), z_1d[0], z_1d[-1])
 
     # ------------------------------------------------------------------
     # Step 5 — Optional: 3D RhoHV grid for quality gating

@@ -28,15 +28,16 @@ from pathlib import Path
 
 import numpy as np
 
+from radarlib import config
+
 # ---------------------------------------------------------------------------
 # Make sure the package root is importable when run directly from the repo
 # ---------------------------------------------------------------------------
 _repo_root = Path(__file__).resolve().parent.parent
-# if str(_repo_root / "src") not in sys.path:
 sys.path.insert(0, str(_repo_root / "src"))
 
-from radarlib import config
-from radarlib.radar_grid import (
+from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf  # noqa: E402
+from radarlib.radar_grid import (  # noqa: E402
     apply_geometry,
     column_max,
     compute_grid_geometry,
@@ -44,13 +45,12 @@ from radarlib.radar_grid import (
     get_gate_coordinates,
     get_radar_info,
     load_geometry,
-    save_geometry
+    save_geometry,
 )
-from radarlib.radar_grid.geometry import build_geometry_filename
-from radarlib.io.pyart.pyart_radar import read_radar_netcdf, estandarizar_campos_RMA
-from radarlib.utils.fields_utils import determine_reflectivity_fields
-from radarlib.utils.names_utils import extract_netcdf_filename_components
-from radarlib.radar_grid.utils import get_field_data, calculate_grid_points, safe_range_max_m
+from radarlib.radar_grid.geometry import build_geometry_filename  # noqa: E402
+from radarlib.radar_grid.utils import calculate_grid_points, get_field_data, safe_range_max_m  # noqa: E402
+from radarlib.utils.fields_utils import determine_reflectivity_fields  # noqa: E402
+from radarlib.utils.names_utils import extract_netcdf_filename_components  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +59,24 @@ logger = logging.getLogger(__name__)
 # Argument parsing
 # ---------------------------------------------------------------------------
 
+
 def _build_parser() -> argparse.ArgumentParser:
+    filename = "RMA1_0315_01_RES1000x600_TOA15000_HF1p0000_MR900_MN1_NB1p30_BSP1p10_nearest_geometry.npz"
     p = argparse.ArgumentParser(
         description="Detect convective cores from a radar NetCDF volume.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--netcdf", type=str, default="tests/data/netcdf/RMA1_0315_01_20260428T145503Z.nc", help="Path to NetCDF radar volume file.")
     p.add_argument(
-        "--geometry", 
-        type=str, 
-        default="tests/data/geometry/RMA1_0315_01_RES1000x600_TOA15000_HF1p0000_MR900_MN1_NB1p30_BSP1p10_nearest_geometry.npz", 
-        help="Path to precomputed geometry file. If not found, will be created from the NetCDF data."
+        "--netcdf",
+        type=str,
+        default="tests/data/netcdf/RMA1_0315_01_20260428T145503Z.nc",
+        help="Path to NetCDF radar volume file.",
+    )
+    p.add_argument(
+        "--geometry",
+        type=str,
+        default=f"tests/data/geometry/{filename}",
+        help="Path to precomputed geometry file. If not found, will be created from the NetCDF data.",
     )
     # p.add_argument(
     #     "--radar-name",
@@ -131,8 +138,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help=(
-            "Disable RhoHV quality gating entirely. "
-            "Only updraft intensity gate applies. Useful for weak convection."
+            "Disable RhoHV quality gating entirely. " "Only updraft intensity gate applies. Useful for weak convection."
         ),
     )
     p.add_argument(
@@ -182,33 +188,33 @@ def _build_parser() -> argparse.ArgumentParser:
 #         If no matching ``.npz`` file is found under
 #         ``config.ROOT_GEOMETRY_PATH``.
 #     """
-    # Build the canonical filename stem using the same helper as the daemon
-    # metadata = {
-    #     "radar_name": radar_name,
-    #     "strategy": strategy,
-    #     "volume_nr": vol_nr,
-    #     "grid_resolution_xy": config.GEOMETRY_RES_XY,
-    #     "grid_resolution_z": config.GEOMETRY_RES_Z,
-    #     "toa": config.GEOMETRY_TOA,
-    #     "h_factor": config.GEOMETRY_HFAC,
-    #     "min_radius": config.GEOMETRY_MIN_RADIUS,
-    #     "max_neighbors": config.MAX_NEIGHBORS,
-    #     "nb": config.GEOMETRY_NB,
-    #     "bsp": config.GEOMETRY_BSP,
-    #     "weighting": config.WEIGHT_FUNCTION,
-    # }
-    # filename_stem = build_geometry_filename(metadata)
-    # geometry_path = os.path.join(config.ROOT_GEOMETRY_PATH, f"{filename_stem}.npz")
+# Build the canonical filename stem using the same helper as the daemon
+# metadata = {
+#     "radar_name": radar_name,
+#     "strategy": strategy,
+#     "volume_nr": vol_nr,
+#     "grid_resolution_xy": config.GEOMETRY_RES_XY,
+#     "grid_resolution_z": config.GEOMETRY_RES_Z,
+#     "toa": config.GEOMETRY_TOA,
+#     "h_factor": config.GEOMETRY_HFAC,
+#     "min_radius": config.GEOMETRY_MIN_RADIUS,
+#     "max_neighbors": config.MAX_NEIGHBORS,
+#     "nb": config.GEOMETRY_NB,
+#     "bsp": config.GEOMETRY_BSP,
+#     "weighting": config.WEIGHT_FUNCTION,
+# }
+# filename_stem = build_geometry_filename(metadata)
+# geometry_path = os.path.join(config.ROOT_GEOMETRY_PATH, f"{filename_stem}.npz")
 
-    # if not Path(geometry_path).exists():
-    #     raise FileNotFoundError(
-    #         f"Geometry file not found: {geometry_path}\n"
-    #         f"Run the daemon at least once so the geometry is built, or use "
-    #         f"examples/daemons/init_geometry_examples.py to pre-build it."
-    #     )
+# if not Path(geometry_path).exists():
+#     raise FileNotFoundError(
+#         f"Geometry file not found: {geometry_path}\n"
+#         f"Run the daemon at least once so the geometry is built, or use "
+#         f"examples/daemons/init_geometry_examples.py to pre-build it."
+#     )
 
-    # logger.info("Loading geometry from %s", geometry_path)
-    # return load_geometry(geometry_path)
+# logger.info("Loading geometry from %s", geometry_path)
+# return load_geometry(geometry_path)
 
 
 def _extract_xy_coords(geometry) -> tuple:
@@ -297,6 +303,7 @@ def _plot_colmax_with_cores(
     # Try the project colourmap; fall back gracefully
     try:
         import radarlib.visualization  # noqa: F401 — registers custom cmaps
+
         cmap_name = "grc_th"
     except Exception:
         cmap_name = "NWSRef"
@@ -353,16 +360,17 @@ def _plot_colmax_with_cores(
     ax.grid(color="gray", linestyle="--", linewidth=0.4, alpha=0.5)
 
     plt.tight_layout()
-    
+
     # Build output filename based on radar, strategy, volume, and timestamp
     # Format: RADAR_STRATEGY_VOLUME_TIMESTAMP_cores.png
     timestamp_for_file = timestamp.replace(":", "").replace("-", "").replace("T", "t").replace("Z", "")
     filename = f"{radar_name}_{strategy}_{vol_nr}_{timestamp_for_file}_cores.png"
-    
+
     # Create output directory if it doesn't exist
     import os
+
     os.makedirs(output_dir, exist_ok=True)
-    
+
     output_path = os.path.join(output_dir, filename)
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     logging.getLogger(__name__).info(f"Saved plot to {output_path}")
@@ -372,6 +380,7 @@ def _plot_colmax_with_cores(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """Main entry point for the convective core detection example."""
@@ -421,7 +430,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     try:
         geometry = load_geometry(args.geometry)
-    except (FileNotFoundError, Exception) as exc:
+    except Exception as exc:
         logger.warning(f"Failed to load geometry from {args.geometry}: {exc}")
         logger.info("Attempting to create geometry from loaded radar data...")
         try:
@@ -440,8 +449,7 @@ def main() -> None:
 
             # Calculate grid dimensions
             z_points, y_points, x_points = calculate_grid_points(
-                z_grid_limits, y_grid_limits, x_grid_limits,
-                config.GEOMETRY_RES_XY, config.GEOMETRY_RES_Z
+                z_grid_limits, y_grid_limits, x_grid_limits, config.GEOMETRY_RES_XY, config.GEOMETRY_RES_Z
             )
             grid_shape = (z_points, y_points, x_points)
             grid_limits = (z_grid_limits, y_grid_limits, x_grid_limits)
@@ -450,8 +458,11 @@ def main() -> None:
             # Compute geometry from gate coordinates
             with tempfile.TemporaryDirectory(prefix="radarlib_geometry_") as temp_dir:
                 geometry = compute_grid_geometry(
-                    gate_x, gate_y, gate_z,
-                    grid_shape, grid_limits,
+                    gate_x,
+                    gate_y,
+                    gate_z,
+                    grid_shape,
+                    grid_limits,
                     temp_dir=temp_dir,
                     toa=config.GEOMETRY_TOA,
                     min_radius=config.GEOMETRY_MIN_RADIUS,
@@ -461,7 +472,7 @@ def main() -> None:
                     bsp=config.GEOMETRY_BSP,
                     weighting=config.WEIGHT_FUNCTION,
                     max_neighbors=config.MAX_NEIGHBORS,
-                    n_workers=4
+                    n_workers=4,
                 )
 
             # Attach metadata
@@ -480,7 +491,7 @@ def main() -> None:
                 "weighting": config.WEIGHT_FUNCTION,
             }
             logger.info(f"Successfully created geometry: {geometry.memory_usage_mb():.1f} MB in memory")
-            
+
             # Derive the canonical filename from the build parameters
             file_name = build_geometry_filename(geometry.metadata)
             file_name = f"{file_name}.npz"
@@ -492,7 +503,7 @@ def main() -> None:
                 f"ERROR: Could not load or create geometry:\n"
                 f"  Original error: {exc}\n"
                 f"  Fallback error: {build_exc}",
-                file=sys.stderr
+                file=sys.stderr,
             )
             sys.exit(1)
 
@@ -504,7 +515,7 @@ def main() -> None:
     colmax_data = apply_geometry(geometry, field_data)
     colmax = column_max(colmax_data, geometry=geometry)
     logger.info("COLMAX grid shape: %s", colmax.shape)
-    
+
     # Print COLMAX statistics for debugging
     valid_colmax = colmax[~np.isnan(colmax)]
     if len(valid_colmax) > 0:
@@ -524,16 +535,15 @@ def main() -> None:
     rhv_field = None
     try:
         # Try RHOHV field first
-        if 'RHOHV' in radar.fields:
-            rhv_field = 'RHOHV'
+        if "RHOHV" in radar.fields:
+            rhv_field = "RHOHV"
             logger.info("Found RHOHV field for quality gating")
-        elif 'RhoHV' in radar.fields:
-            rhv_field = 'RhoHV'
+        elif "RhoHV" in radar.fields:
+            rhv_field = "RhoHV"
             logger.info("Found RhoHV field for quality gating")
-        
+
         if rhv_field is not None:
             # Get the lowest sweep data
-            lowest_sweep_idx = 0
             rhohv_field_data = get_field_data(radar, rhv_field)
             # Apply geometry mapping to RhoHV
             rhohv_data = apply_geometry(geometry, rhohv_field_data)
@@ -555,18 +565,18 @@ def main() -> None:
     # Step 5 — Detect convective cores
     # ------------------------------------------------------------------
     logger.info("Running core detection with min_dbz=%.1f dBZ", min_dbz)
-    
+
     # Use custom parameters from CLI, or defaults from config
     min_dbz_updraft = args.min_dbz_updraft if args.min_dbz_updraft is not None else config.CORES_MIN_Z_UPDRAFT
     rhohv_for_detection = None if args.no_rhohv_quality_gate else rhohv
-    
-    logger.info(f"Core detection parameters:")
+
+    logger.info("Core detection parameters:")
     logger.info(f"  min_dbz: {min_dbz:.1f} dBZ")
     logger.info(f"  min_pixels: {args.min_pixels}")
     logger.info(f"  min_dbz_updraft: {min_dbz_updraft:.1f} dBZ")
     logger.info(f"  rhohv_threshold: {args.rhohv_threshold}")
     logger.info(f"  rhohv_quality_gate_enabled: {not args.no_rhohv_quality_gate}")
-    
+
     cores = detect_cores_from_colmax(
         colmax=colmax,
         x_coords=xx,
@@ -588,8 +598,15 @@ def main() -> None:
     # ------------------------------------------------------------------
     if args.plot:
         _plot_colmax_with_cores(
-            colmax, xx, yy, cores, radar_name, timestamp,
-            strategy=strategy, vol_nr=vol_nr, output_dir=args.plot_output_dir
+            colmax,
+            xx,
+            yy,
+            cores,
+            radar_name,
+            timestamp,
+            strategy=strategy,
+            vol_nr=vol_nr,
+            output_dir=args.plot_output_dir,
         )
 
 

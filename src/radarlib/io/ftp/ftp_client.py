@@ -184,9 +184,9 @@ class RadarFTPClient:
     ) -> Optional[BUFRFileInfo]:
         """
         Encuentra el último archivo BUFR para un radar dado, con opciones de filtrado.
-        
+
         Busca hacia atrás desde `search_from_time` (por defecto ahora).
-        
+
         Parameters
         ----------
         radar : str
@@ -199,7 +199,7 @@ class RadarFTPClient:
             Filtra por campo específico si se proporciona
         search_from_time : datetime, optional
             Hora desde la cual buscar hacia atrás (por defecto: ahora)
-            
+
         Returns
         -------
         BUFRFileInfo or None
@@ -231,19 +231,26 @@ class RadarFTPClient:
                         hours = sorted(self.list_dir(day_path), reverse=True)
                         for h in hours:
                             hi = int(h)
-                            if (yi == search_from_time.year and mi == search_from_time.month and 
-                                di == search_from_time.day and hi > search_from_time.hour):
+                            if (
+                                yi == search_from_time.year
+                                and mi == search_from_time.month
+                                and di == search_from_time.day
+                                and hi > search_from_time.hour
+                            ):
                                 continue
                             hour_path = f"{day_path}/{h}"
                             minutes = sorted(self.list_dir(hour_path), reverse=True)
                             for ms in minutes:
                                 mi_val = int(ms[:2])
-                                sec_val = int(ms[2:]) if len(ms) > 2 else 0
-                                if (yi == search_from_time.year and mi == search_from_time.month and 
-                                    di == search_from_time.day and hi == search_from_time.hour and
-                                    mi_val > search_from_time.minute):
+                                if (
+                                    yi == search_from_time.year
+                                    and mi == search_from_time.month
+                                    and di == search_from_time.day
+                                    and hi == search_from_time.hour
+                                    and mi_val > search_from_time.minute
+                                ):
                                     continue
-                                
+
                                 minute_path = f"{hour_path}/{ms}"
                                 files = self.list_dir(minute_path)
                                 for fname in sorted(files, reverse=True):
