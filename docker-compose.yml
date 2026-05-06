@@ -9,6 +9,7 @@ services:
       - ../product_output/RMA1:/workspace/app/product_output/RMA1
       - ../tops_and_cores/RMA1:/workspace/app/tops_and_cores/RMA1 # Mount tops_and_cores output dir for RMA1
       - ../logs/RMA1:/workspace/app/logs/RMA1
+      - ../geometry/RMA1:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
@@ -56,10 +57,155 @@ services:
       - ../product_output/RMA2:/workspace/app/product_output/RMA2
       - ../tops_and_cores/RMA2:/workspace/app/tops_and_cores/RMA2 # Mount tops_and_cores output dir for RMA2
       - ../logs/RMA2:/workspace/app/logs/RMA2
+      - ../geometry/RMA2:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA2"
+      STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
+      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      ROOT_CACHE_PATH: "/workspace/app/cache"
+      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+      ROOT_TOPS_AND_CORES_PATH: "/workspace/app/tops_and_cores"
+      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+      ROOT_LOGS_PATH: "/workspace/app/logs"
+      ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
+      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    working_dir: /workspace/app
+    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import psutil, sys; p = psutil.Process(); rss = p.memory_info().rss / 1024**3; sys.exit(0 if rss < 2.8 else 1)" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  genpro25-rma3:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    container_name: genpro25-rma3
+    volumes:
+      - ../product_output/RMA3:/workspace/app/product_output/RMA3
+      - ../tops_and_cores/RMA3:/workspace/app/tops_and_cores/RMA3 # Mount tops_and_cores output dir for RMA3
+      - ../logs/RMA3:/workspace/app/logs/RMA3
+      - ../geometry/RMA3:/workspace/app/data/geometries
+      - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    environment:
+      RADAR_NAME: "RMA3"
+      STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
+      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      ROOT_CACHE_PATH: "/workspace/app/cache"
+      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+      ROOT_TOPS_AND_CORES_PATH: "/workspace/app/tops_and_cores"
+      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+      ROOT_LOGS_PATH: "/workspace/app/logs"
+      ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
+      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    working_dir: /workspace/app
+    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import psutil, sys; p = psutil.Process(); rss = p.memory_info().rss / 1024**3; sys.exit(0 if rss < 2.8 else 1)" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  genpro25-rma4:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    container_name: genpro25-rma4
+    volumes:
+      - ../product_output/RMA4:/workspace/app/product_output/RMA4
+      - ../tops_and_cores/RMA4:/workspace/app/tops_and_cores/RMA4 # Mount tops_and_cores output dir for RMA4
+      - ../logs/RMA4:/workspace/app/logs/RMA4
+      - ../geometry/RMA4:/workspace/app/data/geometries
+      - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    environment:
+      RADAR_NAME: "RMA4"
+      STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
+      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      ROOT_CACHE_PATH: "/workspace/app/cache"
+      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+      ROOT_TOPS_AND_CORES_PATH: "/workspace/app/tops_and_cores"
+      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+      ROOT_LOGS_PATH: "/workspace/app/logs"
+      ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
+      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    working_dir: /workspace/app
+    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import psutil, sys; p = psutil.Process(); rss = p.memory_info().rss / 1024**3; sys.exit(0 if rss < 2.8 else 1)" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  genpro25-rma5:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    container_name: genpro25-rma5
+    volumes:
+      - ../product_output/RMA5:/workspace/app/product_output/RMA5
+      - ../tops_and_cores/RMA5:/workspace/app/tops_and_cores/RMA5 # Mount tops_and_cores output dir for RMA5
+      - ../logs/RMA5:/workspace/app/logs/RMA5
+      - ../geometry/RMA5:/workspace/app/data/geometries
+      - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    environment:
+      RADAR_NAME: "RMA5"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
       ROOT_CACHE_PATH: "/workspace/app/cache"
@@ -103,10 +249,107 @@ services:
       - ../product_output/RMA6:/workspace/app/product_output/RMA6
       - ../tops_and_cores/RMA6:/workspace/app/tops_and_cores/RMA6 # Mount tops_and_cores output dir for RMA6
       - ../logs/RMA6:/workspace/app/logs/RMA6
+      - ../geometry/RMA6:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA6"
+      STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
+      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      ROOT_CACHE_PATH: "/workspace/app/cache"
+      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+      ROOT_TOPS_AND_CORES_PATH: "/workspace/app/tops_and_cores"
+      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+      ROOT_LOGS_PATH: "/workspace/app/logs"
+      ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
+      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    working_dir: /workspace/app
+    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import psutil, sys; p = psutil.Process(); rss = p.memory_info().rss / 1024**3; sys.exit(0 if rss < 2.8 else 1)" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  genpro25-rma7:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    container_name: genpro25-rma7
+    volumes:
+      - ../product_output/RMA7:/workspace/app/product_output/RMA7
+      - ../tops_and_cores/RMA7:/workspace/app/tops_and_cores/RMA7 # Mount tops_and_cores output dir for RMA7
+      - ../logs/RMA7:/workspace/app/logs/RMA7
+      - ../geometry/RMA7:/workspace/app/data/geometries
+      - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    environment:
+      RADAR_NAME: "RMA7"
+      STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
+      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      ROOT_CACHE_PATH: "/workspace/app/cache"
+      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+      ROOT_TOPS_AND_CORES_PATH: "/workspace/app/tops_and_cores"
+      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+      ROOT_LOGS_PATH: "/workspace/app/logs"
+      ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
+      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    working_dir: /workspace/app
+    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import psutil, sys; p = psutil.Process(); rss = p.memory_info().rss / 1024**3; sys.exit(0 if rss < 2.8 else 1)" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  genpro25-rma8:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    container_name: genpro25-rma8
+    volumes:
+      - ../product_output/RMA8:/workspace/app/product_output/RMA8
+      - ../tops_and_cores/RMA8:/workspace/app/tops_and_cores/RMA8 # Mount tops_and_cores output dir for RMA8
+      - ../logs/RMA8:/workspace/app/logs/RMA8
+      - ../geometry/RMA8:/workspace/app/data/geometries
+      - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    environment:
+      RADAR_NAME: "RMA8"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
       ROOT_CACHE_PATH: "/workspace/app/cache"
@@ -150,6 +393,7 @@ services:
       - ../product_output/RMA9:/workspace/app/product_output/RMA9
       - ../tops_and_cores/RMA9:/workspace/app/tops_and_cores/RMA9 # Mount tops_and_cores output dir for RMA9
       - ../logs/RMA9:/workspace/app/logs/RMA9
+      - ../geometry/RMA9:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
@@ -197,6 +441,7 @@ services:
       - ../product_output/RMA10:/workspace/app/product_output/RMA10
       - ../tops_and_cores/RMA10:/workspace/app/tops_and_cores/RMA10 # Mount tops_and_cores output dir for RMA10
       - ../logs/RMA10:/workspace/app/logs/RMA10
+      - ../geometry/RMA10:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
@@ -244,6 +489,7 @@ services:
       - ../product_output/RMA11:/workspace/app/product_output/RMA11
       - ../tops_and_cores/RMA11:/workspace/app/tops_and_cores/RMA11 # Mount tops_and_cores output dir for RMA11
       - ../logs/RMA11:/workspace/app/logs/RMA11
+      - ../geometry/RMA11:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
@@ -291,6 +537,7 @@ services:
       - ../product_output/RMA12:/workspace/app/product_output/RMA12
       - ../tops_and_cores/RMA12:/workspace/app/tops_and_cores/RMA12 # Mount tops_and_cores output dir for RMA12
       - ../logs/RMA12:/workspace/app/logs/RMA12
+      - ../geometry/RMA12:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
@@ -338,6 +585,7 @@ services:
       - ../product_output/RMA16:/workspace/app/product_output/RMA16
       - ../tops_and_cores/RMA16:/workspace/app/tops_and_cores/RMA16 # Mount tops_and_cores output dir for RMA16
       - ../logs/RMA16:/workspace/app/logs/RMA16
+      - ../geometry/RMA16:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
@@ -385,6 +633,7 @@ services:
       - ../product_output/RMA17:/workspace/app/product_output/RMA17
       - ../tops_and_cores/RMA17:/workspace/app/tops_and_cores/RMA17 # Mount tops_and_cores output dir for RMA17
       - ../logs/RMA17:/workspace/app/logs/RMA17
+      - ../geometry/RMA17:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:

@@ -111,7 +111,7 @@ local:
         - VRAD
         - WRAD
   DAEMON_PARAMS:
-    GEOMETRY_BUFR_LOOKBACK_HOURS: 72
+    GEOMETRY_BUFR_LOOKBACK_HOURS: 24
     START_DATE: None # ISO format or None
     ENABLE_DOWNLOAD_DAEMON: True # Set to True to enable the download daemon
     ENABLE_PROCESSING_DAEMON: True # Set to True to enable the processing daemon
