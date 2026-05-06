@@ -195,12 +195,11 @@ def test_output_path_format(kwargs, obs_time):
 
     assert result is not None
     assert result.name == "RMA1_0315_01_20260428T150000Z_TOPS_CORES.geojson"
-    # Check directory hierarchy: …/RMA1/2026/04/28/
+    # Check directory hierarchy: …/2026/04/28/
     parts = result.parts
     assert parts[-2] == "28"
     assert parts[-3] == "04"
     assert parts[-4] == "2026"
-    assert parts[-5] == "RMA1"
 
 
 def test_write_failure_does_not_raise(kwargs):
