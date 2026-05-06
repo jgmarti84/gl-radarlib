@@ -144,6 +144,23 @@ DEFAULTS: Dict[str, Any] = {
     "MAX_NEIGHBORS": 1,
     "WEIGHT_FUNCTION": "nearest",
     "GEOMETRY_BUFR_LOOKBACK_HOURS": 72,
+    # Convective core detection thresholds
+    "CORES_MIN_Z": 52.0,
+    "CORES_MIN_Z_UPDRAFT": 56.0,
+    "CORES_MIN_RANGE": 12000.0,
+    "CORES_DEDUP_RADIUS": 8000.0,
+    "CORES_RHOHV_THRESHOLD": 0.85,
+    "CORES_MIN_PIXELS": 2,
+    "CORES_MIN_PIXELS_UPDRAFT": 5,
+    # Storm tops detection thresholds
+    "TOPS_MIN_RANGE_M": 25000.0,
+    "TOPS_MIN_DEV_M": 9000.0,
+    "TOPS_MIN_Z": 20.0,
+    "TOPS_RHOHV_THRESHOLD": 0.94,
+    "TOPS_DEDUP_RADIUS_M": 17000.0,
+    "TOPS_MIN_PIXELS": 2,
+    # Feature flags
+    "ADD_TOPS_AND_CORES": False,
 }
 
 _config: Dict[str, Any] = DEFAULTS.copy()
@@ -290,6 +307,23 @@ GEOMETRY_MIN_RADIUS: float = get("GEOMETRY_MIN_RADIUS")
 MAX_NEIGHBORS: int = get("MAX_NEIGHBORS")
 WEIGHT_FUNCTION: str = get("WEIGHT_FUNCTION")
 GEOMETRY_BUFR_LOOKBACK_HOURS: int = get("GEOMETRY_BUFR_LOOKBACK_HOURS")
+# Convective core detection thresholds
+CORES_MIN_Z: float = get("CORES_MIN_Z")
+CORES_MIN_Z_UPDRAFT: float = get("CORES_MIN_Z_UPDRAFT")
+CORES_MIN_RANGE: float = get("CORES_MIN_RANGE")
+CORES_DEDUP_RADIUS: float = get("CORES_DEDUP_RADIUS")
+CORES_RHOHV_THRESHOLD: float = get("CORES_RHOHV_THRESHOLD")
+CORES_MIN_PIXELS: int = get("CORES_MIN_PIXELS")
+CORES_MIN_PIXELS_UPDRAFT: int = get("CORES_MIN_PIXELS_UPDRAFT")
+# Storm tops detection thresholds
+TOPS_MIN_RANGE_M: float = get("TOPS_MIN_RANGE_M")
+TOPS_MIN_DEV_M: float = get("TOPS_MIN_DEV_M")
+TOPS_MIN_Z: float = get("TOPS_MIN_Z")
+TOPS_RHOHV_THRESHOLD: float = get("TOPS_RHOHV_THRESHOLD")
+TOPS_DEDUP_RADIUS_M: float = get("TOPS_DEDUP_RADIUS_M")
+TOPS_MIN_PIXELS: int = get("TOPS_MIN_PIXELS")
+# Feature flags
+ADD_TOPS_AND_CORES: bool = get("ADD_TOPS_AND_CORES")
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)
 # Format: RADAR_VOLCODE_VOLNR_FIELD_TIMESTAMP.BUFR

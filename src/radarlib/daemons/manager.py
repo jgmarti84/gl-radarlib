@@ -76,6 +76,8 @@ class DaemonManagerConfig:
     enable_cleanup_daemon: bool = False  # Disabled by default for safety
     product_type: str = "image"
     add_colmax: bool = True
+    add_tops_and_cores: bool = False
+    tops_and_cores_dir: Optional[Path] = None
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
     bufr_retention_days: int = 7
     netcdf_retention_days: int = 7
@@ -139,6 +141,9 @@ class DaemonManager:
         self.product_dir = config.base_path / "products"
         if self.config.product_dir is not None:
             self.product_dir = self.config.product_dir
+        self.tops_and_cores_dir = config.base_path / "tops_and_cores"
+        if self.config.tops_and_cores_dir is not None:
+            self.tops_and_cores_dir = self.config.tops_and_cores_dir
         self.state_db = config.base_path / "state.db"
 
         # Ensure directories exist
@@ -190,6 +195,8 @@ class DaemonManager:
             poll_interval=self.config.product_poll_interval,
             product_type=self.config.product_type,
             add_colmax=self.config.add_colmax,
+            add_tops_and_cores=self.config.add_tops_and_cores,
+            tops_and_cores_output_dir=self.tops_and_cores_dir,
             geometry_types=self.config.geometry_types,
             ftp_host=self.config.ftp_host,
             ftp_user=self.config.ftp_user,
