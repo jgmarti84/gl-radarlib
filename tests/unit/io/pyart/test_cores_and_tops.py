@@ -15,8 +15,7 @@ includes scipy and arm-pyart) all tests run.
 
 import json
 from datetime import datetime, timezone
-from pathlib import Path
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -73,6 +72,7 @@ def _mock_geo(x_arr, y_arr, lon_0, lat_0, R=6370997.0):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def arrays():
