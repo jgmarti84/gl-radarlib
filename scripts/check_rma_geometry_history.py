@@ -202,14 +202,14 @@ def collect_samples(
     """
     # Build a vol_types dict that traverse_radar can convert to a regex.
     # Format: {strategy: {vol_nr: [fields]}}
-    vol_types_filter: Dict[str, Dict[str, List[str]]] = {
-        strategy: {vol_nr: fields_priority}
-    }
+    vol_types_filter: Dict[str, Dict[str, List[str]]] = {strategy: {vol_nr: fields_priority}}
 
     # Collect all matching (dt, fname, remote_path) from the traversal
     all_slots: List[Tuple[datetime, str, str]] = []
-    logger.debug(f"Starting traverse_radar for {radar}, strategy={strategy}, vol={vol_nr}, "
-                 f"window=[{dt_start.isoformat()}, {dt_end.isoformat()}]")
+    logger.debug(
+        f"Starting traverse_radar for {radar}, strategy={strategy}, vol={vol_nr}, "
+        f"window=[{dt_start.isoformat()}, {dt_end.isoformat()}]"
+    )
 
     for dt, fname, full_remote in client.traverse_radar(
         radar_name=radar,
@@ -300,10 +300,7 @@ def decode_geometry(local_path: str) -> Tuple[Optional[int], Optional[int], Opti
             or sweeps["gate_size"].nunique() > 1
             or sweeps["gate_offset"].nunique() > 1
         ):
-            logger.debug(
-                f"  Note: file has {len(sweeps)} sweeps with varying geometry — "
-                "using iloc[0] values"
-            )
+            logger.debug(f"  Note: file has {len(sweeps)} sweeps with varying geometry — " "using iloc[0] values")
 
     return ngates, nrays, gate_size, gate_offset
 
@@ -530,13 +527,8 @@ def print_vol_report(
         print("  No OK records — cannot determine geometry.")
     elif len(variants) == 1:
         v = variants[0]
-        print(
-            f"\n✓ No geometry change detected across {v.count} samples."
-        )
-        print(
-            f"Geometry: ngates={v.ngates}, nrays={v.nrays}, "
-            f"gate_size={v.gate_size}, gate_offset={v.gate_offset}"
-        )
+        print(f"\n✓ No geometry change detected across {v.count} samples.")
+        print(f"Geometry: ngates={v.ngates}, nrays={v.nrays}, " f"gate_size={v.gate_size}, gate_offset={v.gate_offset}")
         print("Cached geometry .npz files are likely valid.")
     else:
         for idx, v in enumerate(variants, 1):
@@ -556,10 +548,7 @@ def print_vol_report(
                 f"*** GEOMETRY CHANGE DETECTED at approx. "
                 f"{change_point.timestamp.strftime('%Y-%m-%d %H:%M:%S')} UTC ***"
             )
-            print(
-                "Cached geometry .npz files may be stale. "
-                "Delete them to force regeneration."
-            )
+            print("Cached geometry .npz files may be stale. " "Delete them to force regeneration.")
             print(f"Geometry cache path (from config): {geometry_path}")
 
     if decode_errors > 0 or ftp_errors > 0:
@@ -693,8 +682,7 @@ def main() -> None:
         vol_nrs = sorted(vol_types_for_strategy.keys()) if vol_types_for_strategy else []
         if not vol_nrs:
             print(
-                f"✗ No vol_nrs found for strategy {args.strategy} in VOLUME_TYPES. "
-                "Pass --vol explicitly.",
+                f"✗ No vol_nrs found for strategy {args.strategy} in VOLUME_TYPES. " "Pass --vol explicitly.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -707,7 +695,7 @@ def main() -> None:
         sys.exit(1)
 
     # Import RadarFTPClient
-    from radarlib.io.ftp.ftp_client import FTPError, RadarFTPClient
+    from radarlib.io.ftp.ftp_client import RadarFTPClient
 
     with RadarFTPClient(host=ftp_host, user=ftp_user, password=ftp_pass) as client:
         logger.info(f"Connected to FTP {ftp_host}")
@@ -720,10 +708,7 @@ def main() -> None:
             else:
                 fields_priority = vol_types_for_strategy.get(vol_nr, [])
                 if not fields_priority:
-                    logger.warning(
-                        f"No fields configured for vol={vol_nr} in strategy={args.strategy}. "
-                        "Skipping."
-                    )
+                    logger.warning(f"No fields configured for vol={vol_nr} in strategy={args.strategy}. " "Skipping.")
                     continue
                 field_label = f"{fields_priority[0]} (auto-selected)"
 

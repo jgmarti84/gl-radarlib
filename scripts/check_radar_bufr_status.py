@@ -132,8 +132,13 @@ def size_status(size_bytes: Optional[int]) -> str:
 
 class FileRecord:
     __slots__ = (
-        "radar", "strategy", "vol", "field",
-        "obs_dt", "remote_path", "size_bytes",
+        "radar",
+        "strategy",
+        "vol",
+        "field",
+        "obs_dt",
+        "remote_path",
+        "size_bytes",
     )
 
     def __init__(
@@ -319,18 +324,20 @@ def print_table(records: List[FileRecord]) -> None:
 
         # Column widths
         W_FIELD = 10
-        W_TS    = 22
-        W_SIZE  = 12
-        W_STAT  =  9
-        # Remote path gets the remaining space; cap at 70 for readability
-        W_PATH  = 70
+        W_TS = 22
+        W_SIZE = 12
+        W_STAT = 9
 
         header = (
-            _col("FIELD",       W_FIELD) + "  " +
-            _col("TIMESTAMP (UTC)", W_TS) + "  " +
-            _col("SIZE",        W_SIZE, ">") + "  " +
-            _col("SIZE_STATUS", W_STAT) + "  " +
-            "REMOTE_PATH"
+            _col("FIELD", W_FIELD)
+            + "  "
+            + _col("TIMESTAMP (UTC)", W_TS)
+            + "  "
+            + _col("SIZE", W_SIZE, ">")
+            + "  "
+            + _col("SIZE_STATUS", W_STAT)
+            + "  "
+            + "REMOTE_PATH"
         )
         print(header)
         print("-" * len(header))
@@ -338,11 +345,15 @@ def print_table(records: List[FileRecord]) -> None:
         for r in final:
             ts_str = r.obs_dt.strftime("%Y-%m-%d %H:%M:%S")
             print(
-                _col(r.field,              W_FIELD) + "  " +
-                _col(ts_str,               W_TS)    + "  " +
-                _col(human_size(r.size_bytes), W_SIZE, ">") + "  " +
-                _col(size_status(r.size_bytes), W_STAT) + "  " +
-                r.remote_path
+                _col(r.field, W_FIELD)
+                + "  "
+                + _col(ts_str, W_TS)
+                + "  "
+                + _col(human_size(r.size_bytes), W_SIZE, ">")
+                + "  "
+                + _col(size_status(r.size_bytes), W_STAT)
+                + "  "
+                + r.remote_path
             )
 
     print()
@@ -374,16 +385,12 @@ def main() -> None:
         sys.exit(1)
 
     # Parse comma-separated list arguments
-    radars:     List[str] = [r.strip() for r in args.radar.split(",") if r.strip()]
+    radars: List[str] = [r.strip() for r in args.radar.split(",") if r.strip()]
     strategies: Optional[List[str]] = (
         [s.strip() for s in args.strategy.split(",") if s.strip()] if args.strategy else None
     )
-    vols: Optional[List[str]] = (
-        [v.strip().zfill(2) for v in args.vol.split(",") if v.strip()] if args.vol else None
-    )
-    fields: Optional[List[str]] = (
-        [f.strip() for f in args.field.split(",") if f.strip()] if args.field else None
-    )
+    vols: Optional[List[str]] = [v.strip().zfill(2) for v in args.vol.split(",") if v.strip()] if args.vol else None
+    fields: Optional[List[str]] = [f.strip() for f in args.field.split(",") if f.strip()] if args.field else None
 
     try:
         ftp_host, ftp_user, ftp_pass = resolve_ftp_credentials()
@@ -432,10 +439,7 @@ def main() -> None:
         if args.output_format == "json":
             print("[]")
         else:
-            print(
-                f"No BUFR files found for radar(s) {', '.join(radars)} in the last "
-                f"{args.lookback_days} day(s)."
-            )
+            print(f"No BUFR files found for radar(s) {', '.join(radars)} in the last " f"{args.lookback_days} day(s).")
         return
 
     # ------------------------------------------------------------------
@@ -468,11 +472,16 @@ def main() -> None:
         if args.output_format == "json":
             print("[]")
         else:
-            filters = ", ".join(filter(None, [
-                f"strategy={strategies}" if strategies else None,
-                f"vol={vols}" if vols else None,
-                f"field={fields}" if fields else None,
-            ]))
+            filters = ", ".join(
+                filter(
+                    None,
+                    [
+                        f"strategy={strategies}" if strategies else None,
+                        f"vol={vols}" if vols else None,
+                        f"field={fields}" if fields else None,
+                    ],
+                )
+            )
             print(
                 f"No matching BUFR files found for radar(s) {', '.join(radars)}"
                 + (f" with filters: {filters}" if filters else "")

@@ -186,9 +186,9 @@ Examples:
 
 _FIELD_DEFAULTS = {
     "DBZH": (-5.0, 75.0, "gist_ncar"),
-    "ZDR":  (-2.0, 6.0,  "RdYlBu_r"),
+    "ZDR": (-2.0, 6.0, "RdYlBu_r"),
     "RHOHV": (0.6, 1.05, "plasma"),
-    "KDP":  (-1.0, 6.0,  "RdYlBu_r"),
+    "KDP": (-1.0, 6.0, "RdYlBu_r"),
     "VRADH": (-30.0, 30.0, "RdBu_r"),
     "WRADH": (0.0, 10.0, "viridis"),
     "PHIDP": (0.0, 360.0, "hsv"),
@@ -207,6 +207,7 @@ def field_display_params(field: str, vmin_arg: Optional[float], vmax_arg: Option
     # Prefer grc_ colormaps if registered
     try:
         from radarlib.colormaps import REGISTERED_COLORMAP_NAMES
+
         grc_cand = f"grc_{field.lower()}"
         if grc_cand in REGISTERED_COLORMAP_NAMES:
             cmap = grc_cand
@@ -276,10 +277,7 @@ def main() -> None:
             root_scan_config_files=None,
         )
 
-        logger.info(
-            f"PyART radar: ngates={radar.ngates}, nrays={radar.nrays}, "
-            f"nsweeps={radar.nsweeps}"
-        )
+        logger.info(f"PyART radar: ngates={radar.ngates}, nrays={radar.nrays}, " f"nsweeps={radar.nsweeps}")
         logger.info(f"Available fields: {list(radar.fields.keys())}")
 
         # Validate sweep index
@@ -294,8 +292,7 @@ def main() -> None:
         # Validate field
         if args.field not in radar.fields:
             print(
-                f"✗ Field '{args.field}' not found. "
-                f"Available: {list(radar.fields.keys())}",
+                f"✗ Field '{args.field}' not found. " f"Available: {list(radar.fields.keys())}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -305,10 +302,7 @@ def main() -> None:
         total = fdata.size
         valid = int(np.ma.count(fdata))
         pct = 100.0 * valid / total if total > 0 else 0.0
-        logger.info(
-            f"Field '{args.field}': total gates={total:,}, "
-            f"valid={valid:,} ({pct:.1f}%)"
-        )
+        logger.info(f"Field '{args.field}': total gates={total:,}, " f"valid={valid:,} ({pct:.1f}%)")
         if pct < 1.0:
             logger.warning(
                 f"Only {pct:.1f}% of gates are valid — this may be a clear-sky scan. "
@@ -340,7 +334,7 @@ def main() -> None:
             vmax=vmax,
             cmap=cmap,
             colorbar_label=args.field,
-            title_flag=False,   # we set our own title below
+            title_flag=False,  # we set our own title below
             axislabels_flag=True,
         )
 
@@ -360,6 +354,7 @@ def main() -> None:
         ts_str = ""
         try:
             from radarlib.io.bufr.bufr import BUFRFilename
+
             parsed = BUFRFilename(filename)
             ts_str = parsed.datetime.strftime("%Y-%m-%d %H:%M UTC")
         except Exception:
@@ -369,8 +364,7 @@ def main() -> None:
                 ts_str = filename
 
         ax.set_title(
-            f"{filename}\n"
-            f"Field: {args.field}  |  Sweep {args.sweep}  |  Elev {elev:.1f}°  |  {ts_str}",
+            f"{filename}\n" f"Field: {args.field}  |  Sweep {args.sweep}  |  Elev {elev:.1f}°  |  {ts_str}",
             fontsize=10,
         )
 
@@ -394,6 +388,7 @@ def main() -> None:
 
             # Print metadata as JSON on stderr, base64 PNG on stdout
             import json
+
             info = {
                 "filename": out_filename,
                 "file": filename,
