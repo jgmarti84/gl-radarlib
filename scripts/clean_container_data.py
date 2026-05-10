@@ -109,9 +109,7 @@ def extract_file_timestamp(filename: str) -> Optional[datetime]:
     m = _TIMESTAMP_RE.search(filename)
     if m:
         try:
-            return datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ").replace(
-                tzinfo=timezone.utc
-            )
+            return datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
         except ValueError:
             pass
 
@@ -120,9 +118,7 @@ def extract_file_timestamp(filename: str) -> Optional[datetime]:
     if m2:
         try:
             raw = m2.group(1) + m2.group(2)
-            return datetime.strptime(raw, "%Y%m%d%H%M%S").replace(
-                tzinfo=timezone.utc
-            )
+            return datetime.strptime(raw, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
         except ValueError:
             pass
 
@@ -180,10 +176,7 @@ def _local_list_files(folder: str, extension: str) -> List[str]:
     if not p.is_dir():
         logger.debug("Folder does not exist (local): %s", folder)
         return []
-    return sorted(
-        str(f) for f in p.iterdir()
-        if f.is_file() and f.suffix.lower() == f".{extension.lower()}"
-    )
+    return sorted(str(f) for f in p.iterdir() if f.is_file() and f.suffix.lower() == f".{extension.lower()}")
 
 
 def _local_delete_file(path: str) -> Optional[str]:
@@ -211,15 +204,17 @@ def _docker_is_running(cname: str) -> bool:
 def _docker_list_files(cname: str, folder: str, extension: str) -> List[str]:
     """Return sorted full paths of matching files via docker exec find."""
     result = subprocess.run(
-        ["docker", "exec", cname, "find", folder, "-maxdepth", "1",
-         "-type", "f", "-name", f"*.{extension}"],
+        ["docker", "exec", cname, "find", folder, "-maxdepth", "1", "-type", "f", "-name", f"*.{extension}"],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         logger.debug(
             "find returned non-zero for %s:%s/*.%s — %s",
-            cname, folder, extension, result.stderr.strip(),
+            cname,
+            folder,
+            extension,
+            result.stderr.strip(),
         )
         return []
     return sorted(ln.strip() for ln in result.stdout.splitlines() if ln.strip())
@@ -408,7 +403,7 @@ def print_report(
 
         if sr.skipped_no_ts:
             print()
-            print(f"    Files skipped (no parseable timestamp):")
+            print("    Files skipped (no parseable timestamp):")
             for fname in sr.skipped_no_ts:
                 print(f"      {fname}")
 
@@ -418,16 +413,8 @@ def print_report(
     if dry_run:
         print(f"  SUMMARY (DRY-RUN): {total_candidates} file(s) would be deleted.")
     else:
-        errors = sum(
-            1
-            for sr in scan_results
-            for fr in sr.candidates
-            if not fr.deleted
-        )
-        print(
-            f"  SUMMARY: {total_candidates} candidate(s) found — "
-            f"{total_deleted} deleted, {errors} error(s)."
-        )
+        errors = sum(1 for sr in scan_results for fr in sr.candidates if not fr.deleted)
+        print(f"  SUMMARY: {total_candidates} candidate(s) found — " f"{total_deleted} deleted, {errors} error(s).")
     print("=" * 72)
     print()
 
@@ -461,8 +448,7 @@ def parse_cutoff(value: str) -> datetime:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Remove .BUFR and .nc files older than a given datetime from a "
-            "running genpro25-rmaX container."
+            "Remove .BUFR and .nc files older than a given datetime from a " "running genpro25-rmaX container."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
