@@ -80,9 +80,11 @@ def detect_cores_from_colmax(
         Blobs with centroids closer than this are rejected as near-range
         artefacts.  Defaults to ``config.CORES_MIN_RANGE`` (12 000 m).
     dedup_radius_m : float, optional
-        Merge radius for nearby centroids (metres).  Candidates whose
-        centroids are within this distance of a stronger accepted candidate
-        are discarded.  Defaults to ``config.CORES_DEDUP_RADIUS`` (8 000 m).
+        Merge radius for nearby centroids (metres).  When two cores are within
+        this distance of each other, their centroids are merged using a weighted
+        mean (weight = mean dBZ), and the merged core retains the intensity
+        metrics of the stronger core.  Defaults to ``config.CORES_DEDUP_RADIUS``
+        (8 000 m).
     rhohv_threshold : float, optional
         Minimum mean RhoHV to pass the meteorological echo gate (default
         0.85).
@@ -108,12 +110,19 @@ def detect_cores_from_colmax(
 
     Notes
     -----
-    Connected-component labelling is performed with
-    :func:`scipy.ndimage.label` on a boolean threshold mask.  The default
-    connectivity includes only the 4-neighbours (up/down/left/right);
-    diagonal pixels are NOT treated as connected.  This is intentionally
-    conservative to avoid merging adjacent but distinct cells.
+    **Connected-component labelling:**
+    :func:`scipy.ndimage.label` on a boolean threshold mask with 4-neighbours
+    only (up/down/left/right); diagonal pixels are NOT treated as connected.
+    Conservative to avoid merging adjacent but distinct cells.
 
+    **Deduplication strategy:**
+    When two accepted cores within ``dedup_radius_m`` are identified, their
+    centroids are merged using a weighted mean where the weight is the core's
+    mean dBZ. The merged core retains the intensity statistics (mean_dbz,
+    max_dbz, pixel_count) of the stronger core. This approach reduces fragmentation
+    from wind shear while respecting both cells' spatial contributions.
+
+    **Error handling:**
     This function never raises.  Exceptions encountered during processing
     are caught, logged at ``ERROR`` level, and an empty list (or whatever
     was accumulated up to the failure point) is returned.
@@ -220,22 +229,62 @@ def detect_cores_from_colmax(
             )
 
         # ------------------------------------------------------------------
-        # Step 4 — deduplicate by proximity, keeping the stronger core
+        # Step 4 — deduplicate by proximity with weighted mean centroids
         # ------------------------------------------------------------------
         accepted.sort(key=lambda c: c["mean_dbz"], reverse=True)
 
         deduplicated: list = []
-        for candidate in accepted:
-            too_close = False
-            for kept in deduplicated:
-                dx = candidate["x_m"] - kept["x_m"]
-                dy = candidate["y_m"] - kept["y_m"]
+        merged_flags: set = set()  # Track which candidates have been merged
+
+        for i, candidate in enumerate(accepted):
+            if i in merged_flags:
+                continue  # Already merged into a previous core
+
+            # Find all candidates close to this one
+            close_candidates = [candidate]
+            close_indices = [i]
+
+            for j in range(i + 1, len(accepted)):
+                if j in merged_flags:
+                    continue
+                other = accepted[j]
+                dx = candidate["x_m"] - other["x_m"]
+                dy = candidate["y_m"] - other["y_m"]
                 dist = math.sqrt(dx * dx + dy * dy)
                 if dist < dedup_radius_m:
-                    too_close = True
-                    break
-            if not too_close:
+                    close_candidates.append(other)
+                    close_indices.append(j)
+
+            # If no close candidates, keep this core as-is
+            if len(close_candidates) == 1:
                 deduplicated.append(candidate)
+            else:
+                # Compute weighted mean centroid using mean_dbz as weight
+                total_weight = sum(c["mean_dbz"] for c in close_candidates)
+                weighted_x = sum(c["x_m"] * c["mean_dbz"] for c in close_candidates) / total_weight
+                weighted_y = sum(c["y_m"] * c["mean_dbz"] for c in close_candidates) / total_weight
+
+                # Merge: keep strongest core's dBZ stats, update centroid
+                merged_core = close_candidates[0].copy()
+                merged_core["x_m"] = float(weighted_x)
+                merged_core["y_m"] = float(weighted_y)
+                merged_core["range_m"] = math.sqrt(weighted_x * weighted_x + weighted_y * weighted_y)
+
+                deduplicated.append(merged_core)
+
+                # Mark all merged candidates
+                for j in close_indices[1:]:
+                    merged_flags.add(j)
+
+                logger.debug(
+                    "detect_cores_from_colmax: merged %d core(s) within %.0f m; "
+                    "weighted centroid: (%.1f, %.1f) m, mean_dbz=%.1f dBZ",
+                    len(close_candidates),
+                    dedup_radius_m,
+                    weighted_x,
+                    weighted_y,
+                    close_candidates[0]["mean_dbz"],
+                )
 
         logger.debug(
             "detect_cores_from_colmax: %d core(s) accepted after deduplication " "(%d before)",

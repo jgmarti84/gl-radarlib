@@ -38,7 +38,7 @@ from .products import (
     get_beam_height_difference,
     get_elevation_from_z_level,
 )
-from .tops import detect_tops_from_3d_grid
+from .tops import detect_tops_from_3d_grid, detect_tops_from_cores
 from .utils import get_available_fields, get_field_data, get_gate_coordinates, get_radar_info
 
 __version__ = "0.1.0"
@@ -99,4 +99,5 @@ __all__ = [
     "detect_cores_from_colmax",
     # Tops detection
     "detect_tops_from_3d_grid",
+    "detect_tops_from_cores",
 ]

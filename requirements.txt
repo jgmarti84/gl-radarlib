@@ -8,3 +8,4 @@ pyproj>=3.0.0
 affine>=2.0.0
 cachetools>=5.0.0
 GDAL==3.10.3
+plotly==6.7.0

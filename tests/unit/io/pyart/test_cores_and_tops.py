@@ -36,7 +36,7 @@ from radarlib.io.pyart.cores_and_tops import generate_cores_and_tops  # noqa: E4
 # Patch at the *source* module so the lazy ``from X import Y`` inside _run()
 # picks up the mock when the module attribute has been replaced.
 PATCH_CORES = "radarlib.radar_grid.detect_cores_from_colmax"
-PATCH_TOPS = "radarlib.radar_grid.detect_tops_from_3d_grid"
+PATCH_TOPS = "radarlib.radar_grid.detect_tops_from_cores"
 PATCH_GEO = "pyart.core.transforms.cartesian_to_geographic_aeqd"
 
 # ---------------------------------------------------------------------------
@@ -55,9 +55,10 @@ TOP = {
     "y_m": 25_000.0,
     "altitude_m": 12_500.0,
     "altitude_km": 12.5,
-    "pixel_count": 8,
-    "range_m": 30_000.0,
-    "level_index": 3,
+    "dbz": 28.3,
+    "core_x_m": 10_000.0,
+    "core_y_m": 20_000.0,
+    "core_mean_dbz": 55.3,
 }
 
 
@@ -150,9 +151,14 @@ def test_geojson_written_with_cores(kwargs):
 
 
 def test_geojson_written_with_tops(kwargs):
-    """One top detected → file written with correct GeoJSON schema."""
+    """One core + one top detected → file written, top feature has correct GeoJSON schema.
+
+    In the current architecture tops detection is gated behind cores: tops are
+    only searched when at least one core was found.  A lone top with no parent
+    core is therefore impossible and the test must supply a core alongside it.
+    """
     with (
-        patch(PATCH_CORES, return_value=[]),
+        patch(PATCH_CORES, return_value=[CORE]),
         patch(PATCH_TOPS, return_value=[TOP]),
         patch(PATCH_GEO, side_effect=_mock_geo),
     ):
@@ -160,11 +166,16 @@ def test_geojson_written_with_tops(kwargs):
 
     assert result is not None
     data = json.loads(result.read_text())
-    assert len(data["features"]) == 1
-    feat = data["features"][0]
+    # Two features: one core + one top
+    assert len(data["features"]) == 2
+    top_features = [f for f in data["features"] if f["properties"]["type"] == "top"]
+    assert len(top_features) == 1
+    feat = top_features[0]
     props = feat["properties"]
     assert props["type"] == "top"
     assert props["altitude_m"] == int(TOP["altitude_m"])
+    assert props["dbz"] == float(TOP["dbz"])
+    assert props["parent_core_dbz"] == int(TOP["core_mean_dbz"])
     assert props["radar_code"] == "RMA1"
 
 

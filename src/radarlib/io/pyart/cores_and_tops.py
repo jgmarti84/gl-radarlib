@@ -11,6 +11,24 @@ functions and PyART coordinate utilities.  It is imported lazily at the call-sit
 in ``product_daemon.py`` (local import after the guard block) to keep daemon
 startup cost low.
 
+Algorithm Overview
+-------------------
+
+1. **Core Detection** (from COLMAX 2D):
+   - Connected-component labelling on column-maximum reflectivity grid
+   - Quality gates: RhoHV (mean > 0.85) OR violent updraft (max > 56 dBZ)
+   - Deduplication using **weighted mean centroids** (weight = mean dBZ)
+   - Output: List of core dicts with centroid (x_m, y_m) and intensity metrics
+
+2. **Top Detection** (from DBZH 3D, relative to cores):
+   - For each detected core, search in cylindrical column (radius from TOPS_DEDUP_RADIUS_M config)
+   - Find the **highest altitude with valid DBZH** within that cylinder
+   - No thresholds applied: accepts first valid DBZH found at upper levels
+   - Output: List of top dicts with altitude and parent core reference
+
+This two-stage design ensures tops are only detected where cores exist, and uses
+a simplified (parameterless) algorithm focused on finding tower peaks.
+
 GeoJSON schema reference
 ------------------------
 ::
@@ -34,6 +52,8 @@ GeoJSON schema reference
           "properties": {
             "type": "top",
             "altitude_m": 12500,
+            "dbz": 25.5,
+            "parent_core_dbz": 54,
             "radar_code": "RMA1",
             "observation_time": "2026-04-28T15:00:00Z"
           }
@@ -189,18 +209,9 @@ def _run(
     # Lazy imports: only pulled in when actually called, keeping daemon startup fast.
     from pyart.core.transforms import cartesian_to_geographic_aeqd
 
-    from radarlib.radar_grid import detect_cores_from_colmax, detect_tops_from_3d_grid
+    from radarlib.radar_grid import detect_cores_from_colmax, detect_tops_from_cores
 
     obs_time_str = observation_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # ------------------------------------------------------------------
-    # Derive 2D RhoHV for core detection: lowest level of the 3D array.
-    # The cores function works on a 2D COLMAX grid, so only one level
-    # of RhoHV is needed as a spatial quality gate.
-    # ------------------------------------------------------------------
-    if rhohv_3d is not None:
-        if rhohv_2d is None:
-            rhohv_2d = rhohv_3d[0]
 
     # ------------------------------------------------------------------
     # Convective core detection
@@ -215,30 +226,37 @@ def _run(
         )
     except Exception as exc:
         logger.warning(
-            "CORES_TOPS radar=%s: core detection raised %s: %s — " "skipping cores, still attempting tops.",
+            "CORES_TOPS radar=%s: core detection raised %s: %s — " "skipping cores, and thus no tops will be detected.",
             radar_code,
             type(exc).__name__,
             exc,
         )
 
     # ------------------------------------------------------------------
-    # Storm top detection
+    # Storm top detection (only if cores were found)
     # ------------------------------------------------------------------
     tops: list = []
-    try:
-        tops = detect_tops_from_3d_grid(
-            grid_3d=dbzh_3d,
-            x_coords=x_coords,
-            y_coords=y_coords,
-            z_coords=z_coords,
-            rhohv_3d=rhohv_3d,
-        )
-    except Exception as exc:
-        logger.warning(
-            "CORES_TOPS radar=%s: tops detection raised %s: %s",
+    if cores:
+        try:
+            tops = detect_tops_from_cores(
+                cores=cores,
+                grid_3d=dbzh_3d,
+                x_coords=x_coords,
+                y_coords=y_coords,
+                z_coords=z_coords,
+            )
+        except Exception as exc:
+            logger.warning(
+                "CORES_TOPS radar=%s: tops detection raised %s: %s",
+                radar_code,
+                type(exc).__name__,
+                exc,
+            )
+    else:
+        logger.debug(
+            "CORES_TOPS radar=%s time=%s: no cores detected — skipping tops detection.",
             radar_code,
-            type(exc).__name__,
-            exc,
+            obs_time_str,
         )
 
     # ------------------------------------------------------------------
@@ -299,8 +317,10 @@ def _run(
                 "properties": {
                     "type": "top",
                     "altitude_m": int(top["altitude_m"]),
+                    "dbz": float(top["dbz"]),
                     "radar_code": radar_code,
                     "observation_time": obs_time_str,
+                    "parent_core_dbz": int(top["core_mean_dbz"]),
                 },
             }
         )
