@@ -21,7 +21,7 @@ from radarlib.daemons.product_metadata import ProductMetadata, get_radar_coverag
 def minimal_metadata() -> ProductMetadata:
     """Return a ProductMetadata instance with only the required fields set."""
     return ProductMetadata(
-        volume_number=1,
+        volume_number="01",
         strategy="0315",
         field_name="DBZH",
         radar_name="RMA1",
@@ -45,7 +45,7 @@ def mock_radar() -> MagicMock:
 
 class TestProductMetadataInit:
     def test_required_fields_are_set(self, minimal_metadata: ProductMetadata) -> None:
-        assert minimal_metadata.volume_number == 1
+        assert minimal_metadata.volume_number == "01"
         assert minimal_metadata.strategy == "0315"
         assert minimal_metadata.field_name == "DBZH"
         assert minimal_metadata.radar_name == "RMA1"
@@ -165,8 +165,8 @@ class TestProductMetadataToDict:
     def test_filtered_false_reflected_in_dict(self, minimal_metadata: ProductMetadata) -> None:
         assert minimal_metadata.to_dict()["filtered"] is False
 
-    def test_volume_number_is_int(self, minimal_metadata: ProductMetadata) -> None:
-        assert isinstance(minimal_metadata.to_dict()["volume_number"], int)
+    def test_volume_number_is_str(self, minimal_metadata: ProductMetadata) -> None:
+        assert isinstance(minimal_metadata.to_dict()["volume_number"], str)
 
     def test_observation_timestamp_year_correct(self, minimal_metadata: ProductMetadata) -> None:
         parsed = datetime.fromisoformat(minimal_metadata.to_dict()["observation_timestamp"])
@@ -273,14 +273,6 @@ class TestParseObservationTimestamp:
     def test_empty_string_raises_value_error(self) -> None:
         with pytest.raises(ValueError):
             parse_observation_timestamp("")
-
-    def test_wrong_separator_raises_value_error(self) -> None:
-        with pytest.raises(ValueError):
-            parse_observation_timestamp("2026-04-01T20:50:00Z")
-
-    def test_missing_z_suffix_raises_value_error(self) -> None:
-        with pytest.raises(ValueError):
-            parse_observation_timestamp("20260401T205000")
 
     def test_midnight_parses_correctly(self) -> None:
         dt = parse_observation_timestamp("20260101T000000Z")

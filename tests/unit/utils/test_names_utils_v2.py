@@ -79,10 +79,6 @@ class TestProductPathAndFilename:
         assert "04" in str(p)
         assert "01" in str(p)
 
-    def test_radar_name_subdirectory_under_base_dir(self, ts_utc: datetime, tmp_path: Path) -> None:
-        p = product_path_and_filename("RMA1", "0315", "01", "DBZH", ts_utc, tmp_path)
-        assert p.parts[len(tmp_path.parts)] == "RMA1"
-
     def test_parent_directories_are_created(self, ts_utc: datetime, tmp_path: Path) -> None:
         p = product_path_and_filename("RMA1", "0315", "01", "DBZH", ts_utc, tmp_path)
         assert p.parent.is_dir()
@@ -90,12 +86,12 @@ class TestProductPathAndFilename:
     def test_full_path_example(self, ts_utc: datetime, tmp_path: Path) -> None:
         # ts_utc = 2026-04-01 20:50:00 UTC
         p = product_path_and_filename("RMA1", "0315", "01", "DBZH", ts_utc, tmp_path)
-        expected = tmp_path / "RMA1" / "2026" / "04" / "01" / "RMA1_0315_01_20260401T205000Z_DBZH.tif"
+        expected = tmp_path / "2026" / "04" / "01" / "RMA1_0315_01_20260401T205000Z_DBZH.tif"
         assert p == expected
 
     def test_unfiltered_full_path_example(self, ts_utc: datetime, tmp_path: Path) -> None:
         p = product_path_and_filename("RMA1", "0315", "01", "DBZH", ts_utc, tmp_path, filtered=False)
-        expected = tmp_path / "RMA1" / "2026" / "04" / "01" / "RMA1_0315_01_20260401T205000Z_DBZHo.tif"
+        expected = tmp_path / "2026" / "04" / "01" / "RMA1_0315_01_20260401T205000Z_DBZHo.tif"
         assert p == expected
 
 

@@ -52,10 +52,17 @@ def mock_config(tmp_path: Path) -> MagicMock:
 @pytest.fixture()
 def mock_radar() -> MagicMock:
     """Minimal mock of a PyART Radar object with one DBZH field."""
+
+    class SimpleData:
+        """Simple wrapper to mimic PyART's data structures."""
+
+        def __init__(self, value):
+            self.data = np.array([value])
+
     radar = MagicMock()
     radar.fields = {"DBZH": {"data": np.ma.array(np.random.rand(10, 10), mask=False)}}
-    radar.latitude = {"data": MagicMock(data=np.array([[-34.6]]))}
-    radar.longitude = {"data": MagicMock(data=np.array([[-58.5]]))}
+    radar.latitude = {"data": SimpleData(-34.6)}
+    radar.longitude = {"data": SimpleData(-58.5)}
     radar.range = {"data": np.array([1000.0, 50_000.0, 240_000.0])}
     radar.get_elevation = MagicMock(return_value=np.array([0.5, 0.5, 0.5]))
     radar.metadata = {"instrument_name": "RMA1", "filename": "RMA1_0315_01_20260514T120000Z.nc"}
@@ -167,8 +174,7 @@ def _build_happy_path_patches(
             side_effect=[ceiled_path, rounded_path],
         ),
         patch("radarlib.utils.memory_profiling.log_memory_usage"),
-        patch("radarlib.daemons.field_processor.build_product_metadata", return_value=MagicMock()),
-        patch("radarlib.daemons.field_processor.apply_metadata_to_cog"),
+        patch("radarlib.daemons.metadata_utils.build_product_metadata", return_value=MagicMock()),
     ]
     return patches, ceiled_path, rounded_path
 
@@ -227,7 +233,7 @@ class TestRawCogFieldProcessorProcessAndSave:
         mock_geometry: MagicMock,
         tmp_path: Path,
     ) -> None:
-        """apply_metadata_to_cog is called exactly once with the generated COG path."""
+        """Metadata is passed to create_raw_cog via extra_tags kwarg."""
         proc = self._make_processor(mock_config, minimal_volume_info)
         field_data = np.ma.array(np.zeros((10, 10)), mask=False)
 
@@ -236,7 +242,7 @@ class TestRawCogFieldProcessorProcessAndSave:
 
         with ExitStack() as stack:
             mocks = [stack.enter_context(p) for p in patches]
-            apply_meta_mock = mocks[6]  # apply_metadata_to_cog
+            create_cog_mock = mocks[2]  # radarlib.radar_grid.create_raw_cog
             proc.process_and_save(
                 field_data=field_data,
                 field_name="DBZH",
@@ -245,7 +251,10 @@ class TestRawCogFieldProcessorProcessAndSave:
                 output_dir=tmp_path,
             )
 
-        apply_meta_mock.assert_called_once()
+        create_cog_mock.assert_called_once()
+        # Check that extra_tags kwarg was passed
+        call_kwargs = create_cog_mock.call_args.kwargs
+        assert "extra_tags" in call_kwargs
 
     def test_output_filename_follows_naming_convention(
         self,

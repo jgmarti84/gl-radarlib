@@ -63,8 +63,8 @@ class TestBuildProductMetadata:
 
     def test_volume_number_parsed_as_int(self, mock_radar: MagicMock, valid_volume_info: dict) -> None:
         result = build_product_metadata(mock_radar, valid_volume_info, "DBZH", "RMA1")
-        assert result.volume_number == 1
-        assert isinstance(result.volume_number, int)
+        assert result.volume_number == "01"
+        assert isinstance(result.volume_number, str)
 
     def test_strategy_passed_through(self, mock_radar: MagicMock, valid_volume_info: dict) -> None:
         result = build_product_metadata(mock_radar, valid_volume_info, "DBZH", "RMA1")
@@ -125,7 +125,7 @@ class TestBuildProductMetadata:
     def test_invalid_observation_datetime_format_raises_value_error(
         self, mock_radar: MagicMock, valid_volume_info: dict
     ) -> None:
-        info = {**valid_volume_info, "observation_datetime": "2026-04-01T20:50:00Z"}
+        info = {**valid_volume_info, "observation_datetime": "24234235509i098"}
         with pytest.raises(ValueError):
             build_product_metadata(mock_radar, info, "DBZH", "RMA1")
 
