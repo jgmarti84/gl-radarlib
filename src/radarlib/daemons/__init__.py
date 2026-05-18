@@ -20,12 +20,15 @@ Example:
 # Main daemons
 from radarlib.daemons.cleanup_daemon import CleanupDaemon, CleanupDaemonConfig
 from radarlib.daemons.download_daemon import DownloadDaemon, DownloadDaemonConfig, DownloadDaemonError
+from radarlib.daemons.field_processor import FieldProcessor, RawCogFieldProcessor, get_field_data_safe
 
 # Legacy daemons (for backward compatibility)
 from radarlib.daemons.legacy import DateBasedDaemonConfig, DateBasedFTPDaemon, FTPDaemon, FTPDaemonConfig
 from radarlib.daemons.manager import DaemonManager, DaemonManagerConfig
+from radarlib.daemons.metadata_utils import apply_metadata_to_cog, build_product_metadata
 from radarlib.daemons.processing_daemon import ProcessingDaemon, ProcessingDaemonConfig
 from radarlib.daemons.product_daemon import ProductGenerationDaemon, ProductGenerationDaemonConfig
+from radarlib.daemons.product_metadata import ProductMetadata, get_radar_coverage_km, parse_observation_timestamp
 
 __all__ = [
     # Main daemons (new names)
@@ -40,6 +43,16 @@ __all__ = [
     "CleanupDaemonConfig",
     "DaemonManager",
     "DaemonManagerConfig",
+    # Metadata utilities
+    "ProductMetadata",
+    "get_radar_coverage_km",
+    "parse_observation_timestamp",
+    "apply_metadata_to_cog",
+    "build_product_metadata",
+    # Field processor
+    "FieldProcessor",
+    "RawCogFieldProcessor",
+    "get_field_data_safe",
     # Legacy daemons
     "FTPDaemon",
     "FTPDaemonConfig",

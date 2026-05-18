@@ -6,6 +6,13 @@ services:
     #   - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
     command: [ "tail", "-f", "/dev/null" ]
 
+  genpro25-rma11:
+    # environment:
+    #   RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
+    # volumes:
+    #   - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
+    command: [ "tail", "-f", "/dev/null" ]
+
   genpro25-rma2:
     # environment:
     #   RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
