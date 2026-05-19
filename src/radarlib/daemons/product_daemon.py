@@ -955,19 +955,28 @@ class ProductGenerationDaemon:
             hrefl_field, rhv_field, wrad_field, zdr_field, colmax_field:
                 Resolved PyART field name strings.
         """
+        import datetime as _dt
         import gc
 
-        from radarlib.radar_grid import (
-            GateFilter,
-            GridFilter,
-            apply_geometry,
-            column_max,
-            create_raw_cog,
-            get_field_data,
-        )
+        from radarlib.daemons.metadata_utils import build_product_metadata
+        from radarlib.daemons.product_metadata import parse_observation_timestamp
+        from radarlib.radar_grid import GridFilter, apply_geometry, column_max, create_raw_cog, get_field_data
         from radarlib.utils.memory_profiling import log_memory_usage
 
-        # filename_stem = Path(str(self.config.local_product_dir)).stem  # for logging only
+        # Pre-compute ceiled / rounded datetimes (shared across both loop iterations)
+        obs_dt = parse_observation_timestamp(volume_info["observation_datetime"])
+        strategy = volume_info["strategy"]
+        vol_nr = volume_info["vol_nr"]
+
+        ceiled_dt_raw = obs_dt + _dt.timedelta(minutes=10)
+        ceiled_min = (ceiled_dt_raw.minute // 10) * 10
+        ceiled_dt = ceiled_dt_raw.replace(minute=ceiled_min, second=0, microsecond=0)
+
+        rounded_min_val = round(obs_dt.minute / 10) * 10
+        if rounded_min_val == 60:
+            rounded_dt = obs_dt.replace(minute=0, second=0, microsecond=0) + _dt.timedelta(hours=1)
+        else:
+            rounded_dt = obs_dt.replace(minute=rounded_min_val, second=0, microsecond=0)
 
         for filtered in (False, True):
             list_key = config.FILTERED_FIELDS_TO_PLOT if filtered else config.FIELDS_TO_PLOT
@@ -996,24 +1005,55 @@ class ProductGenerationDaemon:
 
                 colmax_data = get_field_data(radar, hrefl_field)
 
-                # Build elevation+quality gate filter for COLMAX
-                gf = GateFilter(radar)
-                gf.exclude_below_elevation_angle(config.COLMAX_ELEV_LIMIT1)
-                if config.COLMAX_RHOHV_FILTER:
-                    gf.exclude_below(rhv_field, config.COLMAX_RHOHV_UMBRAL)
-                if config.COLMAX_WRAD_FILTER:
-                    gf.exclude_above(wrad_field, config.COLMAX_WRAD_UMBRAL)
-                if config.COLMAX_TDR_FILTER:
-                    gf.exclude_above(zdr_field, config.COLMAX_TDR_UMBRAL)
+                # Gate filter: none for unfiltered, GRC-style (same as DBZH filtered) for filtered
+                if filtered:
+                    gf = self._build_gate_filter(
+                        radar=radar,
+                        hrefl_field=hrefl_field,
+                        rhv_field=rhv_field,
+                        wrad_field=wrad_field,
+                        zdr_field=zdr_field,
+                    )
+                    additional_filters = [gf]
+                else:
+                    additional_filters = []
 
                 log_memory_usage(f"Before {label} COLMAX apply_geometry")
-                colmax_grid = apply_geometry(geom, colmax_data, additional_filters=[gf])
+                colmax_grid = apply_geometry(geom, colmax_data, additional_filters=additional_filters)
                 log_memory_usage(f"After {label} COLMAX apply_geometry")
                 colmax_2d = column_max(colmax_grid, geometry=geom)
 
                 if filtered:
                     gridf = GridFilter()
                     colmax_2d = gridf.apply_below(colmax_2d, config.COLMAX_THRESHOLD)
+
+                # Build metadata and output paths (v2 naming: ceiled + rounded variants)
+                metadata = build_product_metadata(
+                    radar=radar,
+                    volume_info=volume_info,
+                    field_name=colmax_field,
+                    radar_name=self.config.radar_name,
+                    filtered=filtered,
+                )
+
+                target_path = product_path_and_filename(
+                    self.config.radar_name,
+                    strategy,
+                    vol_nr,
+                    colmax_field,
+                    ceiled_dt,
+                    self.config.local_product_dir,
+                    filtered=filtered,
+                )
+                rounded_path = product_path_and_filename(
+                    self.config.radar_name,
+                    strategy,
+                    vol_nr,
+                    colmax_field,
+                    rounded_dt,
+                    self.config.local_product_dir,
+                    filtered=filtered,
+                )
 
                 with tempfile.TemporaryDirectory() as temp_dir:
                     output_file = Path(temp_dir) / "colmax.cog"
@@ -1028,24 +1068,20 @@ class ProductGenerationDaemon:
                         vmax=vmax,
                         overview_factors=[2, 4, 8, 16],
                         resampling_method="average",
+                        extra_tags=metadata.to_geotiff_tags(),
                     )
                     log_memory_usage(f"After create_raw_cog for {label} COLMAX")
 
-                    if output_file.exists():
-                        output_dict = product_path_and_filename(
-                            radar, colmax_field, sweep, round_filename=True, filtered=filtered, extension="tif"
-                        )
-                        target_subdir = self.config.local_product_dir / output_dict["ceiled"][0]
-                        target_subdir.mkdir(parents=True, exist_ok=True)
-                        target_path = target_subdir / output_dict["ceiled"][1]
-                        shutil.move(str(output_file), str(target_path))
-                        logger.info(f"Generated {label} raw COLMAX COG -> {target_path.name}")
+                    if not output_file.exists():
+                        logger.error(f"[_generate_colmax_cog] COG file was not created for {label} COLMAX. Skipping.")
+                        continue
 
-                        rounded_subdir = self.config.local_product_dir / output_dict["rounded"][0]
-                        rounded_subdir.mkdir(parents=True, exist_ok=True)
-                        rounded_path = rounded_subdir / output_dict["rounded"][1]
-                        if target_path != rounded_path:
-                            shutil.copy2(str(target_path), str(rounded_path))
+                    shutil.move(str(output_file), str(target_path))
+                    logger.info(f"Generated {label} raw COLMAX COG -> {target_path.name}")
+
+                if target_path != rounded_path:
+                    shutil.copy2(str(target_path), str(rounded_path))
+                    logger.debug(f"Created rounded-timestamp COLMAX variant: {rounded_path.name}")
 
             except Exception as e:
                 logger.error(f"Error generating {label} raw COLMAX: {e}", exc_info=True)
