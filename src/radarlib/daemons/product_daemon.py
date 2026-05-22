@@ -913,6 +913,21 @@ class ProductGenerationDaemon:
         """
         from radarlib.radar_grid import GateFilter
 
+        # --- Diagnostic: log field availability vs. config flags -------------------
+        def _field_status(enabled: bool, field: str) -> str:
+            if not enabled:
+                return f"{field}(disabled)"
+            return f"{field}({'present' if field in radar.fields else 'MISSING'})"
+
+        logger.info(
+            "GateFilter field availability — "
+            f"RHV={_field_status(config.GRC_RHV_FILTER, rhv_field)}  "
+            f"WRAD={_field_status(config.GRC_WRAD_FILTER, wrad_field)}  "
+            f"REFL={_field_status(config.GRC_REFL_FILTER, hrefl_field)}  "
+            f"ZDR={_field_status(config.GRC_ZDR_FILTER, zdr_field)}"
+        )
+        # ---------------------------------------------------------------------------
+
         gf = GateFilter(radar)
         if config.GRC_RHV_FILTER:
             gf.exclude_below(rhv_field, config.GRC_RHV_THRESHOLD)
@@ -922,6 +937,24 @@ class ProductGenerationDaemon:
             gf.exclude_below(hrefl_field, config.GRC_REFL_THRESHOLD)
         if config.GRC_ZDR_FILTER:
             gf.exclude_above(zdr_field, config.GRC_ZDR_THRESHOLD)
+
+        # --- Diagnostic: log filter outcome ----------------------------------------
+        n_criteria = len(gf._filter_history)
+        pct = 100.0 * gf.n_excluded() / gf.n_gates if gf.n_gates else 0.0
+        if n_criteria == 0:
+            logger.warning(
+                "GateFilter result: 0 criteria applied — no gates excluded. "
+                "All enabled filter fields were missing from the radar object. "
+                "Filtered COG will be identical to unfiltered COG."
+            )
+        else:
+            logger.info(
+                f"GateFilter result: {n_criteria} criteria applied — "
+                f"excluded {gf.n_excluded():,}/{gf.n_gates:,} gates ({pct:.1f}%). "
+                f"Criteria: {gf._filter_history}"
+            )
+        # ---------------------------------------------------------------------------
+
         return gf
 
     def _generate_colmax_cog(
@@ -960,7 +993,7 @@ class ProductGenerationDaemon:
 
         from radarlib.daemons.metadata_utils import build_product_metadata
         from radarlib.daemons.product_metadata import parse_observation_timestamp
-        from radarlib.radar_grid import GridFilter, apply_geometry, column_max, create_raw_cog, get_field_data
+        from radarlib.radar_grid import apply_geometry, column_max, create_raw_cog, get_field_data
         from radarlib.utils.memory_profiling import log_memory_usage
 
         # Pre-compute ceiled / rounded datetimes (shared across both loop iterations)
@@ -1023,9 +1056,9 @@ class ProductGenerationDaemon:
                 log_memory_usage(f"After {label} COLMAX apply_geometry")
                 colmax_2d = column_max(colmax_grid, geometry=geom)
 
-                if filtered:
-                    gridf = GridFilter()
-                    colmax_2d = gridf.apply_below(colmax_2d, config.COLMAX_THRESHOLD)
+                # if filtered:
+                #     gridf = GridFilter()
+                #     colmax_2d = gridf.apply_below(colmax_2d, config.COLMAX_THRESHOLD)
 
                 # Build metadata and output paths (v2 naming: ceiled + rounded variants)
                 metadata = build_product_metadata(
