@@ -33,6 +33,14 @@ from radarlib.utils.names_utils import product_path_and_filename
 logger = logging.getLogger(__name__)
 
 
+class FilterFieldsMissingError(Exception):
+    """Raised when one or more gate-filter fields required by config are absent from the radar volume.
+
+    This is a recoverable condition: the volume is incomplete and will be retried
+    once the processing daemon detects that the missing fields have been downloaded.
+    """
+
+
 @dataclass
 class ProductGenerationDaemonConfig:
     """
@@ -631,6 +639,18 @@ class ProductGenerationDaemon:
             self._stats["volumes_processed"] += 1
             return True
 
+        except FilterFieldsMissingError as e:
+            logger.warning(str(e))
+            self.state_tracker.mark_product_status(
+                volume_id,
+                self.config.product_type,
+                "failed",
+                error_message=str(e)[:500],
+                error_type="FILTER_FIELDS_MISSING",
+            )
+            # Do not increment volumes_failed — this is an expected deferral, not an error.
+            return False
+
         except Exception as e:
             error_msg = (
                 f"Failed to generate {self.config.product_type} for {completeness_str} volume {volume_id}: {str(e)}"
@@ -836,6 +856,26 @@ class ProductGenerationDaemon:
             filtered_plotted_fields = [f for f in config.FILTERED_FIELDS_TO_PLOT if f in radar.fields and f != "COLMAX"]
 
             if filtered_plotted_fields:
+                missing_filter_fields = self._get_missing_filter_fields(
+                    radar=radar,
+                    hrefl_field=hrefl_field,
+                    rhv_field=rhv_field,
+                    wrad_field=wrad_field,
+                    zdr_field=zdr_field,
+                )
+                is_complete = volume_info.get("is_complete", 0) == 1
+                if missing_filter_fields and not is_complete:
+                    raise FilterFieldsMissingError(
+                        f"Skipping filtered COGs for {filename_stem}: "
+                        f"filter field(s) {missing_filter_fields} not yet present in incomplete volume. "
+                        f"Will retry when volume is complete."
+                    )
+                elif missing_filter_fields and is_complete:
+                    logger.error(
+                        f"Filter field(s) {missing_filter_fields} missing from complete volume {filename_stem}. "
+                        f"Generating best-effort filtered COG without those criteria."
+                    )
+
                 gf = self._build_gate_filter(
                     radar=radar,
                     hrefl_field=hrefl_field,
@@ -887,6 +927,34 @@ class ProductGenerationDaemon:
             except Exception:
                 logger.debug("Failed to delete radar object during cleanup", exc_info=False)
             gc.collect()
+
+    def _get_missing_filter_fields(
+        self,
+        radar: Any,
+        hrefl_field: str,
+        rhv_field: str,
+        wrad_field: str,
+        zdr_field: str,
+    ) -> List[str]:
+        """Return the names of filter fields that are enabled in config but absent from ``radar.fields``.
+
+        A field is only considered *required* if its corresponding ``GRC_*_FILTER`` flag is True.
+        Fields that are disabled in config are ignored regardless of availability.
+
+        Returns:
+            List of field name strings that are needed but missing.  Empty list means
+            the gate filter can be built and applied correctly.
+        """
+        missing: List[str] = []
+        if config.GRC_RHV_FILTER and rhv_field not in radar.fields:
+            missing.append(rhv_field)
+        if config.GRC_WRAD_FILTER and wrad_field not in radar.fields:
+            missing.append(wrad_field)
+        if config.GRC_REFL_FILTER and hrefl_field not in radar.fields:
+            missing.append(hrefl_field)
+        if config.GRC_ZDR_FILTER and zdr_field not in radar.fields:
+            missing.append(zdr_field)
+        return missing
 
     def _build_gate_filter(
         self,
@@ -1040,6 +1108,26 @@ class ProductGenerationDaemon:
 
                 # Gate filter: none for unfiltered, GRC-style (same as DBZH filtered) for filtered
                 if filtered:
+                    missing_filter_fields = self._get_missing_filter_fields(
+                        radar=radar,
+                        hrefl_field=hrefl_field,
+                        rhv_field=rhv_field,
+                        wrad_field=wrad_field,
+                        zdr_field=zdr_field,
+                    )
+                    is_complete = volume_info.get("is_complete", 0) == 1
+                    if missing_filter_fields and not is_complete:
+                        raise FilterFieldsMissingError(
+                            f"Skipping filtered COLMAX: "
+                            f"filter field(s) {missing_filter_fields} not yet present in incomplete volume. "
+                            f"Will retry when volume is complete."
+                        )
+                    elif missing_filter_fields and is_complete:
+                        logger.error(
+                            f"Filter field(s) {missing_filter_fields} missing from complete volume for COLMAX. "
+                            f"Generating best-effort filtered COLMAX without those criteria."
+                        )
+
                     gf = self._build_gate_filter(
                         radar=radar,
                         hrefl_field=hrefl_field,

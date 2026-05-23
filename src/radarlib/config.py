@@ -110,6 +110,7 @@ DEFAULTS: Dict[str, Any] = {
         "WRAD",
         "KDP",
         "COLMAX",
+        "PHIDP",
     ],  # COLMAX is treated differently in the COG context, left here for backwards compatibility with PNG products
     "FILTERED_FIELDS_TO_PLOT": [
         "DBZH",

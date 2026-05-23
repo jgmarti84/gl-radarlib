@@ -1142,7 +1142,10 @@ class SQLiteStateTracker:
                 generated_at = NULL,
                 updated_at = ?
             WHERE volume_id = ?
-              AND status = 'completed'
+              AND (
+                status = 'completed'
+                OR (status = 'failed' AND error_type = 'FILTER_FIELDS_MISSING')
+              )
             """,
             (now, volume_id),
         )
@@ -1184,7 +1187,11 @@ class SQLiteStateTracker:
             LEFT JOIN product_generation pg
                 ON vp.volume_id = pg.volume_id AND pg.product_type = ?
             WHERE vp.status = 'completed'
-              AND (pg.status IS NULL OR pg.status = 'pending' OR pg.status = 'failed')
+              AND (
+                pg.status IS NULL
+                OR pg.status = 'pending'
+                OR (pg.status = 'failed' AND (pg.error_type IS NULL OR pg.error_type != 'FILTER_FIELDS_MISSING'))
+              )
             ORDER BY vp.observation_datetime ASC
         """,
             (product_type,),
