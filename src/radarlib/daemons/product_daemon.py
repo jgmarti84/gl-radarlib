@@ -1144,6 +1144,20 @@ class ProductGenerationDaemon:
                 log_memory_usage(f"After {label} COLMAX apply_geometry")
                 colmax_2d = column_max(colmax_grid, geometry=geom)
 
+                # --- Coverage radius mask ------------------------------------------------
+                # Mask Cartesian cells beyond the actual radar sweep range.
+                try:
+                    from radarlib.daemons.field_processor import apply_coverage_radius_mask
+
+                    coverage_radius_m = float(radar.range["data"][-1])
+                    colmax_2d = apply_coverage_radius_mask(colmax_2d, geom, coverage_radius_m)
+                    log_memory_usage(f"After coverage mask for {label} COLMAX")
+                except Exception as _mask_err:
+                    logger.warning(
+                        f"[_generate_colmax_cog] Could not apply coverage radius mask for "
+                        f"{label} COLMAX: {_mask_err}. Proceeding without mask."
+                    )
+
                 # if filtered:
                 #     gridf = GridFilter()
                 #     colmax_2d = gridf.apply_below(colmax_2d, config.COLMAX_THRESHOLD)

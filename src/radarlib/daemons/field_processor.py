@@ -48,6 +48,48 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def apply_coverage_radius_mask(
+    data_2d: np.ndarray,
+    geometry: "GridGeometry",
+    coverage_radius_m: float,
+) -> np.ndarray:
+    """Mask Cartesian grid cells that lie outside the radar coverage radius.
+
+    Computes the ground-range distance from the grid origin (radar position)
+    for every (y, x) cell and sets cells beyond *coverage_radius_m* to masked.
+    This prevents interpolation artefacts from appearing at the grid edges
+    when the configured grid extent is larger than the actual radar sweep range.
+
+    Args:
+        data_2d: 2-D float array of shape ``(ny, nx)``.
+        geometry: :class:`~radarlib.radar_grid.GridGeometry` describing the grid
+            extent.  ``grid_limits`` must follow the convention
+            ``((z_min, z_max), (y_min, y_max), (x_min, x_max))`` in metres.
+        coverage_radius_m: Radar coverage radius in metres (typically
+            ``float(radar.range["data"][-1])``).
+
+    Returns:
+        A :class:`numpy.ma.MaskedArray` equivalent to *data_2d* with all cells
+        whose ground-range distance exceeds *coverage_radius_m* masked out.
+    """
+    import numpy.ma as ma
+
+    (_, _), (y_min, y_max), (x_min, x_max) = geometry.grid_limits
+    ny, nx = data_2d.shape[-2], data_2d.shape[-1]
+
+    x = np.linspace(x_min, x_max, nx)
+    y = np.linspace(y_min, y_max, ny)
+    xx, yy = np.meshgrid(x, y)
+    distance = np.sqrt(xx**2 + yy**2)
+    outside_coverage = distance >= coverage_radius_m
+
+    if isinstance(data_2d, ma.MaskedArray):
+        combined_mask = np.ma.getmaskarray(data_2d) | outside_coverage
+        return ma.array(data_2d.data, mask=combined_mask, fill_value=data_2d.fill_value)
+    else:
+        return ma.array(data_2d, mask=outside_coverage)
+
+
 def get_field_data_safe(radar: Any, field_name: str) -> np.ndarray:
     """Safely retrieve field data from a PyART Radar object.
 
@@ -226,6 +268,19 @@ class RawCogFieldProcessor(FieldProcessor):
                 elevation_angle=elevation_angle,
                 interpolation="linear",
             )
+
+            # --- Coverage radius mask ----------------------------------------------------
+            # Mask out all Cartesian cells that fall outside the actual radar
+            # sweep range to avoid Barnes interpolation artefacts at grid edges.
+            try:
+                coverage_radius_m = float(radar.range["data"][-1])
+                ppi = apply_coverage_radius_mask(ppi, geometry, coverage_radius_m)
+                log_memory_usage(f"After coverage mask for {'filtered' if filtered else 'unfiltered'} {field_name}")
+            except Exception as _mask_err:
+                logger.warning(
+                    f"[RawCogFieldProcessor] Could not apply coverage radius mask for "
+                    f"field '{field_name}': {_mask_err}. Proceeding without mask."
+                )
 
             # --- Build structured metadata -----------------------------------------------
             metadata = build_product_metadata(
