@@ -81,6 +81,7 @@ class ProductGenerationDaemonConfig:
     tops_and_cores_output_dir: Optional[Path] = None
     stuck_volume_timeout_minutes: int = 60
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
+    field_value_masks: Optional[Dict[str, Dict[str, float]]] = None
     ftp_host: Optional[str] = config.FTP_HOST
     ftp_user: Optional[str] = config.FTP_USER
     ftp_password: Optional[str] = config.FTP_PASS

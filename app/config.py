@@ -73,6 +73,11 @@ _DEFAULTS: Dict[str, Any] = {
             "02": ["VRAD", "WRAD"],
         }
     },
+    # Per-field value threshold masks applied post-interpolation before COG write.
+    # Dict[field_name, Dict["min" | "max", float]].
+    # Values outside the specified range are masked to NaN in the output COG.
+    # Example: {"RHOHV": {"min": 0.3}} masks all RHOHV values below 0.3.
+    "FIELD_VALUE_MASKS": {},
 }
 
 # Keys whose values are dicts and must NOT be flattened when encountered in YAML.

@@ -282,6 +282,21 @@ class RawCogFieldProcessor(FieldProcessor):
                     f"field '{field_name}': {_mask_err}. Proceeding without mask."
                 )
 
+            # --- Per-field value threshold mask ------------------------------------------
+            field_masks: Dict[str, Any] = getattr(self.config, "field_value_masks", None) or {}
+            field_mask_cfg = field_masks.get(field_name, {})
+            if field_mask_cfg:
+                min_val = field_mask_cfg.get("min", None)
+                max_val = field_mask_cfg.get("max", None)
+                if min_val is not None:
+                    ppi = np.ma.masked_where(ppi < min_val, ppi)
+                if max_val is not None:
+                    ppi = np.ma.masked_where(ppi > max_val, ppi)
+                logger.debug(
+                    f"[RawCogFieldProcessor] Applied value threshold mask for "
+                    f"'{field_name}': min={min_val}, max={max_val}"
+                )
+
             # --- Build structured metadata -----------------------------------------------
             metadata = build_product_metadata(
                 radar=radar,
