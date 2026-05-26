@@ -2,7 +2,9 @@ import datetime
 import logging
 import os
 import re
+from datetime import datetime as _datetime
 from datetime import timezone
+from pathlib import Path
 from typing import Dict, Optional
 
 import pytz
@@ -231,7 +233,74 @@ def build_vol_types_regex(vol_types: Dict[str, Dict[str, list]]) -> Optional[re.
         return None
 
 
-def product_path_and_filename(radar, field, sweep, round_filename=True, filtered=True, extension="png"):
+def product_path_and_filename(
+    radar_name: str,
+    strategy: str,
+    vol_nr: str,
+    field_name: str,
+    observation_timestamp: _datetime,
+    base_dir: Path,
+    filtered: bool = True,
+    round_filename: bool = False,
+) -> Path:
+    """Generate a COG output path including strategy and volume number.
+
+    Format::
+
+        {base_dir}/{radar_name}/YYYY/MM/DD/
+        {radar_name}_{strategy}_{vol_nr}_{timestamp}_{field_name}[o].tif
+
+    The ``'o'`` suffix is appended when *filtered* is ``False`` (raw/unfiltered
+    data), following the Output Contract convention.
+
+    Args:
+        radar_name: Radar station identifier (e.g. ``"RMA1"``).
+        strategy: Volume scan strategy code (e.g. ``"0315"``).
+        vol_nr: Volume number string (e.g. ``"01"``).
+        field_name: Radar field name (e.g. ``"DBZH"``, ``"COLMAX"``).
+        observation_timestamp: Observation datetime in UTC with second
+            precision.
+        base_dir: Root output directory.
+        filtered: ``True`` (default) for filtered output — no suffix.
+            ``False`` for raw/unfiltered output — appends ``'o'``.
+        round_filename: If ``True``, round the timestamp to the nearest
+            10 minutes (legacy behaviour). Defaults to ``False`` (exact
+            seconds precision).
+
+    Returns:
+        :class:`~pathlib.Path` pointing to the full output file path.
+        Parent directories are created automatically.
+
+    Examples:
+        >>> from datetime import datetime, timezone
+        >>> ts = datetime(2026, 4, 1, 20, 50, 0, tzinfo=timezone.utc)
+        >>> product_path_and_filename(
+        ...     "RMA1", "0315", "01", "DBZH", ts, Path("/products"), filtered=True
+        ... )
+        PosixPath('/products/RMA1/2026/04/01/RMA1_0315_01_20260401T205000Z_DBZH.tif')
+    """
+    if round_filename:
+        rounded_min = str(round(observation_timestamp.minute / 10) * 10).zfill(2)
+        timestamp_str = f"{observation_timestamp.strftime('%Y%m%dT%H')}{rounded_min}00Z"
+    else:
+        timestamp_str = observation_timestamp.strftime("%Y%m%dT%H%M%SZ")
+
+    field_suffix = "" if filtered else "o"
+    filename = f"{radar_name}_{strategy}_{vol_nr}_{timestamp_str}_{field_name}{field_suffix}.tif"
+
+    date_path = observation_timestamp.strftime("%Y/%m/%d")
+    full_path = Path(base_dir) / date_path / filename
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    return full_path
+
+
+def product_path_and_filename_legacy(radar, field, sweep, round_filename=True, filtered=True, extension="png"):
+    """Legacy PNG/GeoTIFF filename generator that accepts a PyART Radar object.
+
+    .. deprecated::
+        Use :func:`product_path_and_filename` for new raw-COG output.
+        This function is retained for PNG generation backward compatibility.
+    """
     radar_name = radar.metadata["instrument_name"]
     # root_out = config.root_products
 
@@ -267,3 +336,47 @@ def product_path_and_filename(radar, field, sweep, round_filename=True, filtered
         logger.error(f"Error generating product path and filename: {e}")
 
     return fnames_dict
+
+
+def extract_cog_filename_components_v2(filename: str) -> Dict[str, object]:
+    """Extract components from the v2 COG filename format.
+
+    Pattern::
+
+        {RADAR}_{STRATEGY}_{VOLNR}_{TIMESTAMP}_{FIELD}[o].tif
+
+    Examples::
+
+        RMA1_0315_01_20260401T205000Z_DBZH.tif    # filtered
+        RMA1_0315_01_20260401T205000Z_DBZHo.tif   # unfiltered
+
+    Args:
+        filename: Bare filename to parse (no directory prefix).
+
+    Returns:
+        Dict with keys:
+
+        - ``radar_name`` (str)
+        - ``strategy`` (str)
+        - ``vol_nr`` (str)
+        - ``timestamp`` (str) — ``YYYYMMDDTHHMMSSZ``
+        - ``field_name`` (str)
+        - ``filtered`` (bool) — ``True`` when no ``'o'`` suffix is present
+
+    Raises:
+        ValueError: If *filename* does not match the v2 pattern.
+    """
+    pattern = r"^([A-Z0-9]+)_(\d{4})_(\d{2})_(\d{8}T\d{6}Z)_([A-Z0-9]+)(o)?\.tif$"
+    match = re.match(pattern, filename)
+    if not match:
+        raise ValueError(f"Filename does not match v2 COG format: {filename!r}")
+
+    radar_name, strategy, vol_nr, timestamp, field_name, raw_suffix = match.groups()
+    return {
+        "radar_name": radar_name,
+        "strategy": strategy,
+        "vol_nr": vol_nr,
+        "timestamp": timestamp,
+        "field_name": field_name,
+        "filtered": raw_suffix is None,  # 'o' present → unfiltered → filtered=False
+    }

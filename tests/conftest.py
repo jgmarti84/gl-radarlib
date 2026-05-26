@@ -21,7 +21,7 @@ def sample_RMA11_vol1_bufr_files():
 
     groups = defaultdict(list)
     for p in bufr_files:
-        stem = p.stem  # e.g., "RMA11_0315_01_DBZH_20251020T151109Z"
+        stem = p.stem
         timestamp = stem.split("_")[-1]
         groups[timestamp].append(p)
 

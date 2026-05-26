@@ -13,7 +13,7 @@ format so they too can benefit from dynamic colormap changes.
 
 import logging
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -647,6 +647,7 @@ def create_raw_cog(
     nodata_value: Optional[float] = None,
     overview_factors: Optional[list] = None,
     resampling_method: str = "nearest",
+    extra_tags: Optional[Dict[str, str]] = None,
 ) -> Path:
     """
     Create a Cloud-Optimized GeoTIFF (COG) that stores the raw float32 data values.
@@ -686,6 +687,11 @@ def create_raw_cog(
         Downsampling factors for overview levels (default: [2, 4, 8, 16])
     resampling_method : str, optional
         Resampling method for overviews (default: 'nearest')
+    extra_tags : dict of str, optional
+        Additional string tags to embed in the COG at write time (e.g. the
+        ``radarlib_*`` metadata from :class:`~radarlib.daemons.product_metadata.ProductMetadata`).  Keys
+        and values must be strings.  Written inside the same ``rasterio.open``
+        block so the file remains a valid COG.
 
     Returns
     -------
@@ -756,6 +762,9 @@ def create_raw_cog(
                 _TAG_DATA_TYPE: _DATA_TYPE_RAW,
             }
         )
+
+        if extra_tags:
+            dst.update_tags(**extra_tags)
 
         if overview_factors:
             dst.build_overviews(overview_factors, resampling_enum)

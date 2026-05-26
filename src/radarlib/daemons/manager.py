@@ -79,6 +79,7 @@ class DaemonManagerConfig:
     add_tops_and_cores: bool = False
     tops_and_cores_dir: Optional[Path] = None
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
+    field_value_masks: Optional[Dict[str, Dict[str, float]]] = None
     bufr_retention_days: int = 7
     netcdf_retention_days: int = 7
     cleanup_product_types: Optional[List[str]] = None
@@ -198,6 +199,7 @@ class DaemonManager:
             add_tops_and_cores=self.config.add_tops_and_cores,
             tops_and_cores_output_dir=self.tops_and_cores_dir,
             geometry_types=self.config.geometry_types,
+            field_value_masks=self.config.field_value_masks or {},
             ftp_host=self.config.ftp_host,
             ftp_user=self.config.ftp_user,
             ftp_password=self.config.ftp_password,
