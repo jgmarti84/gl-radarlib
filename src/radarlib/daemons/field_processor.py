@@ -286,8 +286,8 @@ class RawCogFieldProcessor(FieldProcessor):
             field_masks: Dict[str, Any] = getattr(self.config, "field_value_masks", None) or {}
             field_mask_cfg = field_masks.get(field_name, {})
             if field_mask_cfg:
-                min_val = field_mask_cfg.get("min", None)
-                max_val = field_mask_cfg.get("max", None)
+                min_val = field_mask_cfg.get("min", -np.inf)
+                max_val = field_mask_cfg.get("max", np.inf)
                 if min_val is not None:
                     ppi = np.ma.masked_where(ppi < min_val, ppi)
                 if max_val is not None:

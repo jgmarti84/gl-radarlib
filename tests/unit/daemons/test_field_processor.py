@@ -46,6 +46,7 @@ def mock_config(tmp_path: Path) -> MagicMock:
     cfg = MagicMock()
     cfg.local_product_dir = tmp_path / "products"
     cfg.local_product_dir.mkdir(parents=True, exist_ok=True)
+    cfg.field_value_masks = {}
     return cfg
 
 
