@@ -11,11 +11,13 @@ services:
       - ../logs/RMA00:/workspace/app/logs/RMA00
       - ../geometry/RMA00:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA00"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -23,8 +25,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -60,11 +60,13 @@ services:
       - ../logs/RMA1:/workspace/app/logs/RMA1
       - ../geometry/RMA1:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA1"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -72,8 +74,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
+      NETCDF_RETENTION_DAYS: 180 # in days
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -108,11 +109,13 @@ services:
       - ../logs/RMA2:/workspace/app/logs/RMA2
       - ../geometry/RMA2:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA2"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -120,8 +123,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -156,11 +157,13 @@ services:
       - ../logs/RMA3:/workspace/app/logs/RMA3
       - ../geometry/RMA3:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA3"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -168,8 +171,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -204,11 +205,13 @@ services:
       - ../logs/RMA4:/workspace/app/logs/RMA4
       - ../geometry/RMA4:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA4"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -216,8 +219,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -252,11 +253,13 @@ services:
       - ../logs/RMA5:/workspace/app/logs/RMA5
       - ../geometry/RMA5:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA5"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -264,8 +267,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -300,11 +301,13 @@ services:
       - ../logs/RMA6:/workspace/app/logs/RMA6
       - ../geometry/RMA6:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA6"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -312,8 +315,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -348,11 +349,13 @@ services:
       - ../logs/RMA7:/workspace/app/logs/RMA7
       - ../geometry/RMA7:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA7"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -360,8 +363,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -396,11 +397,13 @@ services:
       - ../logs/RMA8:/workspace/app/logs/RMA8
       - ../geometry/RMA8:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA8"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -408,8 +411,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -444,11 +445,13 @@ services:
       - ../logs/RMA9:/workspace/app/logs/RMA9
       - ../geometry/RMA9:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA9"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -456,8 +459,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -492,11 +493,13 @@ services:
       - ../logs/RMA10:/workspace/app/logs/RMA10
       - ../geometry/RMA10:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA10"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -504,8 +507,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -540,11 +541,13 @@ services:
       - ../logs/RMA11:/workspace/app/logs/RMA11
       - ../geometry/RMA11:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA11"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -552,8 +555,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -588,11 +589,13 @@ services:
       - ../logs/RMA12:/workspace/app/logs/RMA12
       - ../geometry/RMA12:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA12"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -600,8 +603,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -636,11 +637,13 @@ services:
       - ../logs/RMA13:/workspace/app/logs/RMA13
       - ../geometry/RMA13:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA13"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -648,8 +651,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -684,11 +685,13 @@ services:
       - ../logs/RMA14:/workspace/app/logs/RMA14
       - ../geometry/RMA14:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA14"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -696,8 +699,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -732,11 +733,13 @@ services:
       - ../logs/RMA15:/workspace/app/logs/RMA15
       - ../geometry/RMA15:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA15"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -744,8 +747,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -780,11 +781,13 @@ services:
       - ../logs/RMA16:/workspace/app/logs/RMA16
       - ../geometry/RMA16:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA16"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -792,8 +795,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
+      NETCDF_RETENTION_DAYS: 180
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -828,11 +830,13 @@ services:
       - ../logs/RMA17:/workspace/app/logs/RMA17
       - ../geometry/RMA17:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA17"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -840,8 +844,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
+      NETCDF_RETENTION_DAYS: 180
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -876,11 +879,13 @@ services:
       - ../logs/RMA18:/workspace/app/logs/RMA18
       - ../geometry/RMA18:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
     environment:
       RADAR_NAME: "RMA18"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
       GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
       ROOT_CACHE_PATH: "/workspace/app/cache"
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
@@ -888,8 +893,6 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      ROI_PARAMS_VOL01: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.0, \"nb\": 1.3, \"bsp\": 1.1, \"min_radius\": 900.0}"
-      ROI_PARAMS_VOL02: "{\"res_xy\": 1000, \"res_z\": 600, \"toa\": 15000, \"hfac\": 1.1, \"nb\": 1.6, \"bsp\": 1.3, \"min_radius\": 900.0}"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
