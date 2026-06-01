@@ -110,6 +110,8 @@ local:
       "02":
         - VRAD
         - WRAD
+      "04":
+        - DBZH
   DAEMON_PARAMS:
     GEOMETRY_BUFR_LOOKBACK_HOURS: 24
     START_DATE: None # ISO format or None
@@ -127,5 +129,5 @@ local:
     FIELD_VALUE_MASKS:
       RHOHV:
         min: 0.3
-    NETCDF_RETENTION_DAYS: 0.08333333333333333 # in days
+    NETCDF_RETENTION_DAYS: 30 # in days
     BUFR_RETENTION_DAYS: 0.08333333333333333 # in days

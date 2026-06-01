@@ -183,12 +183,12 @@ def _try_load_file(path: str) -> bool:
 
 
 def _auto_load() -> None:
-    # 1) explicit env var
+    # 1) explicit env var — load JSON file if provided (does NOT short-circuit env overrides)
     env_path = os.environ.get("RADARLIB_CONFIG")
-    if env_path and _try_load_file(env_path):
-        return
+    if env_path:
+        _try_load_file(env_path)
 
-    # Override with environment variables if they exist
+    # Override with environment variables if they exist (always runs, highest priority)
     for key in _config.keys():
         env_val = os.environ.get(key)
         if env_val is not None:
@@ -332,10 +332,10 @@ _BUFR_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_([A-Z]{2,10})
 _NETCDF_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_(\d{8}T\d{6}Z)\.nc$", re.IGNORECASE)
 _COG_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{8}T\d{6}Z)_([A-Z0-9]+?)(o?)_(\d{2})\.tif$", re.IGNORECASE)
 
-ROI_PARAMS_VOL01 = None
-ROI_PARAMS_VOL02 = None
-ROI_PARAMS_VOL03 = None
-ROI_PARAMS_VOL04 = None
+ROI_PARAMS_VOL01: dict = get("ROI_PARAMS_VOL01", None)
+ROI_PARAMS_VOL02: dict = get("ROI_PARAMS_VOL02", None)
+ROI_PARAMS_VOL03: dict = get("ROI_PARAMS_VOL03", None)
+ROI_PARAMS_VOL04: dict = get("ROI_PARAMS_VOL04", None)
 
 
 def reload(path: Optional[str] = None) -> None:
