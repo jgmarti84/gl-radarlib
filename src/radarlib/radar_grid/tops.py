@@ -451,7 +451,7 @@ def detect_tops_from_cores(
                 # (prefer higher altitudes when available)
                 z_at_level = float(z_level[valid_in_cylinder].max()) if z_level.ndim > 1 else float(z_level)
 
-                if z_at_level > highest_altitude and max_dbz >= -9999:  # Guard against NaN/extreme values
+                if z_at_level > highest_altitude and max_dbz > 0:  # Guard against NaN/extreme values
                     highest_altitude = z_at_level
                     highest_dbz = max_dbz
 
