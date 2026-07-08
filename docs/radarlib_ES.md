@@ -153,7 +153,7 @@ sudo apt-get install -y gdal-bin libgdal-dev build-essential git
 
 ```bash
 # Clonar el repositorio
-git clone https://github.com/jgmarti84/gl-radarlib.git
+git clone https://gitlab.com/meteocba/webmet/radarlib.git
 cd gl-radarlib
 
 # Crear y activar entorno virtual
@@ -311,8 +311,8 @@ Estas variables controlan el comportamiento de los daemons de la capa de servici
 |---|---|---|---|
 | `PRODUCT_TYPE` | Formato de salida (ver abajo) | `str` | `"raw_cog"` |
 | `ADD_COLMAX` | Generar producto COG de COLMAX (reflectividad máxima columnar) | `bool` | `True` |
-| `ADD_TOPS_AND_CORES` | Generar producto GeoJSON de cimas y núcleos convectivos | `bool` | `False` |
-| `ROOT_TOPS_AND_CORES_PATH` | Directorio raíz para salida GeoJSON de cimas y núcleos | `str` | `"tops_and_cores"` |
+| `ADD_TOPS_AND_CORES` | Generar producto GeoJSON de topes y núcleos convectivos | `bool` | `False` |
+| `ROOT_TOPS_AND_CORES_PATH` | Directorio raíz para salida GeoJSON de topes y núcleos | `str` | `"tops_and_cores"` |
 | `START_DATE` | Iniciar descargas desde esta fecha (UTC) | `datetime` o `None` | `None` |
 | `FIELD_VALUE_MASKS` | Máscaras de umbral de valor por campo aplicadas post-interpolación antes de escritura COG. Valores fuera del rango se enmascaran a NaN. Ejemplo: `{"RHOHV": {"min": 0.3}}` | `dict` | `{}` |
 | `ROI_PARAMS_VOL01` | Override de parámetros de construcción de geometría para volumen 01 (dict o None) | `dict` | `None` |
@@ -420,7 +420,7 @@ local:
   PRODUCT_OUTPUT:
     PRODUCT_TYPE: "raw_cog"            # Opciones: "image" (PNG), "geotiff", "raw_cog" (recomendado)
     ADD_COLMAX: true                   # Generar producto COG de COLMAX
-    ADD_TOPS_AND_CORES: false          # Generar GeoJSON de cimas y núcleos convectivos
+    ADD_TOPS_AND_CORES: false          # Generar GeoJSON de topes y núcleos convectivos
     ROOT_TOPS_AND_CORES_PATH: "tops_and_cores"  # Directorio raíz para salida GeoJSON
 
   # Máscaras de valor por campo (aplicadas post-interpolación, antes de escritura COG)
@@ -750,8 +750,8 @@ Motor de interpolación Barnes polar-cartesiana con geometría precomputada. Uti
 - `column_max(grid_3d, geometry)` — Computar reflectividad máxima columnar 2D
 - `create_raw_cog(data_2d, geometry, lat, lon, path, cmap, vmin, vmax, ...)` — Escribir COG float32
 - `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Detección de núcleos convectivos
-- `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords)` — Detección de cimas de tormenta (anclada en núcleos)
-- `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Detección alternativa independiente de cimas
+- `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords)` — Detección de topes de tormenta (anclada en núcleos)
+- `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Detección alternativa independiente de topes
 - `GateFilter(radar)` — Filtro de calidad de gate polar (exclude_below, exclude_above)
 - `get_field_data(radar, field_name)` — Extraer array numpy enmascarado desde objeto PyART Radar
 
@@ -1057,7 +1057,7 @@ ROOT_RADAR_PRODUCTS_PATH/
                 └── RMA1_20260401T205000Z_ZDR_00.png ← obsoleto
 ```
 
-### Convención GeoJSON de Cimas y Núcleos
+### Convención GeoJSON de Topes y Núcleos
 
 ```text
 {ROOT_TOPS_AND_CORES_PATH}/
@@ -1070,7 +1070,7 @@ ROOT_RADAR_PRODUCTS_PATH/
 Ejemplo: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
 
 **Reglas críticas:**
-- El archivo **NO se escribe** si tanto la lista de núcleos como la de cimas están vacías.
+- El archivo **NO se escribe** si tanto la lista de núcleos como la de topes están vacías.
 - `observation_time` siempre en ISO 8601 UTC.
 - Las coordenadas son `[lon, lat]` — orden estándar GeoJSON.
 - El formato de marca de tiempo en el nombre de archivo es `YYYYMMDDTHHMMSSZ` — igual que los nombres de archivos COG.
@@ -1090,7 +1090,7 @@ Ejemplo: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
   }
 }
 
-// Feature de cima:
+// Feature de tope:
 {
   "type": "Feature",
   "geometry": { "type": "Point", "coordinates": [lon, lat] },
