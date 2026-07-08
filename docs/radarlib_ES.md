@@ -310,8 +310,13 @@ Estas variables controlan el comportamiento de los daemons de la capa de servici
 | Variable | Descripción | Tipo | Por Defecto |
 |---|---|---|---|
 | `PRODUCT_TYPE` | Formato de salida (ver abajo) | `str` | `"raw_cog"` |
-| `ADD_COLMAX` | Generar máximo columnar (solo PNG) | `bool` | `True` |
+| `ADD_COLMAX` | Generar producto COG de COLMAX (reflectividad máxima columnar) | `bool` | `True` |
+| `ADD_TOPS_AND_CORES` | Generar producto GeoJSON de cimas y núcleos convectivos | `bool` | `False` |
+| `ROOT_TOPS_AND_CORES_PATH` | Directorio raíz para salida GeoJSON de cimas y núcleos | `str` | `"tops_and_cores"` |
 | `START_DATE` | Iniciar descargas desde esta fecha (UTC) | `datetime` o `None` | `None` |
+| `FIELD_VALUE_MASKS` | Máscaras de umbral de valor por campo aplicadas post-interpolación antes de escritura COG. Valores fuera del rango se enmascaran a NaN. Ejemplo: `{"RHOHV": {"min": 0.3}}` | `dict` | `{}` |
+| `ROI_PARAMS_VOL01` | Override de parámetros de construcción de geometría para volumen 01 (dict o None) | `dict` | `None` |
+| `ROI_PARAMS_VOL02` | Override de parámetros de construcción de geometría para volumen 02 (dict o None) | `dict` | `None` |
 
 #### Retención de Datos
 
@@ -333,11 +338,11 @@ La variable `PRODUCT_TYPE` controla qué formato se genera:
 
 **Recomendación:** Use `"raw_cog"` para todos los nuevos despliegues.
 
-**Nota:** La configuración `ADD_COLMAX` solo se aplica cuando `PRODUCT_TYPE="image"`. COLMAX no se genera para modos COG.
+**Nota:** En modo `raw_cog`, COLMAX se genera como su propio producto COG mono-banda float32 (vía `_generate_colmax_cog()`), separado del pipeline por campo. El flag `ADD_COLMAX` controla si se genera COLMAX independientemente del tipo de producto. `ADD_COLMAX` en modo PNG heredado (`image`) genera un PNG matplotlib en su lugar.
 
 ### Procesamiento COLMAX (Máximo Columnar)
 
-⚠️ **Nota:** Estas configuraciones solo se aplican cuando `PRODUCT_TYPE="image"` (modo PNG). En modos `raw_cog` o `geotiff`, no se genera COLMAX.
+⚠️ **Nota:** Las configuraciones de filtro `COLMAX_*` a continuación son utilizadas únicamente por el pipeline de generación PNG heredado. En modo `raw_cog`, COLMAX se genera como un producto COG usando el método `_generate_colmax_cog()` con filtros de gate GRC en lugar de los umbrales específicos de COLMAX a continuación.
 
 | Variable | Descripción | Tipo | Por Defecto |
 |---|---|---|---|
@@ -414,7 +419,15 @@ local:
   # Salida de Generación de Productos
   PRODUCT_OUTPUT:
     PRODUCT_TYPE: "raw_cog"            # Opciones: "image" (PNG), "geotiff", "raw_cog" (recomendado)
-    ADD_COLMAX: true                   # Generar max columnar (solo PNG)
+    ADD_COLMAX: true                   # Generar producto COG de COLMAX
+    ADD_TOPS_AND_CORES: false          # Generar GeoJSON de cimas y núcleos convectivos
+    ROOT_TOPS_AND_CORES_PATH: "tops_and_cores"  # Directorio raíz para salida GeoJSON
+
+  # Máscaras de valor por campo (aplicadas post-interpolación, antes de escritura COG)
+  # Los valores fuera del rango especificado se enmascaran a NaN en el COG de salida.
+  FIELD_VALUE_MASKS:
+    RHOHV:
+      min: 0.3                         # enmascarar valores RHOHV por debajo de 0.3
 
   # Retención de Datos (días)
   RETENTION:
@@ -723,11 +736,24 @@ Integración PyART para manipulación de objetos Radar y generación de producto
 
 ### radarlib.radar_grid
 
-Motor de cuadrícula polar-cartesiana precomputada para interpolación eficiente.
+Motor de interpolación Barnes polar-cartesiana con geometría precomputada. Utiliza objetos
+`GridGeometry` (archivos `.npz`) preconstruidos para evitar recomputar pesos de interpolación.
+
+**Clases Clave:**
+- `GridGeometry` — Almacena pesos de interpolación Barnes precomputados, forma de cuadrícula y límites
 
 **Funciones Clave:**
-- `CartesianGrid(radar: Radar, **kwargs)` — Crear cuadrícula de interpolación
-- `grid.get_cart_grid(field: str) -> ndarray` — Interpolar campo a cuadrícula
+- `compute_grid_geometry(...)` — Construir y cachear geometría de interpolación desde coordenadas de gate
+- `load_geometry(path) / save_geometry(geom, path)` — Cargar/guardar archivos de geometría `.npz`
+- `apply_geometry(geometry, field_data, additional_filters=[])` — Interpolación polar → Cartesiana 3D
+- `constant_elevation_ppi(grid_3d, geometry, elevation_angle, interpolation)` — Extraer slice 2D a elevación constante
+- `column_max(grid_3d, geometry)` — Computar reflectividad máxima columnar 2D
+- `create_raw_cog(data_2d, geometry, lat, lon, path, cmap, vmin, vmax, ...)` — Escribir COG float32
+- `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Detección de núcleos convectivos
+- `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords)` — Detección de cimas de tormenta (anclada en núcleos)
+- `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Detección alternativa independiente de cimas
+- `GateFilter(radar)` — Filtro de calidad de gate polar (exclude_below, exclude_above)
+- `get_field_data(radar, field_name)` — Extraer array numpy enmascarado desde objeto PyART Radar
 
 ### radarlib.daemons
 
@@ -867,8 +893,9 @@ except ValueError as e:
 
 radarlib soporta plantillas BUFR comúnmente usadas por la red SiNaRaMe de Argentina:
 - **Plantilla 0315** — Volúmenes de radar multi-barrido
-  - Subconjunto 01: Campos de reflectividad (DBZH, DBZV, ZDR, RHOHV, PHIDP, KDP)
+  - Subconjunto 01: Campos de polarización dual completos (DBZH, DBZV, ZDR, RHOHV, PHIDP, KDP)
   - Subconjunto 02: Campos de velocidad (VRAD, WRAD)
+  - Subconjunto 04: Solo reflectividad de vigilancia (DBZH) — usado para volúmenes en "modo vigilante"
 
 ---
 
@@ -982,33 +1009,100 @@ export_to_geotiff(
 
 ### Tipos de Archivo
 
-- **GeoTIFF (.tif)** — GeoTIFF optimizado para la nube con georreferencia y metadatos
-- **PNG (.png)** — Visualización PNG georeferenciada
+- **GeoTIFF (COG): (.tif)** Este es el formato de salida principal y actual.
+  El GeoTIFF optimizado para la nube es el estándar de producción.
+- **PNG: (.png)** Obsoleto. Se mantiene solo por compatibilidad hacia atrás.
+  No construyas nuevas funcionalidades alrededor de la salida PNG.
 
 ### Convención de Nomenclatura de Archivos
+`<RADAR_NAME>_<TIMESTAMP>_<FIELD>[o]_<ELEVATION>.<ext>`
 
-```
-<CAMPO>_<TIMESTAMP>.<ext>
-```
+| Token | Descripción | Ejemplo |
+|-------|-------------|---------|
+| `RADAR_NAME` | Identificador de la estación de radar | `RMA1` |
+| `TIMESTAMP` | Formato ISO 8601: `YYYYMMDDTHHMMSSZ` | `20260401T205000Z` |
+| `FIELD` | Nombre del campo/variable de radar | `ZDR`, `DBZH` |
+| `[o]` | Sufijo letra `o` = datos crudos/no filtrados. Ausente = datos filtrados | `ZDRo` vs `ZDR` |
+| `ELEVATION` | Ángulo de elevación en grados, relleno con ceros a 2 dígitos. Actualmente siempre `00`. Versiones futuras soportarán otros valores | `00` |
+| `ext` | Extensión de archivo | `tif` (principal), `png` (obsoleto) |
+
+### Ejemplos de Nomenclatura
 
 **Ejemplos:**
-- `DBZH_20250101T120000Z.tif` (GeoTIFF Reflectividad)
-- `DBZH_20250101T120000Z.png` (PNG Reflectividad)
-- `COLMAX_20250101T120000Z.tif` (GeoTIFF Máximo Columnar)
-- `RHOHV_20250101T120000Z.tif` (GeoTIFF Correlación Copolar)
+- `RMA1_20260401T205000Z_ZDR_00.tif` — campo ZDR filtrado, elevación 00°, GeoTIFF (principal)
+- `RMA1_20260401T205000Z_ZDRo_00.tif` — campo ZDR crudo/no filtrado, elevación 00°, GeoTIFF
+- `RMA1_20260401T205000Z_ZDR_00.png` — equivalente PNG (obsoleto, solo compatibilidad hacia atrás)
+
+### Comportamiento de Escritura con Doble Marca de Tiempo
+
+Cada producto COG se escribe con **dos marcas de tiempo** para facilitar la búsqueda del consumidor:
+
+| Variante | Fórmula | Propósito |
+|---------|---------|---------|
+| **Redondeada hacia arriba** | `floor(obs_time + 10 min, 10 min)` | Próximo límite de 10 minutos tras la observación |
+| **Redondeada** | `round(obs_time, 10 min)` | Límite de 10 minutos más cercano |
+
+Cuando las marcas de tiempo redondeada hacia arriba y redondeada difieren, se escriben ambos archivos (el archivo redondeado es una copia del redondeado hacia arriba). Cuando son iguales, solo se escribe un archivo. Este comportamiento es intencional para compatibilidad con `webmet25` y no debe modificarse.
 
 ### Estructura de Carpetas
 
-```
+```text
 ROOT_RADAR_PRODUCTS_PATH/
- <RADAR_NAME>/
-     DBZH_20250101T120000Z.tif
-     DBZH_20250101T120000Z.png
-     COLMAX_20250101T120000Z.tif
-     COLMAX_20250101T120000Z.png
-     RHOHV_20250101T120000Z.tif
-     RHOHV_20250101T120000Z.png
-     ...
+└── <RADAR_NAME>/
+    └── /YYYY/
+        └── /MM/
+            └── /DD/
+                ├── RMA1_20260401T205000Z_ZDR_00.tif
+                ├── RMA1_20260401T205000Z_ZDRo_00.tif
+                └── RMA1_20260401T205000Z_ZDR_00.png ← obsoleto
+```
+
+### Convención GeoJSON de Cimas y Núcleos
+
+```text
+{ROOT_TOPS_AND_CORES_PATH}/
+└── {radar_code}/
+    └── YYYY/
+        └── MM/
+            └── DD/
+                └── {radar_code}_{strategy}_{vol_nr}_{timestamp}_TOPS_CORES.geojson
+```
+Ejemplo: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
+
+**Reglas críticas:**
+- El archivo **NO se escribe** si tanto la lista de núcleos como la de cimas están vacías.
+- `observation_time` siempre en ISO 8601 UTC.
+- Las coordenadas son `[lon, lat]` — orden estándar GeoJSON.
+- El formato de marca de tiempo en el nombre de archivo es `YYYYMMDDTHHMMSSZ` — igual que los nombres de archivos COG.
+- El indexador de `webmet25` depende de este patrón de nombre de archivo — nunca lo cambies sin actualizar `TopsAndCoresFilenameParser` en el repositorio webmet25.
+
+**Esquema GeoJSON por feature:**
+```json
+// Feature de núcleo:
+{
+  "type": "Feature",
+  "geometry": { "type": "Point", "coordinates": [lon, lat] },
+  "properties": {
+    "type": "core",
+    "intensity_dbz": 52,
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:38:54Z"
+  }
+}
+
+// Feature de cima:
+{
+  "type": "Feature",
+  "geometry": { "type": "Point", "coordinates": [lon, lat] },
+  "properties": {
+    "type": "top",
+    "altitude_m": 11200,
+    "dbz": 25.5,
+    "parent_core_dbz": 52,
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:38:54Z"
+  }
+}
 ```
 
 ### Campos de Metadatos de GeoTIFF
@@ -1070,6 +1164,73 @@ ROOT_RADAR_PRODUCTS_PATH/
 - [INCOMPLETE] Sin configuraciones específicas de producción (ej. `docker-compose.prod.yml`)
 - [INCOMPLETE] Sin manifiestos de Kubernetes
 - [FIX] **Recomendación:** Crear carpeta `deploy/k8s/` con gráficos Helm
+
+---
+
+## Buenas Prácticas de Gestión de Memoria
+
+radarlib implementa limpieza integral de memoria para prevenir fugas en daemons de larga duración.
+
+### Reglas Fundamentales
+
+1. **Eliminar arrays numpy grandes después de su uso en bucles** — siempre `del field_data, grid_data, ppi` + `gc.collect()` en bloques `finally`
+2. **Usar gestores de contexto `TemporaryDirectory()`** — nunca `mkdtemp()` (limpieza automática al salir del scope)
+3. **Llamar `gc.collect()` después de operaciones pesadas** — forzar recolección de copias intermedias de arrays enmascarados
+4. **Bloques `finally` exhaustivos** — limpiar incluso en rutas de excepción
+
+### Utilidades Clave
+```python
+from radarlib.utils.memory_profiling import log_memory_usage, check_and_cleanup_memory
+
+log_memory_usage("Antes de cargar radar")          # registra RSS actual
+check_and_cleanup_memory(threshold_mb=1100.0)     # forzar GC si supera umbral
+```
+
+### Lista de Verificación para Investigación de Fugas de Memoria
+1. ¿Se eliminan explícitamente los arrays numpy grandes en los bucles?
+2. ¿Los directorios temporales usan gestores de contexto?
+3. ¿Se llama `gc.collect()` después de operaciones pesadas?
+4. ¿Los bloques `finally` limpian todos los objetos grandes?
+5. ¿Se liberan las copias intermedias en operaciones de enmascarado/filtrado?
+6. ¿Se eliminan los objetos de radar PyART después de su uso?
+7. ¿Existe monitoreo de memoria para rastrear el crecimiento de RSS?
+
+---
+
+## Reglas para Agregar Nuevas Claves de Configuración
+
+| Tipo de configuración | Dónde agregar |
+|---|---|
+| **Capa de servicio** (toggles de daemon, intervalos de sondeo, rutas, FTP) | Solo en `_DEFAULTS` de `app/config.py` |
+| **Interna de biblioteca** (mapas de color, umbrales GRC, geometría, parámetros de algoritmo) | Solo en `DEFAULTS` de `src/radarlib/config.py` + atributo de conveniencia |
+| **Ambas capas** (configuración compartida) | En ambos archivos con valores por defecto coincidentes |
+
+- **Nunca** agregar imports de `app/config.py` dentro de `src/radarlib/` — radarlib debe permanecer utilizable como biblioteca independiente.
+- Después de agregar una clave, agregar la entrada correspondiente en `genpro25.yml` (incluso si es `None`).
+
+---
+
+## Flujo de Trabajo SDD — Seguir Esto Siempre
+
+Cuando se recibe una tarea, seguir estrictamente este ciclo:
+
+### 1. PROPUESTA
+- Leer `copilot-instructions.md` completamente
+- Leer la sección relevante de `docs/radarlib_EN.md`
+- Leer los archivos fuente relevantes
+- Proponer los cambios de código
+- Señalar inmediatamente cualquier conflicto con el Contrato de Salida
+
+### 2. APLICAR
+- Esperar aprobación o retroalimentación
+- Ajustar según la respuesta
+- Proveer el código final solo después de confirmación
+
+### 3. ARCHIVAR
+Después de aplicar el código, declarar explícitamente:
+- ¿Necesita actualizarse `docs/radarlib_EN.md`?
+- ¿Necesita actualizarse `copilot-instructions.md`?
+- ¿Necesita actualizarse el Contrato de Salida?
 
 ---
 

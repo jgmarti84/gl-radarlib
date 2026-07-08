@@ -310,8 +310,13 @@ These variables control the Genpro25 service layer daemon behavior and are defin
 | Variable | Description | Type | Default |
 |---|---|---|---|
 | `PRODUCT_TYPE` | Output format (see below) | `str` | `"raw_cog"` |
-| `ADD_COLMAX` | Generate column-max reflectivity (PNG only) | `bool` | `True` |
+| `ADD_COLMAX` | Generate COLMAX (column-max reflectivity) COG product | `bool` | `True` |
+| `ADD_TOPS_AND_CORES` | Generate convective tops & cores GeoJSON product | `bool` | `False` |
+| `ROOT_TOPS_AND_CORES_PATH` | Root directory for tops & cores GeoJSON output | `str` | `"tops_and_cores"` |
 | `START_DATE` | Begin downloads from this date (UTC) | `datetime` or `None` | `None` |
+| `FIELD_VALUE_MASKS` | Per-field value threshold masks applied post-interpolation before COG write. Values outside range are masked to NaN. Example: `{"RHOHV": {"min": 0.3}}` | `dict` | `{}` |
+| `ROI_PARAMS_VOL01` | Override geometry build parameters for volume 01 (dict or None) | `dict` | `None` |
+| `ROI_PARAMS_VOL02` | Override geometry build parameters for volume 02 (dict or None) | `dict` | `None` |
 
 #### Data Retention
 
@@ -333,11 +338,11 @@ The `PRODUCT_TYPE` variable controls what format is generated:
 
 **Recommendation:** Use `"raw_cog"` for all new deployments.
 
-**Note:** The `ADD_COLMAX` setting only applies when `PRODUCT_TYPE="image"`. COLMAX is not generated for COG modes.
+**Note:** In `raw_cog` mode, COLMAX is generated as its own single-band float32 COG product (via `_generate_colmax_cog()`), separately from the per-field pipeline. The `ADD_COLMAX` flag controls whether COLMAX is generated regardless of product type. `ADD_COLMAX` in the legacy `image` PNG mode generates a matplotlib PNG instead.
 
 ### COLMAX (Column Maximum) Processing
 
-⚠️ **Note:** These settings only apply when `PRODUCT_TYPE="image"` (PNG mode). In `raw_cog` or `geotiff` modes, COLMAX is not generated.
+⚠️ **Note:** The `COLMAX_*` filter settings below are used by the legacy PNG generation pipeline only. In `raw_cog` mode, COLMAX is generated as a COG product using the `_generate_colmax_cog()` method with GRC gate filters instead of the COLMAX-specific thresholds below.
 
 | Variable | Description | Type | Default |
 |---|---|---|---|
@@ -414,7 +419,15 @@ local:
   # Product Generation Output
   PRODUCT_OUTPUT:
     PRODUCT_TYPE: "raw_cog"            # Options: "image" (PNG), "geotiff", "raw_cog" (recommended)
-    ADD_COLMAX: true                   # Generate column-max reflectivity (PNG only)
+    ADD_COLMAX: true                   # Generate COLMAX COG product
+    ADD_TOPS_AND_CORES: false          # Generate convective tops & cores GeoJSON
+    ROOT_TOPS_AND_CORES_PATH: "tops_and_cores"  # Output root for GeoJSON
+
+  # Per-field value masks (applied post-interpolation, before COG write)
+  # Values outside the specified range are masked to NaN in the output COG.
+  FIELD_VALUE_MASKS:
+    RHOHV:
+      min: 0.3                         # mask RHOHV values below 0.3
 
   # Data Retention (days)
   RETENTION:
@@ -721,11 +734,24 @@ PyART integration for Radar object manipulation and product generation.
 
 ### radarlib.radar_grid
 
-Pre-computed polar-to-Cartesian grid engine for efficient interpolation.
+Pre-computed polar-to-Cartesian Barnes interpolation engine. Uses pre-built
+`GridGeometry` objects (`.npz` files) to avoid re-computing interpolation weights.
+
+**Key Classes:**
+- `GridGeometry` — Holds pre-computed Barnes interpolation weights, grid shape, and limits
 
 **Key Functions:**
-- `CartesianGrid(radar: Radar, **kwargs)` — Create interpolation grid
-- `grid.get_cart_grid(field: str) -> ndarray` — Interpolate field to grid
+- `compute_grid_geometry(...)` — Build and cache interpolation geometry from gate coordinates
+- `load_geometry(path) / save_geometry(geom, path)` — Load/save `.npz` geometry files
+- `apply_geometry(geometry, field_data, additional_filters=[])` — Polar → 3D Cartesian interpolation
+- `constant_elevation_ppi(grid_3d, geometry, elevation_angle, interpolation)` — Extract constant-elevation 2D slice
+- `column_max(grid_3d, geometry)` — Compute 2D column-maximum reflectivity
+- `create_raw_cog(data_2d, geometry, lat, lon, path, cmap, vmin, vmax, ...)` — Write float32 COG
+- `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Convective core detection
+- `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords)` — Storm top detection (core-anchored)
+- `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Alternative independent top detection
+- `GateFilter(radar)` — Polar gate quality filter (exclude_below, exclude_above)
+- `get_field_data(radar, field_name)` — Extract masked numpy array from PyART Radar object
 
 ### radarlib.daemons
 
@@ -865,8 +891,9 @@ except ValueError as e:
 
 radarlib supports BUFR templates commonly used by Argentina's SINARAME network:
 - **Template 0315** — Multi-sweep radar volumes
-  - Subset 01: Reflectivity fields (DBZH, DBZV, ZDR, RHOHV, PHIDP, KDP)
+  - Subset 01: Full dual-pol fields (DBZH, DBZV, ZDR, RHOHV, PHIDP, KDP)
   - Subset 02: Velocity fields (VRAD, WRAD)
+  - Subset 04: Surveillance reflectivity only (DBZH) — used for "vigilant mode" volumes
 
 ---
 
@@ -1000,9 +1027,20 @@ export_to_geotiff(
 ### Naming Examples
 
 **Examples:**
-- `RMA1_20260401T205000Z_ZDR_00.tif` (RMA1 Filtered ZDR field, elevation 00 degrees → GeoTIFF)
-- `RMA1_20260401T205000Z_ZDR_00.png` (PNG equivalent, deprecated but kept for backward compt only)
-- `RMA2_20260401T205000Z_ZDRo_00.tif` (RMA2 Non-filtered (raw) Column-max field, elevation 00 degrees → GeoTIFF)
+- `RMA1_20260401T205000Z_ZDR_00.tif` — filtered ZDR field, elevation 00°, GeoTIFF (primary)
+- `RMA1_20260401T205000Z_ZDRo_00.tif` — raw/unfiltered ZDR field, elevation 00°, GeoTIFF
+- `RMA1_20260401T205000Z_ZDR_00.png` — PNG equivalent (deprecated, backward compatibility only)
+
+### Dual-Timestamp Write Behaviour
+
+Each COG product is written at **two timestamps** to aid consumer lookup:
+
+| Variant | Formula | Purpose |
+|---------|---------|---------|
+| **Ceiled** | `floor(obs_time + 10 min, 10 min)` | "Next" 10-minute boundary after observation |
+| **Rounded** | `round(obs_time, 10 min)` | Nearest 10-minute boundary |
+
+When the ceiled and rounded timestamps differ, both files are written (the rounded file is a copy of the ceiled one). When they are equal, only one file is written. This behaviour is intentional for `webmet25` compatibility and must not be changed.
 
 ### Folder Structure
 
@@ -1016,6 +1054,55 @@ ROOT_RADAR_PRODUCTS_PATH/
                 ├── RMA1_20260401T205000Z_ZDR_00.tif
                 ├── RMA1_20260401T205000Z_ZDRo_00.tif
                 └── RMA1_20260401T205000Z_ZDR_00.png ← deprecated
+```
+
+### Tops & Cores GeoJSON Convention
+
+```text
+{ROOT_TOPS_AND_CORES_PATH}/
+└── {radar_code}/
+    └── YYYY/
+        └── MM/
+            └── DD/
+                └── {radar_code}_{strategy}_{vol_nr}_{timestamp}_TOPS_CORES.geojson
+```
+Example: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
+
+**Critical rules:**
+- File is **NOT written** if both core and top lists are empty.
+- `observation_time` is always ISO 8601 UTC.
+- Coordinates are `[lon, lat]` — GeoJSON standard order.
+- Timestamp format in filename is `YYYYMMDDTHHMMSSZ` — same as COG filenames.
+- `webmet25` indexer depends on this filename pattern — never change it without
+  updating `TopsAndCoresFilenameParser` in the webmet25 repo.
+
+**GeoJSON schema per feature:**
+```json
+// Core feature:
+{
+  "type": "Feature",
+  "geometry": { "type": "Point", "coordinates": [lon, lat] },
+  "properties": {
+    "type": "core",
+    "intensity_dbz": 52,
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:38:54Z"
+  }
+}
+
+// Top feature:
+{
+  "type": "Feature",
+  "geometry": { "type": "Point", "coordinates": [lon, lat] },
+  "properties": {
+    "type": "top",
+    "altitude_m": 11200,
+    "dbz": 25.5,
+    "parent_core_dbz": 52,
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:38:54Z"
+  }
+}
 ```
 
 ### GeoTIFF Metadata Fields
@@ -1077,6 +1164,73 @@ ROOT_RADAR_PRODUCTS_PATH/
 - [INCOMPLETE] No production-specific configurations (e.g., `docker-compose.prod.yml`)
 - [INCOMPLETE] No Kubernetes manifests
 - [FIX] **Recommendation:** Create `deploy/k8s/` folder with Helm charts
+
+---
+
+## Memory Management Best Practices
+
+radarlib implements comprehensive memory cleanup to prevent leaks in long-running daemons.
+
+### Core Rules
+
+1. **Delete large numpy arrays after use in loops** — always `del field_data, grid_data, ppi` + `gc.collect()` in `finally` blocks
+2. **Use `TemporaryDirectory()` context managers** — never `mkdtemp()` (auto-cleanup on scope exit)
+3. **Call `gc.collect()` after heavy operations** — force collection of intermediate masked-array copies
+4. **Comprehensive `finally` blocks** — clean up even on exception paths
+
+### Key Utilities
+```python
+from radarlib.utils.memory_profiling import log_memory_usage, check_and_cleanup_memory
+
+log_memory_usage("Before loading radar")          # logs current RSS
+check_and_cleanup_memory(threshold_mb=1100.0)     # force GC if above threshold
+```
+
+### Memory Leak Investigation Checklist
+1. Are large numpy arrays explicitly deleted in loops?
+2. Are temporary directories using context managers?
+3. Is `gc.collect()` called after heavy operations?
+4. Do `finally` blocks clean up all large objects?
+5. Are intermediate copies in masking/filtering operations freed?
+6. Are PyART radar objects deleted after use?
+7. Is memory monitoring in place to track RSS growth?
+
+---
+
+## Rules When Adding New Config Keys
+
+| Setting type | Where to add |
+|---|---|
+| **Service-layer** (daemon toggles, poll intervals, paths, FTP) | `_DEFAULTS` in `app/config.py` only |
+| **Library internal** (colormaps, GRC thresholds, geometry, algorithm params) | `DEFAULTS` in `src/radarlib/config.py` only + convenience attribute |
+| **Both layers** (shared setting) | Both files with matching default values |
+
+- **Never** add `app/config.py` imports inside `src/radarlib/` — radarlib must remain usable as a standalone library.
+- After adding a key, add the matching entry in `genpro25.yml` (even if `None`).
+
+---
+
+## SDD Workflow — Follow This Every Time
+
+When given a task, strictly follow this cycle:
+
+### 1. PROPOSAL
+- Read `copilot-instructions.md` fully
+- Read the relevant section of `docs/radarlib_EN.md`
+- Read the relevant source files
+- Propose the code changes
+- Flag any conflict with the Output Contract immediately
+
+### 2. APPLY
+- Wait for approval or feedback
+- Adjust based on response
+- Provide final code only after confirmation
+
+### 3. ARCHIVE
+After code is applied, explicitly state:
+- Does `docs/radarlib_EN.md` need to be updated?
+- Does `copilot-instructions.md` need to be updated?
+- Does the Output Contract need to be updated?
 
 ---
 
