@@ -74,7 +74,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      NETCDF_RETENTION_DAYS: 180 # in days
+      # NETCDF_RETENTION_DAYS: 180 # in days
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -795,7 +795,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      NETCDF_RETENTION_DAYS: 180
+      # NETCDF_RETENTION_DAYS: 180
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -844,7 +844,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      NETCDF_RETENTION_DAYS: 180
+      # NETCDF_RETENTION_DAYS: 180
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app

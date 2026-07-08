@@ -104,13 +104,27 @@ Example: `RMA6_A_00_20260505163854_TOPS_CORES.geojson`
 
 GeoJSON schema per feature:
 ```json
+// Core feature:
 {
   "type": "Feature",
   "geometry": { "type": "Point", "coordinates": [lon, lat] },
   "properties": {
-    "type": "core",          ← "core" or "top"
-    "intensity_dbz": 52,     ← cores only (int)
-    "altitude_m": 11200,     ← tops only (int)
+    "type": "core",
+    "intensity_dbz": 52,           ← int, mean dBZ of the COLMAX blob
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:38:54Z"
+  }
+}
+
+// Top feature:
+{
+  "type": "Feature",
+  "geometry": { "type": "Point", "coordinates": [lon, lat] },
+  "properties": {
+    "type": "top",
+    "altitude_m": 11200,           ← int, altitude in metres of highest valid echo
+    "dbz": 25.5,                   ← float, reflectivity at the top point
+    "parent_core_dbz": 52,         ← int, mean_dbz of the parent core
     "radar_code": "RMA6",
     "observation_time": "2026-05-05T16:38:54Z"
   }
@@ -294,43 +308,55 @@ If you suspect a memory leak:
 ---
 
 ### Tops & Cores Detection Module
-File: app/io/cores_and_tops.py
-Entry point: generate_cores_and_tops(radargrid, config, output_dir)
-Called from: ProductGenerationDaemon after all COG products are written for a volume.
-Gate: config.ADD_TOPS_AND_CORES must be True — otherwise function is never called.
+File: `src/radarlib/io/pyart/cores_and_tops.py`
+Entry point: `generate_cores_and_tops(colmax_2d, dbzh_3d, x_coords, y_coords, z_coords, radar_lat, radar_lon, observation_time, radar_code, strategy, vol_nr, output_dir, rhohv_3d, rhohv_2d)`
+Called from: `ProductGenerationDaemon._generate_tops_and_cores()`, which is called inside
+`_generate_raw_cog_products_sync()` after unfiltered field COG loop but before filtered field loop.
+Gate: `config.ADD_TOPS_AND_CORES` must be True — otherwise `_generate_tops_and_cores()` is never called.
 
 **Algorithm Summary**
 
-Input: pyart.core.Grid (Cartesian, shape nz × ny × nx, 1000m/pixel typical)
+Inputs:
+- `colmax_2d` — 2D COLMAX array (NY, NX) from `column_max()`
+- `dbzh_3d` — 3D Cartesian DBZH array (NZ, NY, NX) from `apply_geometry()`
+- `x_coords`, `y_coords` — 2D Cartesian coordinate grids (NY, NX), radar-relative metres
+- `z_coords` — 1D altitude array (NZ), from `geometry.z_levels()`
+- `rhohv_3d` — optional 3D RhoHV (NZ, NY, NX), `None` when field absent
+- `rhohv_2d` — optional 2D RhoHV (NY, NX) at lowest sweep, `None` when field absent
 
-**Core detection (level 0):**
-1. Threshold VAR_CORE field at level 0 ≥ MIN_Z_CORE
-2. scipy.ndimage.label() for connected-component labelling
-3. Per blob: compute centroid (xc, yc) from grid.x['data'], grid.y['data']
-4. Reject blobs with range < MIN_RANGE
-5. RhoHV filter (if field present): mean RhoHV > 0.85 AND count > 2,
-OR max dBZ > MIN_Z_UP AND count > 5
-6. Deduplication: blobs within R_NUCLEOS → keep higher mean dBZ
+**Core detection** — `detect_cores_from_colmax()` in `src/radarlib/radar_grid/cores.py`:
+1. Threshold COLMAX 2D ≥ `CORES_MIN_Z`, exclude masked pixels
+2. `scipy.ndimage.label()` connected-component labelling (4-neighbour, conservative)
+3. Per blob: reject if pixel_count ≤ 1; compute centroid via `x_coords[mask].mean()` / `y_coords[mask].mean()`
+4. Reject blobs with centroid range < `CORES_MIN_RANGE`
+5. Quality gate: `rhohv_ok = (mean_rhohv > CORES_RHOHV_THRESHOLD) AND (pixel_count > CORES_MIN_PIXELS)` OR
+   `updraft_ok = (max_dbz > CORES_MIN_Z_UPDRAFT) AND (pixel_count > CORES_MIN_PIXELS_UPDRAFT)`
+6. Deduplication: pairs within `CORES_DEDUP_RADIUS` → **weighted-mean centroid** (weight = mean_dBZ),
+   keep strongest core's intensity stats
 
-**Top detection:**
-1. Per level: threshold DBZH ≥ MIN_Z_TOP, mask range < 25000m
-2. scipy.ndimage.label() per level
-3. Per blob: zt = grid.z['data'][iz] (scalar altitude for that level)
-4. Filter: zt > MIN_DEV AND mean RhoHV > 0.94 (if present) AND count > 2
-5. Deduplication: blobs within R_TOPES → keep higher zt
+**Top detection** — `detect_tops_from_cores()` in `src/radarlib/radar_grid/tops.py`:
+1. For each detected core: define a cylinder of radius `TOPS_DEDUP_RADIUS_M` around its (x_m, y_m)
+2. Scan all NZ levels top-to-bottom; for each level find grid cells within cylinder that are not masked
+3. Track the **highest altitude** where any valid (non-masked, > 0 dBZ) echo exists
+4. Record: position of max-dBZ pixel at that highest level, altitude, dBZ value
+5. Returns one top dict per core (or none if no valid echo found in cylinder)
+> Note: No MIN_Z_TOP, MIN_DEV, or RhoHV threshold is applied in this function.
+  The only parameter is the cylindrical search radius.
 
 **Coordinate conversion:**
-pyart.core.cartesian_to_geographic_aeqd(x, y, origin_lon, origin_lat) → (lon, lat)
+`pyart.core.transforms.cartesian_to_geographic_aeqd(x, y, origin_lon, origin_lat)` → (lon, lat)
 
 **Important Implementation Notes**
-- Uses scipy.ndimage.label() — NOT pyart.correct.find_objects() (which requires polar Radar objects)
-- Top detection loops per level, not 3D — preserves per-altitude semantics
-- grid.z['data'][iz] is a scalar (all pixels at level iz share the same altitude)
-- RhoHV field name resolved via pyart.config.get_field_name('cross_correlation_ratio')
-- Missing RhoHV → WARNING logged once, detection continues with relaxed filter
-- Missing VAR_CORE field → WARNING logged, function returns early
-- GeoJSON write failure → ERROR logged with traceback, never re-raised
-- Log at INFO: "CORES_TOPS radar={} time={} cores={} tops={} elapsed={}ms"
+- Uses `scipy.ndimage.label()` — NOT `pyart.correct.find_objects()` (which requires polar Radar objects)
+- Core detection operates on the 2D COLMAX grid, not on 3D levels
+- Top detection is core-anchored (cylindrical, per-core) — not independent per-level scanning
+- RhoHV field name resolved via `pyart.config.get_field_name('cross_correlation_ratio')`
+- Missing RhoHV → WARNING logged; detection continues with updraft-gate only for cores, no RhoHV gate for tops
+- Missing DBZH → WARNING logged, tops/cores skipped entirely
+- GeoJSON write failure → ERROR logged with traceback, never re-raised (must not abort COG generation)
+- 3D arrays (dbzh_3d, rhohv_3d) for tops/cores are **recomputed from scratch** after field loops are freed —
+  deliberate trade-off to keep memory bounded in the long-running daemon
+- Log at INFO: `"CORES_TOPS radar={} time={} cores={} tops={} elapsed={}ms"`
 
 ---
 
@@ -388,23 +414,40 @@ VOLUME_TYPES:                  →   VOLUME_TYPES: {"0315": {...}}  # kept intac
 ```
 
 ### Tops & Cores Config Keys
-The following keys were added to `_DEFAULTS` in `app/config.py` and to `genpro25.yaml`.
-They follow the standard two-layer config system — YAML overrides defaults, env vars
-override YAML.
 
-Key	Default	Type	Description
-ADD_TOPS_AND_CORES	False	bool	Gate flag — enables GeoJSON generation
-MIN_RANGE	12000	int	Min range from radar to process [m]
-MIN_DEV	9000	int	Min vertical development for tops [m]
-MIN_Z_TOP	20.0	float	Reflectivity threshold for tops [dBZ]
-MIN_Z_CORE	52.0	float	Reflectivity threshold for cores [dBZ]
-MIN_Z_UP	56.0	float	Violent updraft core threshold [dBZ]
-VAR_CORE	"COLMAX"	str	Field for core detection ("COLMAX" or "DBZH")
-R_NUCLEOS	8000	int	Deduplication radius for cores [m]
-R_TOPES	17000	int	Deduplication radius for tops [m]
+Tops & cores settings are split across both config layers:
 
-These are service-layer settings (rule 1) — they belong in `app/config.py` `_DEFAULTS` only,
-not in `src/radarlib/config.py`.
+**Service layer** — `app/config.py` `_DEFAULTS` (rule 1: daemon toggles / paths):
+
+| Key | Default | Type | Description |
+|---|---|---|---|
+| `ADD_TOPS_AND_CORES` | `False` | bool | Gate flag — enables GeoJSON generation |
+| `ROOT_TOPS_AND_CORES_PATH` | `"tops_and_cores"` | str | Root directory for GeoJSON output |
+
+**Library layer** — `src/radarlib/config.py` `DEFAULTS` (rule 2: algorithm thresholds):
+
+| Key | Default | Type | Description |
+|---|---|---|---|
+| `CORES_MIN_Z` | `40.0` | float | COLMAX threshold for blob detection [dBZ] |
+| `CORES_MIN_RANGE` | `10000.0` | float | Min centroid range from radar [m] |
+| `CORES_MIN_Z_UPDRAFT` | `58.0` | float | Violent updraft max-dBZ gate [dBZ] |
+| `CORES_DEDUP_RADIUS` | `5000.0` | float | Weighted-mean merge radius for cores [m] |
+| `CORES_RHOHV_THRESHOLD` | `0.85` | float | Min mean RhoHV to pass quality gate |
+| `CORES_MIN_PIXELS` | `4` | int | Min blob pixel count for RhoHV gate path |
+| `CORES_MIN_PIXELS_UPDRAFT` | `6` | int | Min blob pixel count for updraft gate path |
+| `TOPS_DEDUP_RADIUS_M` | `2000.0` | float | Cylindrical search radius around each core [m] |
+
+> `TOPS_DEDUP_RADIUS_M` is the **cylindrical search radius** used by `detect_tops_from_cores`,
+> not a deduplication parameter. There is no deduplication step for tops — one top is returned
+> per core.
+
+### Other Service-Layer Config Keys (app/config.py)
+
+| Key | Default | Type | Description |
+|---|---|---|---|
+| `FIELD_VALUE_MASKS` | `{}` | dict | Per-field value threshold masks applied post-interpolation. `Dict[field, {"min": float, "max": float}]`. Values outside range are masked to NaN in the COG. Example: `{"RHOHV": {"min": 0.3}}` |
+| `ROI_PARAMS_VOL01` | `None` | dict or None | Override geometry parameters for volume 01 |
+| `ROI_PARAMS_VOL02` | `None` | dict or None | Override geometry parameters for volume 02 |
 
 ### Rules When Adding New Config Keys
 1. **Service-layer settings** (daemon toggles, poll intervals, retention days, paths, FTP):

@@ -41,6 +41,175 @@ best_font() {
     fi
 }
 
+# ─── Helper: preprocess markdown for PDF/HTML rendering ─────────────────────
+preprocess_markdown_file() {
+    local input_file="$1"
+    local output_file="$2"
+
+    python3 - "$input_file" "$output_file" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+input_path = Path(sys.argv[1])
+output_path = Path(sys.argv[2])
+
+lines = input_path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+CHECKMARK_PATTERNS = [
+    r"\[CHECK\]",
+    r":white_check_mark:",
+    r"✅",
+    r"✔️",
+    r"✔",
+    r"☑️",
+    r"☑",
+    r"✓",
+]
+
+connector_line_re = re.compile(r"^\s*(\|.*|[vV])\s*$")
+node_line_re = re.compile(r"^\s*\[.+\].*$")
+key_functions_header_re = re.compile(r"^\s*\*\*(Funciones Clave|Key Functions):\*\*\s*$")
+bullet_line_re = re.compile(r"^\s*-\s+")
+
+
+def strip_checkmarks(text: str) -> str:
+    cleaned = text
+    for pattern in CHECKMARK_PATTERNS:
+        cleaned = re.sub(pattern, "", cleaned)
+    cleaned = re.sub(r"^\s*[-*+]\s{2,}", "- ", cleaned)
+    return cleaned
+
+
+def is_flow_block(block_lines: list[str]) -> bool:
+    if len(block_lines) < 4:
+        return False
+
+    connectors = sum(1 for line in block_lines if connector_line_re.match(line.rstrip("\n")))
+    nodes = sum(1 for line in block_lines if node_line_re.match(line.rstrip("\n")))
+    has_direction = any("--" in line or "->" in line or "→" in line for line in block_lines)
+
+    return connectors >= 2 and nodes >= 1 and has_direction
+
+
+def transform_block(block_lines: list[str]) -> list[str]:
+    if is_flow_block(block_lines):
+        return ["```text\n", *block_lines, "```\n"]
+    return block_lines
+
+
+SECTIONS_TO_STRIP = re.compile(
+    r"^## ("
+    r"Known Gaps & Risks"
+    r"|Brechas Conocidas & Riesgos"
+    r"|SDD Workflow — Follow This Every Time"
+    r"|Flujo de Trabajo SDD — Seguir Esto Siempre"
+    r"|Contributing"
+    r"|Contribuyendo"
+    r"|License"
+    r"|Licencia"
+    r"|Acknowledgments"
+    r"|Reconocimientos"
+    r")\s*$"
+)
+section_header_re = re.compile(r"^## ")
+
+
+def strip_sections(lines: list[str]) -> list[str]:
+    """Drop entire ## sections whose title matches SECTIONS_TO_STRIP."""
+    result: list[str] = []
+    skipping = False
+
+    for line in lines:
+        if section_header_re.match(line):
+            if SECTIONS_TO_STRIP.match(line):
+                skipping = True
+                continue
+            else:
+                skipping = False
+
+        if not skipping:
+            result.append(line)
+
+    return result
+
+
+def wrap_key_function_blocks(lines: list[str]) -> list[str]:
+    wrapped: list[str] = []
+    inside_fence = False
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.lstrip()
+
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            inside_fence = not inside_fence
+            wrapped.append(line)
+            index += 1
+            continue
+
+        if not inside_fence and key_functions_header_re.match(line.rstrip("\n")):
+            wrapped.append(line)
+            look_ahead = index + 1
+            bullet_block: list[str] = []
+
+            while look_ahead < len(lines) and bullet_line_re.match(lines[look_ahead]):
+                bullet_block.append(lines[look_ahead])
+                look_ahead += 1
+
+            if bullet_block:
+                wrapped.append("```text\n")
+                wrapped.extend(bullet_block)
+                wrapped.append("```\n")
+                index = look_ahead
+                continue
+
+        wrapped.append(line)
+        index += 1
+
+    return wrapped
+
+
+output_lines: list[str] = []
+paragraph_buffer: list[str] = []
+inside_fence = False
+
+cleaned_lines = [strip_checkmarks(original_line) for original_line in lines]
+cleaned_lines = strip_sections(cleaned_lines)
+cleaned_lines = wrap_key_function_blocks(cleaned_lines)
+
+for line in cleaned_lines:
+    stripped = line.lstrip()
+
+    if stripped.startswith("```") or stripped.startswith("~~~"):
+        if paragraph_buffer:
+            output_lines.extend(transform_block(paragraph_buffer))
+            paragraph_buffer = []
+        inside_fence = not inside_fence
+        output_lines.append(line)
+        continue
+
+    if inside_fence:
+        output_lines.append(line)
+        continue
+
+    if line.strip() == "":
+        if paragraph_buffer:
+            output_lines.extend(transform_block(paragraph_buffer))
+            paragraph_buffer = []
+        output_lines.append(line)
+        continue
+
+    paragraph_buffer.append(line)
+
+if paragraph_buffer:
+    output_lines.extend(transform_block(paragraph_buffer))
+
+output_path.write_text("".join(output_lines), encoding="utf-8")
+PY
+}
+
 # ─── Helper: generate PDF or HTML fallback ───────────────────────────────────
 generate_doc() {
     local output_pdf="$1"
@@ -49,6 +218,11 @@ generate_doc() {
     local title="$4"
     shift 4
     local md_files=("$@")
+    local tmp_dir
+    local preprocessed_files=()
+
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' RETURN
 
     echo "  → Archivos de entrada:"
     for f in "${md_files[@]}"; do
@@ -60,6 +234,13 @@ generate_doc() {
     done
     echo ""
 
+    for f in "${md_files[@]}"; do
+        local tmp_file
+        tmp_file="$tmp_dir/$(basename "$f")"
+        preprocess_markdown_file "$f" "$tmp_file"
+        preprocessed_files+=("$tmp_file")
+    done
+
     if command -v xelatex &> /dev/null; then
         local main_font mono_font
         main_font="$(best_font "DejaVu Serif" "Latin Modern Roman")"
@@ -69,7 +250,7 @@ generate_doc() {
         # the fonts were actually detected. This prevents fontspec errors from
         # XeLaTeX when a requested font isn't available on the system.
         pandoc_args=(
-            "${md_files[@]}"
+            "${preprocessed_files[@]}"
             -o "$output_pdf"
             --from markdown
             --toc
@@ -101,7 +282,7 @@ generate_doc() {
     else
         echo "  ⚠️  XeLaTeX no disponible — generando HTML en su lugar..."
 
-        pandoc "${md_files[@]}" \
+        pandoc "${preprocessed_files[@]}" \
             -o "$output_html" \
             --from markdown \
             --to html5 \
