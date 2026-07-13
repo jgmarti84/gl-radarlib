@@ -203,6 +203,7 @@ class DaemonManager:
             ftp_host=self.config.ftp_host,
             ftp_user=self.config.ftp_user,
             ftp_password=self.config.ftp_password,
+            start_date=self.config.start_date,
         )
         return ProductGenerationDaemon(product_config)
 
