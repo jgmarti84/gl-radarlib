@@ -276,6 +276,22 @@ generate_doc() {
             pandoc_args+=( -V monofont="$mono_font" )
         fi
 
+        # LaTeX header: enable line-breaking inside highlighted code blocks.
+        # fvextra redefines the fancyvrb Highlighting environment with breaklines
+        # so long lines with comments don't overflow the page.
+        local header_path="$SCRIPT_DIR/latex/code_block_wrap.tex"
+        if [ -f "$header_path" ]; then
+            pandoc_args+=( -H "$header_path" )
+        fi
+
+        # Lua filter: make inline code in table cells line-breakable.
+        # Without this, long \texttt{} strings (env var names, paths) overflow
+        # column boundaries because LaTeX has no break points after \_ or /.
+        local filter_path="$SCRIPT_DIR/filters/breakable_table_code.lua"
+        if [ -f "$filter_path" ]; then
+            pandoc_args+=( --lua-filter "$filter_path" )
+        fi
+
         pandoc "${pandoc_args[@]}"
 
         echo "  ✅ PDF generado: $output_pdf"
