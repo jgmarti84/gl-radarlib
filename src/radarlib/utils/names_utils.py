@@ -162,7 +162,7 @@ def extract_bufr_filename_components(filename: str) -> dict:
         return {
             "radar_name": match.group(1),
             "strategy": match.group(2),
-            "vol_nr": match.group(3),
+            "vol_nr": match.group(3).zfill(2),
             "field_type": match.group(4),
             "timestamp": match.group(5),
         }
@@ -214,7 +214,8 @@ def build_vol_types_regex(vol_types: Dict[str, Dict[str, list]]) -> Optional[re.
             for field in fields:
                 # Create pattern: _VOLCODE_VOLNR_FIELD_
                 # Using escaped characters to handle special regex chars
-                pattern = f"_{re.escape(vol_code)}_{re.escape(vol_nr)}_{re.escape(field)}_"
+                vol_nr_pat = r"0?" + re.escape(vol_nr.lstrip("0") or "0")
+                pattern = f"_{re.escape(vol_code)}_{vol_nr_pat}_{re.escape(field)}_"
                 patterns.append(pattern)
 
     if not patterns:
