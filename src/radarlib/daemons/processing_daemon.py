@@ -326,8 +326,13 @@ class ProcessingDaemon:
 
         Scans the downloads table for files belonging to volumes and determines
         if each volume is complete based on the expected field types.
-        Only fetches new files since the last registered volume to improve efficiency.
-        Filters out observations before the configured start_date.
+
+        In backfill mode (start_date set): scans from start_date always — never
+        advances the floor to latest_registered_volume_datetime, which would hide
+        backward-fill downloads that predate the newest registered volume.
+
+        In live mode (no start_date): uses latest_registered_volume_datetime as
+        the floor for efficiency, since the download daemon never goes backward.
         """
         logger.debug(f"Checking volume completeness for radar '{self.config.radar_name}'")
 
@@ -335,30 +340,53 @@ class ProcessingDaemon:
         conn = self.state_tracker._get_connection()
         cursor = conn.cursor()
 
-        # Get the latest registered volume's observation datetime to avoid re-processing
-        latest_volume_datetime = self.state_tracker.get_latest_registered_volume_datetime(self.config.radar_name)
-        # Parse ISO format datetime string if needed
-        if isinstance(latest_volume_datetime, str):
-            min_datetime = datetime.fromisoformat(latest_volume_datetime.replace("Z", "+00:00"))
-        else:
-            min_datetime = latest_volume_datetime
-
         if self.config.start_date:
-            # If start_date is configured, use it as minimum threshold
-            if min_datetime is None or self.config.start_date > min_datetime:
-                min_datetime = self.config.start_date
+            # Backfill mode: always scan from start_date, never advance the floor to
+            # latest_registered_volume_datetime. Backward-fill downloads have
+            # observation_datetime < the latest registered volume and would be permanently
+            # invisible if the floor advanced. Already-processed volumes are skipped by
+            # the idempotency check below.
+            cursor.execute(
+                """
+                SELECT filename, radar_name, strategy, vol_nr, field_type, observation_datetime, local_path
+                FROM downloads
+                WHERE radar_name = ? AND status = 'completed'
+                    AND observation_datetime >= ?
+                ORDER BY observation_datetime
+                """,
+                (self.config.radar_name, self.config.start_date.isoformat()),
+            )
+        else:
+            # Live mode: the download daemon never goes backward, so using the latest
+            # registered volume as the floor is correct and efficient.
+            latest_volume_datetime = self.state_tracker.get_latest_registered_volume_datetime(self.config.radar_name)
+            if isinstance(latest_volume_datetime, str):
+                min_datetime = datetime.fromisoformat(latest_volume_datetime.replace("Z", "+00:00"))
+            else:
+                min_datetime = latest_volume_datetime
 
-        # Fetch files with observation_datetime >= min_datetime
-        cursor.execute(
-            """
-            SELECT filename, radar_name, strategy, vol_nr, field_type, observation_datetime, local_path
-            FROM downloads
-            WHERE radar_name = ? AND status = 'completed'
-                AND observation_datetime >= ?
-            ORDER BY observation_datetime
-        """,
-            (self.config.radar_name, min_datetime.isoformat()),
-        )
+            if min_datetime is not None:
+                cursor.execute(
+                    """
+                    SELECT filename, radar_name, strategy, vol_nr, field_type, observation_datetime, local_path
+                    FROM downloads
+                    WHERE radar_name = ? AND status = 'completed'
+                        AND observation_datetime >= ?
+                    ORDER BY observation_datetime
+                    """,
+                    (self.config.radar_name, min_datetime.isoformat()),
+                )
+            else:
+                # First cycle in live mode with no registered volumes yet — scan all completed downloads
+                cursor.execute(
+                    """
+                    SELECT filename, radar_name, strategy, vol_nr, field_type, observation_datetime, local_path
+                    FROM downloads
+                    WHERE radar_name = ? AND status = 'completed'
+                    ORDER BY observation_datetime
+                    """,
+                    (self.config.radar_name,),
+                )
 
         files = cursor.fetchall()
         logger.info(f"Retrieved {len(files)} downloaded files for completeness check")
