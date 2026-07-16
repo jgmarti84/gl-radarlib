@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -85,6 +86,7 @@ class ProductGenerationDaemonConfig:
     ftp_host: Optional[str] = config.FTP_HOST
     ftp_user: Optional[str] = config.FTP_USER
     ftp_password: Optional[str] = config.FTP_PASS
+    start_date: Optional[datetime] = None
 
     def __post_init__(self):
         # Validate product type
@@ -299,6 +301,7 @@ class ProductGenerationDaemon:
                 ftp_user=self.config.ftp_user,
                 ftp_pass=self.config.ftp_password,
                 lookback_hours=config.GEOMETRY_BUFR_LOOKBACK_HOURS,
+                reference_dt=self.config.start_date,
             )
             gate_coords_file_path = str(created_coords_file_path)
             logger.info(f"Created gate coordinates file: {gate_coords_file_path}")

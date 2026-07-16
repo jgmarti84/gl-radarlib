@@ -21,23 +21,47 @@ PRODUCT_UNITS = {
 
 
 def _find_reference_field(fields: List[dict]) -> int:
-    """Return the index of the field that has the farthest range.
+    """Return the index of the best reference field for grid alignment.
 
-    The input is expected to be a list where each element contains an
-    `'info'` dict with a `'sweeps'` DataFrame including `gate_offset`,
-    `gate_size` and `ngates`.
+    The reference field defines the common range grid onto which all other
+    fields are aligned. It is chosen by two criteria applied in order:
+
+    1. Minimum gate_offset — ensures every other field starts at or after
+       the reference grid origin so that alignment indices are always >= 0.
+    2. Maximum last_gate within that minimum-offset group — gives the widest
+       possible grid, reducing the chance of overflow for long-range fields.
+
+    This handles radars (e.g. RMA20) where polarimetric fields such as PHIDP
+    and RHOHV start half a gate later than reflectivity fields: those fields
+    end up with the largest last_gate and would previously be chosen as
+    reference, causing negative alignment indices for all earlier-starting
+    fields.
     """
     if not fields:
         raise ValueError("no fields provided")
 
-    # Compute a per-field maximum last_gate distance and pick the field with the largest
-    # last gate. This is robust even when the concatenated sweeps do not contain a
-    # 'vol_id' column.
+    # First pass: find the minimum gate_offset across all valid fields.
+    min_offset = None
+    for f in fields:
+        sweeps = f.get("info", {}).get("sweeps")
+        if sweeps is None or sweeps.empty:
+            continue
+        offset = sweeps["gate_offset"].iloc[0]
+        if min_offset is None or offset < min_offset:
+            min_offset = offset
+
+    if min_offset is None:
+        raise ValueError("no valid fields with sweep geometry found")
+
+    # Second pass: among fields that share the minimum offset, pick the one
+    # with the largest last_gate (widest range coverage).
     max_last = -1
     max_idx = 0
     for i, f in enumerate(fields):
         sweeps = f.get("info", {}).get("sweeps")
         if sweeps is None or sweeps.empty:
+            continue
+        if sweeps["gate_offset"].iloc[0] != min_offset:
             continue
         last_gate = (sweeps["gate_offset"] + sweeps["gate_size"] * sweeps["ngates"]).max()
         if last_gate > max_last:

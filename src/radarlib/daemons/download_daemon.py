@@ -295,7 +295,7 @@ class DownloadDaemon:
                                     del components
                                 gc.collect()
 
-                    tasks.append(asyncio.create_task(download_one()))
+                        tasks.append(asyncio.create_task(download_one()))
 
                     await asyncio.gather(*tasks)
                     logger.info(f"[{self.radar_name}] Processed {len(files)} files.")

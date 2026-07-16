@@ -41,6 +41,7 @@ def create_gate_coords_file(
     ftp_pass: Optional[str] = None,
     lookback_hours: int = 72,
     max_download_attempts: int = 3,
+    reference_dt: Optional[datetime] = None,
 ):
     """Fetch one random BUFR file and save gate coordinates as compressed .npz.
 
@@ -89,7 +90,7 @@ def create_gate_coords_file(
     if not ftp_host or not ftp_user or not ftp_pass:
         raise ValueError("FTP credentials required (args or FTP_HOST/FTP_USER/FTP_PASS)")
 
-    dt_end = datetime.now(timezone.utc)
+    dt_end = reference_dt if reference_dt is not None else datetime.now(timezone.utc)
     dt_start = dt_end - timedelta(hours=lookback_hours)
 
     # build filename regex — restrict to specific fields if provided
@@ -98,8 +99,9 @@ def create_gate_coords_file(
             logger.warning("KDP is not well suited for building gate coordinates files, excluding it from field filter")
             field_names = [f for f in field_names if f.upper() != "KDP"]
         fields_alt = "|".join(re.escape(f) for f in field_names)
+        vol_nr_pat = r"0?" + re.escape(vol_nr.lstrip("0") or "0")
         pattern = re.compile(
-            rf"^.*_{re.escape(strategy_name)}_{re.escape(vol_nr)}_({fields_alt})_.*\.BUFR$",
+            rf"^.*_{re.escape(strategy_name)}_{vol_nr_pat}_({fields_alt})_.*\.BUFR$",
             re.IGNORECASE,
         )
         logger.info(
@@ -109,8 +111,9 @@ def create_gate_coords_file(
             vol_nr,
         )
     else:
+        vol_nr_pat = r"0?" + re.escape(vol_nr.lstrip("0") or "0")
         pattern = re.compile(
-            rf"^.*_{re.escape(strategy_name)}_{re.escape(vol_nr)}_.*\.BUFR$",
+            rf"^.*_{re.escape(strategy_name)}_{vol_nr_pat}_.*\.BUFR$",
             re.IGNORECASE,
         )
 

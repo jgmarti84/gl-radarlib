@@ -32,6 +32,18 @@ def test_find_reference_field():
     assert idx == 1
 
 
+def test_find_reference_field_prefers_min_offset():
+    # Reproduces the RMA20 case: PHIDP/RHOHV have a slightly larger gate_offset
+    # than DBZH/DBZV (half-gate shift), which gives them a marginally larger
+    # last_gate. The old logic chose PHIDP as reference, causing init=-1 for
+    # all 1440m-offset fields. The new logic picks the minimum-offset field.
+    dbzh = make_field("R_1_DBZH_1.BUFR", 653, 360, 1440, 360, 1.0)   # last_gate=236,520m
+    phidp = make_field("R_1_PHIDP_1.BUFR", 653, 360, 1620, 360, 1.0)  # last_gate=236,700m
+    # PHIDP has a larger last_gate but a larger offset — must NOT be chosen as reference.
+    idx = bufr_to_pyart_module._find_reference_field([dbzh, phidp])
+    assert idx == 0  # DBZH (min offset) should be the reference
+
+
 def test_align_field_to_reference():
     # reference 200 gates, field has offset 100 and 50 gates
     ref_ngates = 200

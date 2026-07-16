@@ -340,54 +340,51 @@ The `PRODUCT_TYPE` variable controls what format is generated:
 
 **Note:** In `raw_cog` mode, COLMAX is generated as its own single-band float32 COG product (via `_generate_colmax_cog()`), separately from the per-field pipeline. The `ADD_COLMAX` flag controls whether COLMAX is generated regardless of product type. `ADD_COLMAX` in the legacy `image` PNG mode generates a matplotlib PNG instead.
 
-### COLMAX (Column Maximum) Processing
+### GRC Quality Filters
 
-⚠️ **Note:** The `COLMAX_*` filter settings below are used by the legacy PNG generation pipeline only. In `raw_cog` mode, COLMAX is generated as a COG product using the `_generate_colmax_cog()` method with GRC gate filters instead of the COLMAX-specific thresholds below.
-
-| Variable | Description | Type | Default |
-|---|---|---|---|
-| `COLMAX_THRESHOLD` | Reflectivity threshold (dBZ) | `float` | `-3` |
-| `COLMAX_ELEV_LIMIT1` | Maximum elevation angle | `float` | `0.65` |
-| `COLMAX_RHOHV_FILTER` | Enable RhoHV filter | `bool` | `True` |
-| `COLMAX_RHOHV_UMBRAL` | RhoHV quality threshold | `float` | `0.8` |
-| `COLMAX_WRAD_FILTER` | Enable spectral width filter | `bool` | `True` |
-| `COLMAX_WRAD_UMBRAL` | Spectral width threshold | `float` | `4.6` |
-| `COLMAX_TDR_FILTER` | Enable ZDR filter | `bool` | `True` |
-| `COLMAX_TDR_UMBRAL` | ZDR threshold | `float` | `8.5` |
-
-### Visualization (Unfiltered Data)
+⚠️ **Important:** These parameters belong to the **library layer** (`radarlib.config`), not the service layer. They cannot be set via `genpro25.yml` — `product_daemon.py` reads them directly from `radarlib.config`. To override these values per radar, use **environment variables** (in `docker-compose.yml`) or a **JSON file** pointed to by the `RADARLIB_CONFIG` env var.
 
 | Variable | Description | Type | Default |
 |---|---|---|---|
-| `VMIN_REFL_NOFILTERS` | Reflectivity minimum | `int` | `-20` |
-| `VMAX_REFL_NOFILTERS` | Reflectivity maximum | `int` | `70` |
-| `CMAP_REFL_NOFILTERS` | Reflectivity colormap | `str` | `"grc_th"` |
-| `VMIN_RHOHV_NOFILTERS` | RhoHV minimum | `int` | `0` |
-| `VMAX_RHOHV_NOFILTERS` | RhoHV maximum | `int` | `1` |
-| `CMAP_RHOHV_NOFILTERS` | RhoHV colormap | `str` | `"grc_rho"` |
-| `VMIN_ZDR_NOFILTERS` | ZDR minimum | `float` | `-7.5` |
-| `VMAX_ZDR_NOFILTERS` | ZDR maximum | `float` | `7.5` |
-| `CMAP_ZDR_NOFILTERS` | ZDR colormap | `str` | `"grc_zdr"` |
-| `VMIN_VRAD_NOFILTERS` | Radial velocity minimum | `int` | `-30` |
-| `VMAX_VRAD_NOFILTERS` | Radial velocity maximum | `int` | `30` |
-| `CMAP_VRAD_NOFILTERS` | Radial velocity colormap | `str` | `"grc_vrad"` |
+| `GRC_RHV_FILTER` | Enable RhoHV gate filter | `bool` | `True` |
+| `GRC_RHV_THRESHOLD` | RhoHV minimum — gates **below** this value are excluded | `float` | `0.87` |
+| `GRC_WRAD_FILTER` | Enable spectral width gate filter | `bool` | `False` |
+| `GRC_WRAD_THRESHOLD` | Spectral width maximum — gates **above** this value are excluded | `float` | `4.6` |
+| `GRC_REFL_FILTER` | Enable reflectivity gate filter | `bool` | `True` |
+| `GRC_REFL_THRESHOLD` | Reflectivity minimum (dBZ) — gates **below** this value are excluded | `float` | `30` |
+| `GRC_ZDR_FILTER` | Enable ZDR gate filter | `bool` | `False` |
+| `GRC_ZDR_THRESHOLD` | ZDR maximum — gates **above** this value are excluded | `float` | `8.5` |
 
-### Visualization (Filtered Data)
+**Active filters with default config:** RhoHV (`< 0.87`) and Reflectivity (`< 30 dBZ`). WRAD and ZDR filters are off by default.
 
-| Variable | Description | Type | Default |
-|---|---|---|---|
-| `VMIN_REFL` | Reflectivity minimum (filtered) | `int` | `-20` |
-| `VMAX_REFL` | Reflectivity maximum (filtered) | `int` | `70` |
-| `CMAP_REFL` | Reflectivity colormap (filtered) | `str` | `"grc_th"` |
-| `VMIN_RHOHV` | RhoHV minimum (filtered) | `int` | `0` |
-| `VMAX_RHOHV` | RhoHV maximum (filtered) | `int` | `1` |
-| `CMAP_RHOHV` | RhoHV colormap (filtered) | `str` | `"grc_rho"` |
-| `VMIN_ZDR` | ZDR minimum (filtered) | `float` | `-2.0` |
-| `VMAX_ZDR` | ZDR maximum (filtered) | `float` | `7.5` |
-| `CMAP_ZDR` | ZDR colormap (filtered) | `str` | `"grc_zdr"` |
-| `VMIN_VRAD` | Radial velocity minimum (filtered) | `int` | `-15` |
-| `VMAX_VRAD` | Radial velocity maximum (filtered) | `int` | `15` |
-| `CMAP_VRAD` | Radial velocity colormap (filtered) | `str` | `"grc_vrad"` |
+**To override per radar (docker-compose.yml):**
+```yaml
+environment:
+  - GRC_RHV_THRESHOLD=0.70
+  - GRC_WRAD_FILTER=true
+  - GRC_WRAD_THRESHOLD=3.5
+  - GRC_REFL_THRESHOLD=20
+```
+
+**To override for all radars globally (shared JSON file):**
+
+Create a JSON file with the values you want to change from the defaults (e.g. `radarlib_overrides.json`):
+```json
+{
+  "GRC_RHV_THRESHOLD": 0.90,
+  "GRC_REFL_THRESHOLD": 25
+}
+```
+
+Then point every radar container to it via `RADARLIB_CONFIG`:
+```yaml
+environment:
+  - RADARLIB_CONFIG=/config/radarlib_overrides.json
+volumes:
+  - ./radarlib_overrides.json:/config/radarlib_overrides.json:ro
+```
+
+Individual env vars always win over the JSON file (load order: defaults → JSON file → env vars), so you can use the JSON as a network-wide baseline and per-service env vars to deviate on specific radars.
 
 ## Example: genpro25.yml
 
@@ -435,43 +432,6 @@ local:
     NETCDF_RETENTION_DAYS: 30.0
     GEOMETRY_BUFR_LOOKBACK_HOURS: 72
 
-  # COLMAX (Column Maximum) Reflectivity Settings
-  COLMAX:
-    COLMAX_THRESHOLD: -3
-    COLMAX_ELEV_LIMIT1: 0.65
-    COLMAX_RHOHV_FILTER: true
-    COLMAX_RHOHV_UMBRAL: 0.8
-    COLMAX_WRAD_FILTER: true
-    COLMAX_WRAD_UMBRAL: 4.6
-    COLMAX_TDR_FILTER: true
-    COLMAX_TDR_UMBRAL: 8.5
-
-  # Visualization (Unfiltered Data)
-  VISUALIZATION_NOFILTERS:
-    VMIN_REFL_NOFILTERS: -20
-    VMAX_REFL_NOFILTERS: 70
-    CMAP_REFL_NOFILTERS: "grc_th"
-    VMIN_ZDR_NOFILTERS: -7.5
-    VMAX_ZDR_NOFILTERS: 7.5
-    CMAP_ZDR_NOFILTERS: "grc_zdr"
-
-  # Visualization (Filtered Data)
-  VISUALIZATION_FILTERED:
-    VMIN_REFL: -20
-    VMAX_REFL: 70
-    CMAP_REFL: "grc_th"
-    VMIN_ZDR: -2.0
-    VMAX_ZDR: 7.5
-    CMAP_ZDR: "grc_zdr"
-
-  # GRC Quality Filters
-  GRC_FILTER:
-    GRC_RHV_FILTER: true
-    GRC_RHV_THRESHOLD: 0.55
-    GRC_WRAD_FILTER: true
-    GRC_WRAD_THRESHOLD: 4.6
-    GRC_ZDR_FILTER: true
-    GRC_ZDR_THRESHOLD: 8.5
 ```
 
 ---
