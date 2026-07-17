@@ -49,7 +49,7 @@ class DownloadDaemonConfig:
     bufr_download_max_delay: float = 30
     failed_file_retry_interval: int = 600  # Retry failed files every 10 minutes (in seconds)
     failed_file_retention_days: int = 1  # Keep retrying for up to 1 day
-    ftp_cycle_timeout: int = 120  # Max seconds for a single FTP poll cycle before timeout
+    ftp_cycle_timeout: int = 3600  # Max seconds for a single FTP poll cycle before timeout
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -241,9 +241,30 @@ class DownloadDaemon:
                 max_workers=self.config.max_concurrent_downloads,
             ) as client:
                 logger.debug(f"[{self.radar_name}] Connected to FTP server. Checking for new files...")
-                files = self.new_bufr_files(
-                    ftp_client=client, start_date=resume_date, end_date=None, vol_types=self.vol_types
-                )
+                # Run synchronous FTP traversal in a thread so the event loop stays alive.
+                # A background task keeps the watchdog heartbeat fresh during long backfill
+                # traversals that can take many minutes.
+                async def _refresh_heartbeat():
+                    while True:
+                        self._last_heartbeat = datetime.now(timezone.utc)
+                        await asyncio.sleep(30)
+
+                self._last_heartbeat = datetime.now(timezone.utc)
+                _heartbeat_task = asyncio.create_task(_refresh_heartbeat())
+                try:
+                    files = await asyncio.to_thread(
+                        self.new_bufr_files,
+                        ftp_client=client,
+                        start_date=resume_date,
+                        end_date=None,
+                        vol_types=self.vol_types,
+                    )
+                finally:
+                    _heartbeat_task.cancel()
+                    try:
+                        await _heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
                 if files:
                     tasks = []
                     for remote, local, fname, dt, status in files:
