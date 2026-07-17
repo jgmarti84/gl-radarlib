@@ -1424,6 +1424,7 @@ def main() -> None:
     logger.info("DBZH 3D grid shape: %s", dbzh_3d.shape)
     colmax_2d = column_max(dbzh_3d, geometry=geometry)
     from radarlib.daemons.field_processor import apply_coverage_radius_mask
+
     colmax_2d = apply_coverage_radius_mask(colmax_2d, geometry, coverage_radius_m)
     logger.info("COLMAX 2D grid shape: %s", colmax_2d.shape)
 

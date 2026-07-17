@@ -241,6 +241,7 @@ class DownloadDaemon:
                 max_workers=self.config.max_concurrent_downloads,
             ) as client:
                 logger.debug(f"[{self.radar_name}] Connected to FTP server. Checking for new files...")
+
                 # Run synchronous FTP traversal in a thread so the event loop stays alive.
                 # A background task keeps the watchdog heartbeat fresh during long backfill
                 # traversals that can take many minutes.

@@ -126,13 +126,9 @@ def decode_field_geometry(local_path: str) -> FieldGeometry:
     sweeps = field_dict["info"]["sweeps"]
 
     if len(sweeps) > 1 and (
-        sweeps["gate_offset"].nunique() > 1
-        or sweeps["gate_size"].nunique() > 1
-        or sweeps["ngates"].nunique() > 1
+        sweeps["gate_offset"].nunique() > 1 or sweeps["gate_size"].nunique() > 1 or sweeps["ngates"].nunique() > 1
     ):
-        logger.warning(
-            "%s: geometry varies across sweeps — reporting sweep 0 values only", fname
-        )
+        logger.warning("%s: geometry varies across sweeps — reporting sweep 0 values only", fname)
 
     gate_offset = int(sweeps["gate_offset"].iloc[0])
     gate_size = int(sweeps["gate_size"].iloc[0])
@@ -180,9 +176,7 @@ def check_alignment(
             is_reference=is_reference,
             init=None,
             passes=False,
-            failure_reason=(
-                f"gate_size mismatch: field={field.gate_size}m vs ref={ref.gate_size}m"
-            ),
+            failure_reason=(f"gate_size mismatch: field={field.gate_size}m vs ref={ref.gate_size}m"),
         )
 
     if field.gate_offset == ref.gate_offset:
@@ -190,9 +184,7 @@ def check_alignment(
         init = 0
         passes = field.ngates <= ref.ngates
         reason = (
-            f"ngates overflow: field has {field.ngates} gates but ref only has {ref.ngates}"
-            if not passes
-            else None
+            f"ngates overflow: field has {field.ngates} gates but ref only has {ref.ngates}" if not passes else None
         )
     else:
         init = int((field.gate_offset - ref.gate_offset) // ref.gate_size)
@@ -245,10 +237,7 @@ def fetch_volume_from_ftp(
 
     # FTP path: /L2/{RADAR}/{YYYY}/{MM}/{DD}/{HH}/{MMSS}/
     ts = timestamp
-    ftp_dir = (
-        f"/L2/{radar}/{ts.year:04d}/{ts.month:02d}/{ts.day:02d}/"
-        f"{ts.hour:02d}/{ts.minute:02d}{ts.second:02d}"
-    )
+    ftp_dir = f"/L2/{radar}/{ts.year:04d}/{ts.month:02d}/{ts.day:02d}/" f"{ts.hour:02d}/{ts.minute:02d}{ts.second:02d}"
     logger.info("Searching FTP directory: %s", ftp_dir)
 
     local_paths: List[str] = []
@@ -261,9 +250,7 @@ def fetch_volume_from_ftp(
 
         bufr_files = [f for f in files if f.endswith(".BUFR") and f"_{vol_nr}_" in f.split("/")[-1]]
         if not bufr_files:
-            raise RuntimeError(
-                f"No BUFR files found in {ftp_dir} matching vol={vol_nr}"
-            )
+            raise RuntimeError(f"No BUFR files found in {ftp_dir} matching vol={vol_nr}")
 
         logger.info("Found %d BUFR files, downloading...", len(bufr_files))
         for remote in bufr_files:
@@ -418,8 +405,7 @@ Examples:
     parser.add_argument(
         "bufr_paths",
         nargs="*",
-        help="Local BUFR file paths (all fields of one volume). "
-        "Mutually exclusive with --radar/--timestamp.",
+        help="Local BUFR file paths (all fields of one volume). " "Mutually exclusive with --radar/--timestamp.",
     )
     parser.add_argument("--radar", help="Radar code for FTP fetch (e.g. RMA20)")
     parser.add_argument("--strategy", help="Strategy code (e.g. 0315)")
@@ -458,9 +444,7 @@ def main() -> None:
     elif args.radar and args.timestamp:
         # FTP mode
         try:
-            ts = datetime.strptime(args.timestamp, "%Y-%m-%d %H:%M:%S").replace(
-                tzinfo=timezone.utc
-            )
+            ts = datetime.strptime(args.timestamp, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         except ValueError:
             print(
                 f"✗ Invalid --timestamp format '{args.timestamp}' (use YYYY-MM-DD HH:MM:SS)",

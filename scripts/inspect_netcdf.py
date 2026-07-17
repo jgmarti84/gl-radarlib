@@ -59,7 +59,7 @@ def inspect(nc_path: str) -> None:
         print(f"[ERROR] File not found: {nc_path}", file=sys.stderr)
         sys.exit(1)
 
-    size_mb = p.stat().st_size / (1024 ** 2)
+    size_mb = p.stat().st_size / (1024**2)
 
     print(f"\n{SEP}")
     print(f"  NETCDF FILE: {p.name}")

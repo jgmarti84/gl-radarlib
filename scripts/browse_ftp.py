@@ -53,9 +53,7 @@ logger = logging.getLogger("browse_ftp")
 # ---------------------------------------------------------------------------
 
 
-def resolve_credentials(
-    host: Optional[str], user: Optional[str], password: Optional[str]
-) -> Tuple[str, str, str]:
+def resolve_credentials(host: Optional[str], user: Optional[str], password: Optional[str]) -> Tuple[str, str, str]:
     if host and user and password:
         return host, user, password
 
@@ -92,13 +90,13 @@ def resolve_credentials(
 #   drwxr-xr-x  2 user group    4096 Jan 15 10:30 name
 #   -rw-r--r--  1 user group 8388608 Jul 17 2024  name.bufr
 _LIST_RE = re.compile(
-    r"^([d\-lrwxst]{10})\s+"   # permissions
-    r"\d+\s+"                   # links
-    r"\S+\s+"                   # owner
-    r"\S+\s+"                   # group
-    r"(\d+)\s+"                 # size
+    r"^([d\-lrwxst]{10})\s+"  # permissions
+    r"\d+\s+"  # links
+    r"\S+\s+"  # owner
+    r"\S+\s+"  # group
+    r"(\d+)\s+"  # size
     r"(\w{3}\s+\d+\s+[\d:]+)\s+"  # date/time
-    r"(.+)$"                    # name (may contain spaces)
+    r"(.+)$"  # name (may contain spaces)
 )
 
 

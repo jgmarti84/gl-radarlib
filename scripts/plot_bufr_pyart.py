@@ -288,6 +288,7 @@ def main() -> None:
 
         if args.save_netcdf:
             import pyart as _pyart
+
             nc_path = Path(args.save_netcdf)
             nc_path.parent.mkdir(parents=True, exist_ok=True)
             _pyart.io.write_cfradial(str(nc_path), radar)
