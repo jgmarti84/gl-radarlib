@@ -287,9 +287,10 @@ def main() -> None:
         logger.info(f"Available fields: {list(radar.fields.keys())}")
 
         if args.save_netcdf:
+            import pyart as _pyart
             nc_path = Path(args.save_netcdf)
             nc_path.parent.mkdir(parents=True, exist_ok=True)
-            pyart.io.write_cfradial(str(nc_path), radar)
+            _pyart.io.write_cfradial(str(nc_path), radar)
             logger.info(f"Saved NetCDF: {nc_path}")
             print(f"NetCDF  : {nc_path}")
 
