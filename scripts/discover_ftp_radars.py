@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 discover_ftp_radars.py — List all radar folders on the FTP server and peek at
 the most recent BUFR file in each one.
@@ -52,9 +50,7 @@ SUB = "-" * 72
 # ---------------------------------------------------------------------------
 
 
-def resolve_credentials(
-    host: Optional[str], user: Optional[str], password: Optional[str]
-) -> Tuple[str, str, str]:
+def resolve_credentials(host: Optional[str], user: Optional[str], password: Optional[str]) -> Tuple[str, str, str]:
     """Resolve FTP credentials: CLI args > app/config.py > env vars."""
 
     if host and user and password:
@@ -218,9 +214,7 @@ def main() -> None:
         col_name = 14
         col_years = 7
         col_file = 52
-        print(
-            f"  {'FOLDER':<{col_name}}  {'YEARS':>{col_years}}  {'MOST RECENT FILE':<{col_file}}"
-        )
+        print(f"  {'FOLDER':<{col_name}}  {'YEARS':>{col_years}}  {'MOST RECENT FILE':<{col_file}}")
         print(f"  {SUB}")
 
         for folder in folders:

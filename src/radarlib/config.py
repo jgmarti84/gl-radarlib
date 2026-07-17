@@ -154,12 +154,7 @@ DEFAULTS: Dict[str, Any] = {
     "CORES_MIN_PIXELS": 4,
     "CORES_MIN_PIXELS_UPDRAFT": 6,
     # Storm tops detection thresholds
-    # "TOPS_MIN_RANGE_M": 25000.0,
-    # "TOPS_MIN_DEV_M": 9000.0,
-    # "TOPS_MIN_Z": 20.0,
-    # "TOPS_RHOHV_THRESHOLD": 0.94,
     "TOPS_DEDUP_RADIUS_M": 2000.0,
-    # "TOPS_MIN_PIXELS": 2,
     # Feature flags
     "ADD_TOPS_AND_CORES": False,
 }
@@ -328,7 +323,9 @@ ADD_TOPS_AND_CORES: bool = get("ADD_TOPS_AND_CORES")
 
 # Pre-compiled regex pattern for BUFR filename parsing (efficiency optimization)
 # Format: RADAR_VOLCODE_VOLNR_FIELD_TIMESTAMP.BUFR
-_BUFR_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{1,2})_([A-Z]{2,10})_(\d{8}T\d{6}Z)\.BUFR$", re.IGNORECASE)
+_BUFR_FILENAME_PATTERN = re.compile(
+    r"^([A-Z0-9]+)_(\d{4})_(\d{1,2})_([A-Z]{2,10})_(\d{8}T\d{6}Z)\.BUFR$", re.IGNORECASE
+)
 _NETCDF_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{4})_(\d{2})_(\d{8}T\d{6}Z)\.nc$", re.IGNORECASE)
 _COG_FILENAME_PATTERN = re.compile(r"^([A-Z0-9]+)_(\d{8}T\d{6}Z)_([A-Z0-9]+?)(o?)_(\d{2})\.tif$", re.IGNORECASE)
 
