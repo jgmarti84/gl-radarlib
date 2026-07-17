@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 fetch_and_inspect_arx.py — Download the most recent BUFR file for a given radar
 and run a full structural inspection on it.
@@ -49,9 +47,7 @@ SEP = "=" * 72
 # ---------------------------------------------------------------------------
 
 
-def resolve_credentials(
-    host: Optional[str], user: Optional[str], password: Optional[str]
-) -> Tuple[str, str, str]:
+def resolve_credentials(host: Optional[str], user: Optional[str], password: Optional[str]) -> Tuple[str, str, str]:
     if host and user and password:
         return host, user, password
 
@@ -108,10 +104,7 @@ def find_latest_file(
                     for h in latest(client.list_dir(f"{base}/{y}/{m}/{d}")):
                         for ms in latest(client.list_dir(f"{base}/{y}/{m}/{d}/{h}")):
                             minute_path = f"{base}/{y}/{m}/{d}/{h}/{ms}"
-                            files = [
-                                f for f in client.list_dir(minute_path)
-                                if f.upper().endswith(".BUFR")
-                            ]
+                            files = [f for f in client.list_dir(minute_path) if f.upper().endswith(".BUFR")]
                             for fname in sorted(files, reverse=True):
                                 if vol_filter:
                                     # Filename: {radar}_{strategy}_{vol}_{field}_{ts}.BUFR
@@ -199,7 +192,7 @@ def main() -> None:
         print(f"  Save  : {local_path}")
 
         # --- Step 2: download ---
-        print(f"\n[2/3] Downloading ...")
+        print("\n[2/3] Downloading ...")
         try:
             client.download_file(ftp_path, local_path)
             size_kb = local_path.stat().st_size / 1024
@@ -209,7 +202,7 @@ def main() -> None:
             sys.exit(1)
 
     # --- Step 3: inspect (runs outside FTP context) ---
-    print(f"\n[3/3] Structural inspection:")
+    print("\n[3/3] Structural inspection:")
     print(SEP)
 
     try:
@@ -222,6 +215,7 @@ def main() -> None:
     except Exception as e:
         print(f"\n✗ Inspection failed: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         print(
             f"\n  The file is saved at: {local_path}\n"
@@ -234,9 +228,9 @@ def main() -> None:
     print(f"\n{SEP}")
     print(f"  File saved at: {local_path}")
     print(f"  FTP path     : {ftp_path}")
-    print(f"\n  To re-inspect later:")
+    print("\n  To re-inspect later:")
     print(f"    python3 scripts/inspect_bufr_scan.py {local_path}")
-    print(f"\n  To get geometry detail:")
+    print("\n  To get geometry detail:")
     print(f"    python3 scripts/get_bufr_geometry.py {local_path}")
     print(SEP + "\n")
 
