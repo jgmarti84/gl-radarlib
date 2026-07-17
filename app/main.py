@@ -113,6 +113,7 @@ def main():
         product_type=config.PRODUCT_TYPE,  # type: ignore
         add_colmax=config.ADD_COLMAX,  # type: ignore
         add_tops_and_cores=config.ADD_TOPS_AND_CORES,  # type: ignore
+        tops_and_cores_vol_nr=config.get_config("TOPS_AND_CORES_VOL_NR", default="01"),  # type: ignore
         tops_and_cores_dir=Path(os.path.join(config.ROOT_TOPS_AND_CORES_PATH, radar_name)),  # type: ignore
         field_value_masks=config.get_config("FIELD_VALUE_MASKS", default={}),  # type: ignore
         enable_cleanup_daemon=config.ENABLE_CLEANUP_DAEMON,  # type: ignore

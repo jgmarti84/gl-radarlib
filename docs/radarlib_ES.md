@@ -312,6 +312,7 @@ Estas variables controlan el comportamiento de los daemons de la capa de servici
 | `PRODUCT_TYPE` | Formato de salida (ver abajo) | `str` | `"raw_cog"` |
 | `ADD_COLMAX` | Generar producto COG de COLMAX (reflectividad máxima columnar) | `bool` | `True` |
 | `ADD_TOPS_AND_CORES` | Generar producto GeoJSON de topes y núcleos convectivos | `bool` | `False` |
+| `TOPS_AND_CORES_VOL_NR` | Número de volumen cuyo escaneo DBZH se usa para la detección de topes y núcleos. Solo los volúmenes con este número disparan la detección; los demás se omiten. | `str` | `"01"` |
 | `ROOT_TOPS_AND_CORES_PATH` | Directorio raíz para salida GeoJSON de topes y núcleos | `str` | `"tops_and_cores"` |
 | `START_DATE` | Iniciar descargas desde esta fecha (UTC) | `datetime` o `None` | `None` |
 | `FIELD_VALUE_MASKS` | Máscaras de umbral de valor por campo aplicadas post-interpolación antes de escritura COG. Valores fuera del rango se enmascaran a NaN. Ejemplo: `{"RHOHV": {"min": 0.3}}` | `dict` | `{}` |
@@ -418,6 +419,7 @@ local:
     PRODUCT_TYPE: "raw_cog"            # Opciones: "image" (PNG), "geotiff", "raw_cog" (recomendado)
     ADD_COLMAX: true                   # Generar producto COG de COLMAX
     ADD_TOPS_AND_CORES: false          # Generar GeoJSON de topes y núcleos convectivos
+    TOPS_AND_CORES_VOL_NR: "01"        # Volumen cuyo DBZH se usa para topes+núcleos (debe ser el escaneo 3-D completo)
     ROOT_TOPS_AND_CORES_PATH: "tops_and_cores"  # Directorio raíz para salida GeoJSON
 
   # Máscaras de valor por campo (aplicadas post-interpolación, antes de escritura COG)
