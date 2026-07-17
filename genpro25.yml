@@ -31,6 +31,7 @@ local:
     PRODUCT_TYPE: "raw_cog" # "image", "geotiff" or "raw_cog"
     ADD_COLMAX: True # Set to True to add Colmax products
     ADD_TOPS_AND_CORES: True # Set to True to generate cores+tops GeoJSON products
+    TOPS_AND_CORES_VOL_NR: "01" # Volume number to use for tops+cores detection (vol01 = full polarimetric scan)
     FIELD_VALUE_MASKS:
       RHOHV:
         min: 0.3

@@ -6,7 +6,7 @@ local:
 
   VOLUME_TYPES:
     "1000":
-      "01":
+      "03":
         - DBZH
 
 

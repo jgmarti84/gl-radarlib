@@ -172,6 +172,12 @@ Examples:
         help="Output PNG as base64 to stdout instead of file (useful for Docker; pipe to 'base64 -d > output.png')",
     )
     parser.add_argument(
+        "--save-netcdf",
+        default=None,
+        metavar="PATH",
+        help="Also save the decoded PyART radar as CFRadial NetCDF to this path.",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING"],
@@ -279,6 +285,15 @@ def main() -> None:
 
         logger.info(f"PyART radar: ngates={radar.ngates}, nrays={radar.nrays}, " f"nsweeps={radar.nsweeps}")
         logger.info(f"Available fields: {list(radar.fields.keys())}")
+
+        if args.save_netcdf:
+            import pyart as _pyart
+
+            nc_path = Path(args.save_netcdf)
+            nc_path.parent.mkdir(parents=True, exist_ok=True)
+            _pyart.io.write_cfradial(str(nc_path), radar)
+            logger.info(f"Saved NetCDF: {nc_path}")
+            print(f"NetCDF  : {nc_path}")
 
         # Validate sweep index
         if args.sweep >= radar.nsweeps:

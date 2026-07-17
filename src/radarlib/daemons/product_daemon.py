@@ -65,6 +65,12 @@ class ProductGenerationDaemonConfig:
                         via :func:`~radarlib.radar_grid.remap_cog_colormap` or
                         :func:`~radarlib.radar_grid.read_cog_tile_as_rgba`
         add_colmax: Whether to generate COLMAX field (only for 'image' product type)
+        add_tops_and_cores: Whether to generate convective tops & cores GeoJSON products.
+        tops_and_cores_vol_nr: Volume number whose DBZH is used for tops & cores detection.
+            Only volumes whose ``vol_nr`` matches this value will trigger detection.
+            Defaults to ``"01"`` (the full multi-elevation polarimetric scan). Set this
+            explicitly if your strategy uses a different volume number for the 3-D scan.
+        tops_and_cores_output_dir: Directory to write tops & cores GeoJSON files.
         stuck_volume_timeout_minutes: Minutes to wait before resetting a stuck volume from
                                       'processing' status back to 'pending' for retry
     """
@@ -79,6 +85,7 @@ class ProductGenerationDaemonConfig:
     product_type: str = "image"
     add_colmax: bool = True
     add_tops_and_cores: bool = False
+    tops_and_cores_vol_nr: str = "01"
     tops_and_cores_output_dir: Optional[Path] = None
     stuck_volume_timeout_minutes: int = 60
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
@@ -843,7 +850,7 @@ class ProductGenerationDaemon:
             # --- Tops & Cores (after unfiltered loop so large arrays are freed) ---------
             # NOTE: 3D arrays freed inside each iteration's finally block above.
             # Tops/cores grids are recomputed on demand — deliberate documented exception.
-            if self.config.add_tops_and_cores:
+            if self.config.add_tops_and_cores and volume_info.get("vol_nr") == self.config.tops_and_cores_vol_nr:
                 self._generate_tops_and_cores(
                     radar=radar,
                     geom=geom,
@@ -1263,6 +1270,7 @@ class ProductGenerationDaemon:
         """
         import gc
 
+        from radarlib.daemons.field_processor import apply_coverage_radius_mask
         from radarlib.io.pyart.cores_and_tops import generate_cores_and_tops
         from radarlib.radar_grid import apply_geometry, column_max, constant_elevation_ppi, get_field_data
         from radarlib.utils.names_utils import get_time_from_RMA_filename
@@ -1279,6 +1287,8 @@ class ProductGenerationDaemon:
                 _ct_dbzh_3d = apply_geometry(geom, _ct_fd)
                 del _ct_fd
                 _ct_colmax_2d = column_max(_ct_dbzh_3d, geometry=geom)
+                coverage_radius_m = float(radar.range["data"][-1])
+                _ct_colmax_2d = apply_coverage_radius_mask(_ct_colmax_2d, geom, coverage_radius_m)
             else:
                 logger.warning(
                     f"[{self.config.radar_name}] Tops/cores: reflectivity field "

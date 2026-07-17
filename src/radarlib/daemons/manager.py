@@ -77,6 +77,7 @@ class DaemonManagerConfig:
     product_type: str = "image"
     add_colmax: bool = True
     add_tops_and_cores: bool = False
+    tops_and_cores_vol_nr: str = "01"
     tops_and_cores_dir: Optional[Path] = None
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
     field_value_masks: Optional[Dict[str, Dict[str, float]]] = None
@@ -197,6 +198,7 @@ class DaemonManager:
             product_type=self.config.product_type,
             add_colmax=self.config.add_colmax,
             add_tops_and_cores=self.config.add_tops_and_cores,
+            tops_and_cores_vol_nr=self.config.tops_and_cores_vol_nr,
             tops_and_cores_output_dir=self.tops_and_cores_dir,
             geometry_types=self.config.geometry_types,
             field_value_masks=self.config.field_value_masks or {},
