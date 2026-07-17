@@ -1387,6 +1387,7 @@ def main() -> None:
 
     radar_lat: float = float(radar.latitude["data"].data[0])
     radar_lon: float = float(radar.longitude["data"].data[0])
+    coverage_radius_m: float = float(radar.range["data"][-1])
     logger.info("Radar location: lat=%.4f  lon=%.4f", radar_lat, radar_lon)
 
     # ------------------------------------------------------------------
@@ -1422,6 +1423,8 @@ def main() -> None:
 
     logger.info("DBZH 3D grid shape: %s", dbzh_3d.shape)
     colmax_2d = column_max(dbzh_3d, geometry=geometry)
+    from radarlib.daemons.field_processor import apply_coverage_radius_mask
+    colmax_2d = apply_coverage_radius_mask(colmax_2d, geometry, coverage_radius_m)
     logger.info("COLMAX 2D grid shape: %s", colmax_2d.shape)
 
     valid_colmax = colmax_2d[~np.isnan(colmax_2d)]

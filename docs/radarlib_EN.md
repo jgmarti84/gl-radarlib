@@ -312,6 +312,7 @@ These variables control the Genpro25 service layer daemon behavior and are defin
 | `PRODUCT_TYPE` | Output format (see below) | `str` | `"raw_cog"` |
 | `ADD_COLMAX` | Generate COLMAX (column-max reflectivity) COG product | `bool` | `True` |
 | `ADD_TOPS_AND_CORES` | Generate convective tops & cores GeoJSON product | `bool` | `False` |
+| `TOPS_AND_CORES_VOL_NR` | Volume number whose DBZH scan is used for tops & cores detection. Only volumes matching this value trigger detection; all other volumes are skipped. | `str` | `"01"` |
 | `ROOT_TOPS_AND_CORES_PATH` | Root directory for tops & cores GeoJSON output | `str` | `"tops_and_cores"` |
 | `START_DATE` | Begin downloads from this date (UTC) | `datetime` or `None` | `None` |
 | `FIELD_VALUE_MASKS` | Per-field value threshold masks applied post-interpolation before COG write. Values outside range are masked to NaN. Example: `{"RHOHV": {"min": 0.3}}` | `dict` | `{}` |
@@ -418,6 +419,7 @@ local:
     PRODUCT_TYPE: "raw_cog"            # Options: "image" (PNG), "geotiff", "raw_cog" (recommended)
     ADD_COLMAX: true                   # Generate COLMAX COG product
     ADD_TOPS_AND_CORES: false          # Generate convective tops & cores GeoJSON
+    TOPS_AND_CORES_VOL_NR: "01"        # Volume whose DBZH is used for tops+cores (must be the full 3-D scan)
     ROOT_TOPS_AND_CORES_PATH: "tops_and_cores"  # Output root for GeoJSON
 
   # Per-field value masks (applied post-interpolation, before COG write)
