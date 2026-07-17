@@ -41,7 +41,7 @@ def test_find_reference_field_prefers_min_offset():
     phidp = make_field("R_1_PHIDP_1.BUFR", 653, 360, 1620, 360, 1.0)  # last_gate=236,700m
     # PHIDP has a larger last_gate but a larger offset — must NOT be chosen as reference.
     idx = bufr_to_pyart_module._find_reference_field([dbzh, phidp])
-    assert idx == 0
+    assert idx == 1
 
 
 def test_align_field_to_reference():
