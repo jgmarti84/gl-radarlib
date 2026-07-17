@@ -964,6 +964,102 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  genpro25-ar5:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    container_name: genpro25-ar5
+    volumes:
+      - ../product_output/AR5:/workspace/app/product_output/AR5
+      - ../logs/AR5:/workspace/app/logs/AR5
+      - ../geometry/AR5:/workspace/app/data/geometries
+      - ./genpro25_arX.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    environment:
+      RADAR_NAME: "AR5"
+      STREAM_LOG_LEVEL: "INFO" # debug, info, etc...
+      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
+      ROOT_CACHE_PATH: "/workspace/app/cache"
+      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+      ROOT_TOPS_AND_CORES_PATH: "/workspace/app/tops_and_cores"
+      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+      ROOT_LOGS_PATH: "/workspace/app/logs"
+      ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+      START_DATE: "2026-04-01T00:00:00:+00:00"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    working_dir: /workspace/app
+    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import psutil, sys; p = psutil.Process(); rss = p.memory_info().rss / 1024**3; sys.exit(0 if rss < 2.8 else 1)" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  genpro25-ar7:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    container_name: genpro25-ar7
+    volumes:
+      - ../product_output/AR7:/workspace/app/product_output/AR7
+      - ../logs/AR7:/workspace/app/logs/AR7
+      - ../geometry/AR7:/workspace/app/data/geometries
+      - ./genpro25_arX.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
+      - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
+      - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    environment:
+      RADAR_NAME: "AR7"
+      STREAM_LOG_LEVEL: "INFO" # debug, info, etc...
+      GENPRO25_CONFIG: "/workspace/app/genpro25.yml"
+      RADARLIB_CONFIG: "/workspace/app/radarlib_overrides.json"
+      ROOT_CACHE_PATH: "/workspace/app/cache"
+      ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
+      ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
+      ROOT_TOPS_AND_CORES_PATH: "/workspace/app/tops_and_cores"
+      ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
+      ROOT_LOGS_PATH: "/workspace/app/logs"
+      ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
+      START_DATE: "2026-04-01T00:00:00:+00:00"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    working_dir: /workspace/app
+    command: [ "bash", "-c", "mkdir -p /workspace/app/product_output && python main.py" ]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import psutil, sys; p = psutil.Process(); rss = p.memory_info().rss / 1024**3; sys.exit(0 if rss < 2.8 else 1)" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   genpro25-ar8:
     build:
       context: .
@@ -988,7 +1084,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      START_DATE: "2026-04-26T00:00:00:+00:00"
+      START_DATE: "2026-04-01T00:00:00:+00:00"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
