@@ -3,8 +3,8 @@
 browse_ftp.py — Interactive FTP browser for the SINARAME radar data server.
 
 Starts at /L2/ and lets you navigate the directory tree with simple commands.
-Understands the SINARAME folder structure and shows file sizes in human-readable
-form. Optionally download individual files.
+Shows file sizes and dates parsed from the server's LIST response.
+Optionally download individual files.
 
 Commands inside the browser:
   ls [path]        List current directory (or a sub-path)
@@ -35,9 +35,10 @@ import argparse
 import ftplib
 import logging
 import os
+import re
 import sys
 from pathlib import Path, PurePosixPath
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -84,6 +85,59 @@ def resolve_credentials(
 
 
 # ---------------------------------------------------------------------------
+# LIST line parser
+# ---------------------------------------------------------------------------
+
+# Matches Unix-style LIST lines:
+#   drwxr-xr-x  2 user group    4096 Jan 15 10:30 name
+#   -rw-r--r--  1 user group 8388608 Jul 17 2024  name.bufr
+_LIST_RE = re.compile(
+    r"^([d\-lrwxst]{10})\s+"   # permissions
+    r"\d+\s+"                   # links
+    r"\S+\s+"                   # owner
+    r"\S+\s+"                   # group
+    r"(\d+)\s+"                 # size
+    r"(\w{3}\s+\d+\s+[\d:]+)\s+"  # date/time
+    r"(.+)$"                    # name (may contain spaces)
+)
+
+
+def _parse_list_line(line: str) -> Optional[Dict]:
+    m = _LIST_RE.match(line.strip())
+    if not m:
+        return None
+    perms, size_str, date_str, name = m.groups()
+    return {
+        "name": name,
+        "is_dir": perms.startswith("d"),
+        "size": int(size_str),
+        "date": date_str.strip(),
+    }
+
+
+def _list_dir(ftp: ftplib.FTP, path: str) -> List[Dict]:
+    """Return parsed entries for *path* using LIST, fallback to bare NLST."""
+    lines: List[str] = []
+    try:
+        ftp.retrlines(f"LIST {path}", lines.append)
+    except ftplib.all_errors as e:
+        logger.debug(f"LIST failed for {path}: {e}")
+        # Fallback: NLST gives only names, no metadata
+        try:
+            names = ftp.nlst(path)
+            return [{"name": Path(n).name, "is_dir": False, "size": 0, "date": ""} for n in names]
+        except ftplib.all_errors:
+            return []
+
+    entries = []
+    for line in lines:
+        parsed = _parse_list_line(line)
+        if parsed and parsed["name"] not in (".", ".."):
+            entries.append(parsed)
+    return entries
+
+
+# ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
 
@@ -97,22 +151,6 @@ def _human_size(n: int) -> str:
             return f"{val:.1f} {unit}"
         val /= 1024
     return f"{val:.1f} {_UNITS[-1]}"
-
-
-def _parse_mlsd_entry(name: str, facts: dict) -> dict:
-    return {
-        "name": name,
-        "type": facts.get("type", "?"),
-        "size": int(facts["size"]) if "size" in facts else None,
-        "modify": facts.get("modify", ""),
-    }
-
-
-def _fmt_modify(modify: str) -> str:
-    # MLSD modify format: YYYYMMDDHHmmss
-    if len(modify) >= 12:
-        return f"{modify[:4]}-{modify[4:6]}-{modify[6:8]} {modify[8:10]}:{modify[10:12]}"
-    return modify
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +172,7 @@ class FTPBrowser:
         self.ftp.set_pasv(True)
         try:
             self.ftp.cwd(self.cwd)
+            self.cwd = self.ftp.pwd()
         except ftplib.error_perm:
             print(f"[warn] Could not cd to {self.cwd}, starting at /")
             self.cwd = "/"
@@ -165,41 +204,26 @@ class FTPBrowser:
         self._ensure_connected()
         target = self._resolve(path) if path else self.cwd
 
-        entries = []
-        try:
-            for name, facts in self.ftp.mlsd(target):  # type: ignore[union-attr]
-                if name in (".", ".."):
-                    continue
-                entries.append(_parse_mlsd_entry(name, facts))
-        except ftplib.error_perm as e:
-            print(f"[error] {e}")
-            return
-        except Exception:
-            # MLSD not supported — fall back to NLST
-            try:
-                names = self.ftp.nlst(target)  # type: ignore[union-attr]
-                entries = [{"name": Path(n).name, "type": "?", "size": None, "modify": ""} for n in sorted(names)]
-            except ftplib.error_perm as e:
-                print(f"[error] {e}")
-                return
+        entries = _list_dir(self.ftp, target)  # type: ignore[arg-type]
 
         if not entries:
             print("(empty)")
             return
 
-        dirs = sorted([e for e in entries if e["type"] == "dir"], key=lambda x: x["name"])
-        files = sorted([e for e in entries if e["type"] != "dir"], key=lambda x: x["name"])
+        dirs = sorted([e for e in entries if e["is_dir"]], key=lambda x: x["name"])
+        files = sorted([e for e in entries if not e["is_dir"]], key=lambda x: x["name"])
 
         col_name = max((len(e["name"]) for e in entries), default=20)
         col_name = max(col_name, 20)
 
-        print(f"\n  {'NAME':<{col_name}}  {'SIZE':>10}  {'MODIFIED'}")
+        print(f"\n  {'NAME':<{col_name}}  {'SIZE':>10}  {'DATE'}")
         print(f"  {'-'*col_name}  {'-'*10}  {'-'*16}")
         for e in dirs:
-            print(f"  \033[34m{'[' + e['name'] + ']':<{col_name}}\033[0m  {'':>10}  {_fmt_modify(e['modify'])}")
+            label = "[" + e["name"] + "]"
+            print(f"  \033[34m{label:<{col_name}}\033[0m  {'':>10}  {e['date']}")
         for e in files:
-            size_str = _human_size(e["size"]) if e["size"] is not None else ""
-            print(f"  {e['name']:<{col_name}}  {size_str:>10}  {_fmt_modify(e['modify'])}")
+            size_str = _human_size(e["size"]) if e["size"] else ""
+            print(f"  {e['name']:<{col_name}}  {size_str:>10}  {e['date']}")
 
         print(f"\n  {len(dirs)} dir(s), {len(files)} file(s)  —  {target}")
 
@@ -215,15 +239,18 @@ class FTPBrowser:
     def cmd_info(self, path: str) -> None:
         self._ensure_connected()
         target = self._resolve(path)
+
+        # Get size via SIZE command
         try:
             size = self.ftp.size(target)  # type: ignore[union-attr]
             size_str = _human_size(size) if size is not None else "unknown"
         except Exception:
             size_str = "unknown"
 
+        # Get mtime via MDTM
         try:
             mdtm = self.ftp.voidcmd(f"MDTM {target}").split()[-1]  # type: ignore[union-attr]
-            mod_str = _fmt_modify(mdtm)
+            mod_str = f"{mdtm[:4]}-{mdtm[4:6]}-{mdtm[6:8]} {mdtm[8:10]}:{mdtm[10:12]}" if len(mdtm) >= 12 else mdtm
         except Exception:
             mod_str = "unknown"
 
@@ -264,32 +291,18 @@ class FTPBrowser:
         def _walk(path: str, depth: int = 0) -> None:
             if depth > 8:
                 return
-            try:
-                entries = list(self.ftp.mlsd(path))  # type: ignore[union-attr]
-            except Exception:
-                try:
-                    names = self.ftp.nlst(path)  # type: ignore[union-attr]
-                    entries = [(Path(n).name, {"type": "file"}) for n in names]
-                except Exception:
-                    return
-
-            for name, facts in entries:
-                if name in (".", ".."):
-                    continue
-                full = f"{path.rstrip('/')}/{name}"
-                ftype = facts.get("type", "file")
-                if ftype == "dir":
+            for entry in _list_dir(self.ftp, path):  # type: ignore[arg-type]
+                full = f"{path.rstrip('/')}/{entry['name']}"
+                if entry["is_dir"]:
                     _walk(full, depth + 1)
-                else:
-                    if Path(name).match(pattern):
-                        size = int(facts["size"]) if "size" in facts else None
-                        size_str = _human_size(size) if size else ""
-                        found.append(f"  {full}  {size_str}")
+                elif Path(entry["name"]).match(pattern):
+                    size_str = _human_size(entry["size"]) if entry["size"] else ""
+                    found.append(f"  {full:<70}  {size_str:>10}")
 
         _walk(self.cwd)
         if found:
-            print(f"\n  {'PATH + SIZE'}")
-            print(f"  {'-'*60}")
+            print(f"\n  {'PATH':<70}  {'SIZE':>10}")
+            print(f"  {'-'*82}")
             for line in found:
                 print(line)
             print(f"\n  {len(found)} file(s) found.")
