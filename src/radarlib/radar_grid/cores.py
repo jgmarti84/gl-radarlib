@@ -178,9 +178,10 @@ def detect_cores_from_colmax(
             if pixel_count <= 1:
                 continue
 
-            # b) centroid
-            x_c = float(x_coords[blob_mask].mean())
-            y_c = float(y_coords[blob_mask].mean())
+            # b) centroid — dBZ-weighted to avoid geometric bias on L-shaped blobs
+            weights = colmax_data[blob_mask]
+            x_c = float(np.average(x_coords[blob_mask], weights=weights))
+            y_c = float(np.average(y_coords[blob_mask], weights=weights))
 
             # c) range from radar origin
             range_m = math.sqrt(x_c * x_c + y_c * y_c)

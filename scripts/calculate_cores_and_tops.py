@@ -63,6 +63,7 @@ import glob
 import json
 import logging
 import os
+import shutil
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -131,14 +132,42 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--datetime",
-        required=True,
+        required=False,
+        default=None,
         metavar="ISO8601",
         dest="obs_datetime",
         help=(
-            "Observation datetime in ISO 8601 UTC (e.g. 2026-04-23T07:07:21Z). "
+            "Single-scan mode: observation datetime in ISO 8601 UTC "
+            "(e.g. 2026-04-23T07:07:21Z). "
             "If no BUFR files exist at this exact time the script searches a "
             f"±{_DEFAULT_SEARCH_WINDOW_HOURS}h window and uses the closest "
-            "available pair of DBZH + RHOHV files."
+            "available pair of DBZH + RHOHV files. "
+            "Mutually exclusive with --start-datetime / --end-datetime."
+        ),
+    )
+    parser.add_argument(
+        "--start-datetime",
+        required=False,
+        default=None,
+        metavar="ISO8601",
+        dest="start_datetime",
+        help=(
+            "Batch mode: start of the processing window in ISO 8601 UTC "
+            "(e.g. 2026-07-22T12:00:00Z). "
+            "All scans with DBZH+RHOHV available between --start-datetime and "
+            "--end-datetime will be processed. "
+            "Mutually exclusive with --datetime."
+        ),
+    )
+    parser.add_argument(
+        "--end-datetime",
+        required=False,
+        default=None,
+        metavar="ISO8601",
+        dest="end_datetime",
+        help=(
+            "Batch mode: end of the processing window in ISO 8601 UTC "
+            "(e.g. 2026-07-22T13:00:00Z). Required when --start-datetime is set."
         ),
     )
 
@@ -1237,153 +1266,204 @@ def _print_report(geojson_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Timestamp rounding helpers (matching production daemon logic)
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
-        datefmt="%H:%M:%S",
-    )
+def _ceil_to_10min(dt: datetime) -> datetime:
+    """Return dt ceiled to the next 10-minute boundary (same as daemon ceiled_dt)."""
+    raw = dt + timedelta(minutes=10)
+    return raw.replace(minute=(raw.minute // 10) * 10, second=0, microsecond=0)
 
-    args = _build_parser().parse_args()
 
-    # ------------------------------------------------------------------
-    # 1. Parse the requested observation datetime
-    # ------------------------------------------------------------------
-    try:
-        obs_str = args.obs_datetime
-        if obs_str.endswith("Z"):
-            obs_str = obs_str[:-1] + "+00:00"
-        obs_time: datetime = datetime.fromisoformat(obs_str)
-        if obs_time.tzinfo is None:
-            obs_time = obs_time.replace(tzinfo=timezone.utc)
-    except ValueError as exc:
-        print(f"ERROR: Could not parse --datetime '{args.obs_datetime}': {exc}", file=sys.stderr)
-        sys.exit(1)
+def _round_to_10min(dt: datetime) -> datetime:
+    """Return dt rounded to the nearest 10-minute boundary (same as daemon rounded_dt)."""
+    rounded_min = round(dt.minute / 10) * 10
+    if rounded_min == 60:
+        return dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return dt.replace(minute=rounded_min, second=0, microsecond=0)
 
-    radar_name: str = args.radar_name
-    strategy: str = args.strategy
-    vol_nr: str = args.vol_nr
-    timestamp_str: str = obs_time.strftime("%Y%m%dT%H%M%SZ")
+
+def _parse_datetime(s: str) -> datetime:
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+# ---------------------------------------------------------------------------
+# Batch mode: FTP scan discovery
+# ---------------------------------------------------------------------------
+
+
+def _list_scan_pairs_in_window(
+    ftp_cfg: dict,
+    radar_name: str,
+    strategy: str,
+    vol_nr: str,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> List[Tuple[datetime, str, str, str, str]]:
+    """
+    Return all (obs_time, dbzh_remote, dbzh_fname, rhohv_remote, rhohv_fname)
+    pairs available on FTP within [start_dt, end_dt], sorted by obs_time.
+    """
+    from radarlib.io.ftp.ftp_client import RadarFTPClientAsync
+
+    host = ftp_cfg.get("FTP_HOST")
+    user = ftp_cfg.get("FTP_USER")
+    password = ftp_cfg.get("FTP_PASS")
+    if not all([host, user, password]):
+        raise RuntimeError("FTP credentials not configured.")
+
+    window_sec = (end_dt - start_dt).total_seconds()
+    mid_dt = start_dt + timedelta(seconds=window_sec / 2)
+    window_hours = window_sec / 3600 / 2 + 0.1
+
+    with RadarFTPClientAsync(host, user, password) as ftp_client:
+        files = _traverse_and_collect(ftp_client, radar_name, strategy, vol_nr, mid_dt, window_hours)
+
+    files = [(dt, fname, remote) for dt, fname, remote in files if start_dt <= dt <= end_dt]
+
+    dbzh_by_dt: dict = {}
+    rhohv_by_dt: dict = {}
+    for dt, fname, remote in files:
+        parts = fname.split("_")
+        if len(parts) < 5:
+            continue
+        field = parts[3].upper()
+        if field == "DBZH":
+            dbzh_by_dt[dt] = (fname, remote)
+        elif field == "RHOHV":
+            rhohv_by_dt[dt] = (fname, remote)
+
+    common_dts = sorted(set(dbzh_by_dt.keys()) & set(rhohv_by_dt.keys()))
+    result = []
+    for dt in common_dts:
+        dbzh_fname, dbzh_remote = dbzh_by_dt[dt]
+        rhohv_fname, rhohv_remote = rhohv_by_dt[dt]
+        result.append((dt, dbzh_remote, dbzh_fname, rhohv_remote, rhohv_fname))
 
     logger.info(
-        "Volume: radar=%s  strategy=%s  vol_nr=%s  time=%s",
-        radar_name,
-        strategy,
-        vol_nr,
-        timestamp_str,
+        "Found %d scan pairs in window [%s, %s].",
+        len(result),
+        start_dt.strftime("%Y%m%dT%H%M%SZ"),
+        end_dt.strftime("%Y%m%dT%H%M%SZ"),
     )
+    return result
+
+
+def _fetch_pair_to_netcdf(
+    ftp_cfg: dict,
+    dbzh_remote: str,
+    dbzh_fname: str,
+    rhohv_remote: str,
+    rhohv_fname: str,
+) -> Path:
+    """Download a located BUFR pair from FTP and decode to a temporary NetCDF file."""
+    from radarlib.io.bufr.pyart_writer import bufr_paths_to_pyart, save_radar_to_cfradial
+    from radarlib.io.ftp.ftp_client import RadarFTPClientAsync
+
+    host = ftp_cfg.get("FTP_HOST")
+    user = ftp_cfg.get("FTP_USER")
+    password = ftp_cfg.get("FTP_PASS")
+    if not all([host, user, password]):
+        raise RuntimeError("FTP credentials not configured.")
+
+    with RadarFTPClientAsync(host, user, password) as ftp_client:
+        with tempfile.TemporaryDirectory(prefix="radarlib_bufr_") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            dbzh_local = tmp_path / dbzh_fname
+            rhohv_local = tmp_path / rhohv_fname
+
+            logger.info("Downloading %s …", dbzh_fname)
+            ftp_client.download_file(dbzh_remote, dbzh_local)
+
+            logger.info("Downloading %s …", rhohv_fname)
+            ftp_client.download_file(rhohv_remote, rhohv_local)
+
+            logger.info("Decoding BUFR pair …")
+            radar = bufr_paths_to_pyart([str(dbzh_local), str(rhohv_local)])
+            if radar is None:
+                raise RuntimeError("bufr_paths_to_pyart returned None — decode failed.")
+
+            netcdf_tmp = Path(tempfile.mktemp(suffix=".nc", prefix="radarlib_nc_"))
+            save_radar_to_cfradial(radar, netcdf_tmp)
+            del radar
+            gc.collect()
+            return netcdf_tmp
+
+
+# ---------------------------------------------------------------------------
+# Per-scan processing pipeline
+# ---------------------------------------------------------------------------
+
+
+def _process_scan(
+    netcdf_path: Path,
+    actual_obs_time: datetime,
+    geometry,
+    xx: np.ndarray,
+    yy: np.ndarray,
+    z_1d: np.ndarray,
+    radar_name: str,
+    strategy: str,
+    vol_nr: str,
+    output_dir: Path,
+    args,
+    app_cfg: dict,
+) -> None:
+    """
+    Run the full detection pipeline for one radar volume and write output files.
+
+    Uses ceiled_dt for file naming and GeoJSON observation_time (matching the
+    production daemon).  When ceiled_dt ≠ rounded_dt a second GeoJSON copy is
+    written at the rounded timestamp — also matching daemon behaviour.
+    """
+    from radarlib.daemons.field_processor import apply_coverage_radius_mask
+    from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
+    from radarlib.radar_grid.interpolate import apply_geometry as _apply_geom
+    from radarlib.radar_grid.products import column_max, constant_elevation_ppi
+    from radarlib.radar_grid.utils import get_field_data
+    from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
+    import radarlib.config as _rlib_cfg
 
     # ------------------------------------------------------------------
-    # 2. Load service config (FTP creds + filesystem paths)
+    # Timestamp rounding — matches production daemon
     # ------------------------------------------------------------------
-    app_cfg = _load_app_config()
-    netcdf_dir = Path(app_cfg["ROOT_RADAR_FILES_PATH"]) / radar_name / "netcdf"
-    geometry_dir = Path(app_cfg["ROOT_GEOMETRY_PATH"])
+    ceiled_dt = _ceil_to_10min(actual_obs_time)
+    rounded_dt = _round_to_10min(actual_obs_time)
+    ceiled_ts = ceiled_dt.strftime("%Y%m%dT%H%M%SZ")
+    raw_ts = actual_obs_time.strftime("%Y%m%dT%H%M%SZ")
 
-    # ------------------------------------------------------------------
-    # 3. Import radarlib (deferred to allow sys.path setup above)
-    # ------------------------------------------------------------------
-    try:
-        from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
-        from radarlib.radar_grid.geometry import load_geometry
-        from radarlib.radar_grid.interpolate import apply_geometry
-        from radarlib.radar_grid.products import column_max
-        from radarlib.radar_grid.utils import get_field_data
-        from radarlib.utils.fields_utils import determine_reflectivity_fields
-    except ImportError as exc:
-        print(
-            f"ERROR: Could not import radarlib. Ensure the 'src/' directory is on "
-            f"PYTHONPATH or run from the repository root.\n  ImportError: {exc}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    # ------------------------------------------------------------------
-    # 4. Resolve the NetCDF (local cache or FTP fetch)
-    # ------------------------------------------------------------------
-    # Track whether we created a temp file that must be cleaned up.
-    _temp_netcdf: Optional[Path] = None
-    actual_obs_time = obs_time  # may be updated if we fetch a nearby datetime
-
-    netcdf_filename = _build_netcdf_filename(radar_name, strategy, vol_nr, obs_time)
-    netcdf_path = _find_netcdf(netcdf_dir, netcdf_filename)
-
-    if netcdf_path is None:
+    if ceiled_dt != rounded_dt:
         logger.info(
-            "NetCDF not found locally. Fetching BUFR files from FTP for %s %s-%s @ %s …",
-            radar_name,
-            strategy,
-            vol_nr,
-            timestamp_str,
+            "Timestamps: raw=%s  ceiled=%s  rounded=%s",
+            raw_ts, ceiled_ts, rounded_dt.strftime("%Y%m%dT%H%M%SZ"),
         )
-        try:
-            netcdf_path, actual_obs_time = _fetch_and_decode_bufr(
-                radar_name=radar_name,
-                strategy=strategy,
-                vol_nr=vol_nr,
-                obs_time=obs_time,
-                ftp_cfg=app_cfg,
-                window_hours=args.search_window_hours,
-            )
-        except RuntimeError as exc:
-            print(f"ERROR: BUFR fetch/decode failed: {exc}", file=sys.stderr)
-            sys.exit(1)
-
-        _temp_netcdf = netcdf_path  # remember to clean up at the end
-
-        # Update the display timestamp if we ended up using a nearby datetime.
-        if actual_obs_time != obs_time:
-            timestamp_str = actual_obs_time.strftime("%Y%m%dT%H%M%SZ")
-            logger.info(
-                "Using actual observation time %s (Δ=%.0fs from requested)",
-                timestamp_str,
-                abs((actual_obs_time - obs_time).total_seconds()),
-            )
+    else:
+        logger.info("Timestamps: raw=%s  ceiled/rounded=%s", raw_ts, ceiled_ts)
 
     # ------------------------------------------------------------------
-    # 5. Find geometry file
-    # ------------------------------------------------------------------
-    geometry_file = _find_geometry_file(radar_name, strategy, vol_nr, geometry_dir)
-    if geometry_file is None:
-        print(
-            f"ERROR: No geometry file found in {geometry_dir} for "
-            f"{radar_name} {strategy}-{vol_nr}.\n"
-            f"  Expected pattern: {radar_name}_{strategy}_{vol_nr}_*.npz",
-            file=sys.stderr,
-        )
-        if _temp_netcdf and _temp_netcdf.exists():
-            _temp_netcdf.unlink(missing_ok=True)
-        sys.exit(1)
-
-    # ------------------------------------------------------------------
-    # 6. Load and standardise radar volume
+    # Load and standardise radar volume
     # ------------------------------------------------------------------
     logger.info("Loading radar volume: %s", netcdf_path)
     try:
         radar = read_radar_netcdf(str(netcdf_path))
         radar = estandarizar_campos_RMA(radar)
     except Exception as exc:
-        print(f"ERROR: Failed to load radar volume: {exc}", file=sys.stderr)
-        if _temp_netcdf and _temp_netcdf.exists():
-            _temp_netcdf.unlink(missing_ok=True)
-        sys.exit(1)
+        logger.error("Failed to load radar volume %s: %s", netcdf_path, exc)
+        return
 
     fields = determine_reflectivity_fields(radar)
     hrefl_field: str = fields["hrefl_field"]
-    logger.info("Horizontal reflectivity field: %s", hrefl_field)
-
     if hrefl_field not in radar.fields:
-        print(
-            f"ERROR: Required reflectivity field '{hrefl_field}' not present in the radar volume.",
-            file=sys.stderr,
-        )
-        if _temp_netcdf and _temp_netcdf.exists():
-            _temp_netcdf.unlink(missing_ok=True)
-        sys.exit(1)
+        logger.error("Required field '%s' not present — skipping scan %s.", hrefl_field, raw_ts)
+        del radar
+        gc.collect()
+        return
 
     radar_lat: float = float(radar.latitude["data"].data[0])
     radar_lon: float = float(radar.longitude["data"].data[0])
@@ -1391,29 +1471,18 @@ def main() -> None:
     logger.info("Radar location: lat=%.4f  lon=%.4f", radar_lat, radar_lon)
 
     # ------------------------------------------------------------------
-    # 7. Load precomputed geometry
+    # Polar → Cartesian, COLMAX
     # ------------------------------------------------------------------
-    logger.info("Loading geometry: %s", geometry_file)
-    try:
-        geometry = load_geometry(str(geometry_file))
-    except Exception as exc:
-        print(f"ERROR: Failed to load geometry: {exc}", file=sys.stderr)
-        if _temp_netcdf and _temp_netcdf.exists():
-            _temp_netcdf.unlink(missing_ok=True)
-        sys.exit(1)
-
-    # ------------------------------------------------------------------
-    # 8. Build Cartesian grids
-    # ------------------------------------------------------------------
-    logger.info("Applying geometry (polar → Cartesian) …")
+    logger.info("Applying geometry …")
+    dbzh_3d: Optional[np.ndarray] = None
     try:
         dbzh_field_data = get_field_data(radar, hrefl_field)
-        dbzh_3d = apply_geometry(geometry, dbzh_field_data)
+        dbzh_3d = _apply_geom(geometry, dbzh_field_data)
     except Exception as exc:
-        print(f"ERROR: Failed to apply geometry to DBZH: {exc}", file=sys.stderr)
-        if _temp_netcdf and _temp_netcdf.exists():
-            _temp_netcdf.unlink(missing_ok=True)
-        sys.exit(1)
+        logger.error("Failed to apply geometry: %s — skipping scan %s.", exc, raw_ts)
+        del radar
+        gc.collect()
+        return
     finally:
         try:
             del dbzh_field_data
@@ -1421,66 +1490,35 @@ def main() -> None:
             pass
         gc.collect()
 
-    logger.info("DBZH 3D grid shape: %s", dbzh_3d.shape)
     colmax_2d = column_max(dbzh_3d, geometry=geometry)
-    from radarlib.daemons.field_processor import apply_coverage_radius_mask
-
     colmax_2d = apply_coverage_radius_mask(colmax_2d, geometry, coverage_radius_m)
-    logger.info("COLMAX 2D grid shape: %s", colmax_2d.shape)
 
-    valid_colmax = colmax_2d[~np.isnan(colmax_2d)]
-    if len(valid_colmax) > 0:
+    valid_px = colmax_2d[~np.isnan(colmax_2d)]
+    if len(valid_px) > 0:
         logger.info(
             "COLMAX stats — min=%.1f  max=%.1f  mean=%.1f  valid_px=%d",
-            float(np.min(valid_colmax)),
-            float(np.max(valid_colmax)),
-            float(np.mean(valid_colmax)),
-            len(valid_colmax),
+            float(np.min(valid_px)), float(np.max(valid_px)),
+            float(np.mean(valid_px)), len(valid_px),
         )
     else:
-        logger.warning("COLMAX grid contains only NaN values — nothing will be detected.")
-
-    xx, yy, z_1d = _extract_coordinates(geometry)
-    logger.info(
-        "Grid: nz=%d  ny=%d  nx=%d  z_range=[%.0f, %.0f] m",
-        len(z_1d),
-        xx.shape[0],
-        xx.shape[1],
-        float(z_1d[0]),
-        float(z_1d[-1]),
-    )
+        logger.warning("COLMAX grid is all NaN — nothing will be detected.")
 
     # ------------------------------------------------------------------
-    # 9. Optional RhoHV 3D grid + 2D constant-elevation PPI
-    #    Matches the product daemon: rhohv_2d is derived from the lowest
-    #    sweep elevation, not from a raw z=0 slice of the 3D grid.
+    # Optional RhoHV (lowest-sweep PPI, matching daemon)
     # ------------------------------------------------------------------
-    from radarlib.radar_grid.products import constant_elevation_ppi
-    from radarlib.utils.fields_utils import get_lowest_nsweep
-
     rhohv_3d: Optional[np.ndarray] = None
     rhohv_2d: Optional[np.ndarray] = None
     rhohv_field_name = _find_rhohv_field(radar)
     if rhohv_field_name is not None:
-        logger.info("Extracting RhoHV field '%s' …", rhohv_field_name)
+        logger.info("Extracting RhoHV …")
         try:
             rhohv_field_data = get_field_data(radar, rhohv_field_name)
-            rhohv_3d = apply_geometry(geometry, rhohv_field_data)
-            logger.info("RhoHV 3D grid shape: %s", rhohv_3d.shape)
-
-            # Derive 2D RhoHV as a constant-elevation PPI at the lowest sweep
-            # (identical to the product daemon: sweep = get_lowest_nsweep(radar))
+            rhohv_3d = _apply_geom(geometry, rhohv_field_data)
             lowest_sweep = get_lowest_nsweep(radar)
             elevation_angle = float(np.unique(radar.get_elevation(lowest_sweep))[0])
-            logger.info(
-                "Computing RhoHV PPI at lowest sweep %d (elevation %.2f°) …",
-                lowest_sweep,
-                elevation_angle,
-            )
             rhohv_2d = constant_elevation_ppi(
                 rhohv_3d, geometry, elevation_angle=elevation_angle, interpolation="linear"
             )
-            logger.info("RhoHV 2D PPI shape: %s", rhohv_2d.shape)
         except Exception as exc:
             logger.warning("Could not extract RhoHV; proceeding without quality gate: %s", exc)
             rhohv_3d = None
@@ -1492,23 +1530,15 @@ def main() -> None:
                 pass
             gc.collect()
     else:
-        logger.warning(
-            "No RhoHV field found (%s). Quality gate will use updraft intensity only.",
-            _RHOHV_FIELD_CANDIDATES,
-        )
+        logger.warning("No RhoHV field found — quality gate disabled.")
 
-    # We no longer need the PyART radar object.
     del radar
     gc.collect()
 
     # ------------------------------------------------------------------
-    # 10. Resolve detection config params
-    #     Priority: CLI arg > app/config > radarlib.config default
+    # Detection params (CLI → app_cfg → radarlib.config)
     # ------------------------------------------------------------------
-    import radarlib.config as _rlib_cfg  # type: ignore[import]
-
     def _resolve(cli_val, cfg_key, rlib_attr):
-        """Return the first non-None value in: CLI → app_cfg → radarlib.config."""
         if cli_val is not None:
             return cli_val
         if cfg_key is not None:
@@ -1522,34 +1552,16 @@ def main() -> None:
     eff_min_range = _resolve(args.min_range, "MIN_RANGE", "CORES_MIN_RANGE")
     eff_dedup_cores = _resolve(args.dedup_radius_cores, "R_NUCLEOS", "CORES_DEDUP_RADIUS")
     eff_dedup_tops = _resolve(args.dedup_radius_tops, "R_TOPES", "TOPS_DEDUP_RADIUS_M")
-    # These three have no app/config equivalents — CLI overrides radarlib.config directly.
     eff_rhohv_threshold = _resolve(args.rhohv_threshold_cores, None, "CORES_RHOHV_THRESHOLD")
     eff_min_pixels = int(_resolve(args.min_pixels, None, "CORES_MIN_PIXELS"))
     eff_min_pixels_updraft = int(_resolve(args.min_pixels_updraft, None, "CORES_MIN_PIXELS_UPDRAFT"))
 
-    logger.info(
-        "Detection params — min_z_core=%.1f  min_z_updraft=%.1f  "
-        "min_range=%.0fm  dedup_cores=%.0fm  dedup_tops=%.0fm  "
-        "rhohv_threshold=%.2f  min_pixels=%d  min_pixels_updraft=%d",
-        eff_min_z_core,
-        eff_min_z_updraft,
-        eff_min_range,
-        eff_dedup_cores,
-        eff_dedup_tops,
-        eff_rhohv_threshold,
-        eff_min_pixels,
-        eff_min_pixels_updraft,
-    )
-
     # ------------------------------------------------------------------
-    # 10b. Run detection
+    # Detection — pass ceiled_dt so observation_time in GeoJSON matches daemon
     # ------------------------------------------------------------------
-    output_dir = Path(args.output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    logger.info("Running cores & tops detection …")
+    geojson_path: Optional[Path] = None
     try:
-        geojson_path: Optional[Path] = _run_detection(
+        geojson_path = _run_detection(
             colmax_2d=colmax_2d,
             dbzh_3d=dbzh_3d,
             xx=xx,
@@ -1557,7 +1569,7 @@ def main() -> None:
             z_1d=z_1d,
             radar_lat=radar_lat,
             radar_lon=radar_lon,
-            observation_time=actual_obs_time,
+            observation_time=ceiled_dt,
             radar_name=radar_name,
             strategy=strategy,
             vol_nr=vol_nr,
@@ -1574,8 +1586,7 @@ def main() -> None:
             min_pixels_updraft=eff_min_pixels_updraft,
         )
     except Exception as exc:
-        print(f"ERROR: Detection pipeline failed: {exc}", file=sys.stderr)
-        sys.exit(1)
+        logger.error("Detection pipeline failed for %s: %s", ceiled_ts, exc)
     finally:
         del dbzh_3d
         if rhohv_3d is not None:
@@ -1588,16 +1599,39 @@ def main() -> None:
         logger.info("GeoJSON written: %s", geojson_path)
         _print_report(geojson_path)
     else:
-        logger.info("No convective cores or tops detected — GeoJSON file not written.")
+        logger.info("No detections — GeoJSON not written.")
 
     # ------------------------------------------------------------------
-    # 11. Optional PNG
+    # Rounded-timestamp copy (matching daemon dual-write behaviour)
+    # ------------------------------------------------------------------
+    if ceiled_dt != rounded_dt:
+        rounded_ts = rounded_dt.strftime("%Y%m%dT%H%M%SZ")
+        rounded_subdir = (
+            output_dir
+            / f"{rounded_dt.year:04d}"
+            / f"{rounded_dt.month:02d}"
+            / f"{rounded_dt.day:02d}"
+        )
+        rounded_path = rounded_subdir / f"{radar_name}_{strategy}_{vol_nr}_{rounded_ts}_TOPS_CORES.geojson"
+        if geojson_path is not None:
+            try:
+                rounded_subdir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(geojson_path), str(rounded_path))
+                logger.info("Created rounded-timestamp copy: %s", rounded_path.name)
+            except Exception as exc:
+                logger.warning("Could not create rounded copy: %s", exc)
+        elif rounded_path.exists():
+            rounded_path.unlink()
+            logger.debug("Removed stale rounded-timestamp file: %s", rounded_path.name)
+
+    # ------------------------------------------------------------------
+    # Optional PNG / HTML — use ceiled_ts for filename
     # ------------------------------------------------------------------
     if args.with_png:
         png_path = (
             Path(args.png_output).resolve()
-            if args.png_output
-            else output_dir / f"{radar_name}_{strategy}_{vol_nr}_{timestamp_str}_cores_tops.png"
+            if getattr(args, "png_output", None)
+            else output_dir / f"{radar_name}_{strategy}_{vol_nr}_{ceiled_ts}_cores_tops.png"
         )
         _save_png(
             colmax=colmax_2d,
@@ -1607,20 +1641,17 @@ def main() -> None:
             radar_lat=radar_lat,
             radar_lon=radar_lon,
             radar_name=radar_name,
-            timestamp_str=timestamp_str,
+            timestamp_str=ceiled_ts,
             strategy=strategy,
             vol_nr=vol_nr,
             output_path=png_path,
         )
 
-    # ------------------------------------------------------------------
-    # 11b. Optional interactive HTML (Plotly)
-    # ------------------------------------------------------------------
     if args.with_html:
         html_path = (
             Path(args.html_output).resolve()
-            if args.html_output
-            else output_dir / f"{radar_name}_{strategy}_{vol_nr}_{timestamp_str}_cores_tops.html"
+            if getattr(args, "html_output", None)
+            else output_dir / f"{radar_name}_{strategy}_{vol_nr}_{ceiled_ts}_cores_tops.html"
         )
         _save_html(
             colmax=colmax_2d,
@@ -1630,24 +1661,198 @@ def main() -> None:
             radar_lat=radar_lat,
             radar_lon=radar_lon,
             radar_name=radar_name,
-            timestamp_str=timestamp_str,
+            timestamp_str=ceiled_ts,
             strategy=strategy,
             vol_nr=vol_nr,
             output_path=html_path,
         )
 
-    del colmax_2d, xx, yy
+    del colmax_2d
     gc.collect()
 
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    args = _build_parser().parse_args()
+
+    # Validate: exactly one of (--datetime) or (--start-datetime + --end-datetime)
+    has_single = args.obs_datetime is not None
+    has_batch = args.start_datetime is not None or args.end_datetime is not None
+
+    if has_single and has_batch:
+        print("ERROR: --datetime is mutually exclusive with --start-datetime/--end-datetime.", file=sys.stderr)
+        sys.exit(1)
+    if not has_single and not has_batch:
+        print("ERROR: Provide either --datetime (single scan) or --start-datetime + --end-datetime (batch).", file=sys.stderr)
+        sys.exit(1)
+    if has_batch and (args.start_datetime is None or args.end_datetime is None):
+        print("ERROR: Both --start-datetime and --end-datetime are required for batch mode.", file=sys.stderr)
+        sys.exit(1)
+
+    radar_name: str = args.radar_name
+    strategy: str = args.strategy
+    vol_nr: str = args.vol_nr
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     # ------------------------------------------------------------------
-    # 12. Cleanup temp NetCDF (if we created one)
+    # Load service config and geometry (shared across all scans)
     # ------------------------------------------------------------------
-    if _temp_netcdf is not None and _temp_netcdf.exists():
+    app_cfg = _load_app_config()
+    geometry_dir = Path(app_cfg["ROOT_GEOMETRY_PATH"])
+    netcdf_dir = Path(app_cfg["ROOT_RADAR_FILES_PATH"]) / radar_name / "netcdf"
+
+    try:
+        from radarlib.radar_grid.geometry import load_geometry
+    except ImportError as exc:
+        print(f"ERROR: Could not import radarlib: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    geometry_file = _find_geometry_file(radar_name, strategy, vol_nr, geometry_dir)
+    if geometry_file is None:
+        print(
+            f"ERROR: No geometry file found in {geometry_dir} for {radar_name} {strategy}-{vol_nr}.\n"
+            f"  Expected pattern: {radar_name}_{strategy}_{vol_nr}_*.npz",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    logger.info("Loading geometry: %s", geometry_file)
+    try:
+        geometry = load_geometry(str(geometry_file))
+    except Exception as exc:
+        print(f"ERROR: Failed to load geometry: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    xx, yy, z_1d = _extract_coordinates(geometry)
+    logger.info(
+        "Grid: nz=%d  ny=%d  nx=%d  z_range=[%.0f, %.0f] m",
+        len(z_1d), xx.shape[0], xx.shape[1], float(z_1d[0]), float(z_1d[-1]),
+    )
+
+    # ------------------------------------------------------------------
+    # Single-scan mode
+    # ------------------------------------------------------------------
+    if has_single:
         try:
-            _temp_netcdf.unlink()
-            logger.debug("Removed temporary NetCDF: %s", _temp_netcdf)
-        except OSError as exc:
-            logger.warning("Could not remove temporary NetCDF %s: %s", _temp_netcdf, exc)
+            obs_time = _parse_datetime(args.obs_datetime)
+        except ValueError as exc:
+            print(f"ERROR: Could not parse --datetime '{args.obs_datetime}': {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        logger.info(
+            "Single scan mode: radar=%s  strategy=%s  vol_nr=%s  time=%s",
+            radar_name, strategy, vol_nr, obs_time.strftime("%Y%m%dT%H%M%SZ"),
+        )
+
+        _temp_netcdf: Optional[Path] = None
+        actual_obs_time = obs_time
+
+        netcdf_path = _find_netcdf(netcdf_dir, _build_netcdf_filename(radar_name, strategy, vol_nr, obs_time))
+        if netcdf_path is None:
+            logger.info("NetCDF not found locally — fetching BUFR from FTP …")
+            try:
+                netcdf_path, actual_obs_time = _fetch_and_decode_bufr(
+                    radar_name=radar_name, strategy=strategy, vol_nr=vol_nr,
+                    obs_time=obs_time, ftp_cfg=app_cfg, window_hours=args.search_window_hours,
+                )
+                _temp_netcdf = netcdf_path
+            except RuntimeError as exc:
+                print(f"ERROR: BUFR fetch/decode failed: {exc}", file=sys.stderr)
+                sys.exit(1)
+
+        try:
+            _process_scan(
+                netcdf_path=netcdf_path,
+                actual_obs_time=actual_obs_time,
+                geometry=geometry, xx=xx, yy=yy, z_1d=z_1d,
+                radar_name=radar_name, strategy=strategy, vol_nr=vol_nr,
+                output_dir=output_dir, args=args, app_cfg=app_cfg,
+            )
+        finally:
+            if _temp_netcdf is not None and _temp_netcdf.exists():
+                try:
+                    _temp_netcdf.unlink()
+                except OSError:
+                    pass
+
+    # ------------------------------------------------------------------
+    # Batch mode
+    # ------------------------------------------------------------------
+    else:
+        try:
+            start_dt = _parse_datetime(args.start_datetime)
+            end_dt = _parse_datetime(args.end_datetime)
+        except ValueError as exc:
+            print(f"ERROR: Could not parse batch datetimes: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        if end_dt <= start_dt:
+            print("ERROR: --end-datetime must be after --start-datetime.", file=sys.stderr)
+            sys.exit(1)
+
+        logger.info(
+            "Batch mode: radar=%s  strategy=%s  vol_nr=%s  window=[%s, %s]",
+            radar_name, strategy, vol_nr,
+            start_dt.strftime("%Y%m%dT%H%M%SZ"), end_dt.strftime("%Y%m%dT%H%M%SZ"),
+        )
+
+        logger.info("Listing available scans from FTP …")
+        try:
+            pairs = _list_scan_pairs_in_window(app_cfg, radar_name, strategy, vol_nr, start_dt, end_dt)
+        except RuntimeError as exc:
+            print(f"ERROR: FTP listing failed: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        if not pairs:
+            print(
+                f"No scans found in window [{start_dt.strftime('%Y%m%dT%H%M%SZ')}, "
+                f"{end_dt.strftime('%Y%m%dT%H%M%SZ')}]."
+            )
+            sys.exit(0)
+
+        logger.info("Found %d scans — beginning batch processing.", len(pairs))
+
+        for i, (obs_time, dbzh_remote, dbzh_fname, rhohv_remote, rhohv_fname) in enumerate(pairs, start=1):
+            logger.info(
+                "=== Scan %d/%d  obs_time=%s ===",
+                i, len(pairs), obs_time.strftime("%Y%m%dT%H%M%SZ"),
+            )
+            _temp_netcdf = None
+            try:
+                _temp_netcdf = _fetch_pair_to_netcdf(
+                    app_cfg, dbzh_remote, dbzh_fname, rhohv_remote, rhohv_fname,
+                )
+                _process_scan(
+                    netcdf_path=_temp_netcdf,
+                    actual_obs_time=obs_time,
+                    geometry=geometry, xx=xx, yy=yy, z_1d=z_1d,
+                    radar_name=radar_name, strategy=strategy, vol_nr=vol_nr,
+                    output_dir=output_dir, args=args, app_cfg=app_cfg,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to process scan %s: %s", obs_time.strftime("%Y%m%dT%H%M%SZ"), exc,
+                    exc_info=True,
+                )
+            finally:
+                if _temp_netcdf is not None and _temp_netcdf.exists():
+                    try:
+                        _temp_netcdf.unlink()
+                    except OSError:
+                        pass
+
+        logger.info("Batch processing complete — %d scans processed.", len(pairs))
 
 
 if __name__ == "__main__":
