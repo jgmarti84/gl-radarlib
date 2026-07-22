@@ -1044,6 +1044,15 @@ La propiedad `observation_time` incrustada en cada feature GeoJSON siempre refle
 la marca de tiempo **redondeada hacia arriba**, coincidiendo con el nombre del archivo
 primario y los productos COG asociados para el mismo volumen.
 
+**Limpieza de archivos obsoletos:** Cuando no se detectan núcleos convectivos, no
+se escribe ningún GeoJSON para la marca de tiempo redondeada hacia arriba, y tampoco
+se produce copia redondeada. Sin embargo, la copia redondeada del COG siempre se
+escribe incondicionalmente. Si un escaneo posterior sin detecciones colisiona en el
+mismo intervalo redondeado que un escaneo anterior que sí produjo detecciones, el
+pipeline elimina explícitamente el GeoJSON de marca de tiempo redondeada obsoleto,
+para que el estado de topes y núcleos permanezca sincronizado con el COG en cada
+marca de tiempo.
+
 **Reglas críticas:**
 - El archivo **NO se escribe** si tanto la lista de núcleos como la de topes están vacías.
 - `observation_time` siempre en ISO 8601 UTC, redondeada a un límite de 10 minutos.

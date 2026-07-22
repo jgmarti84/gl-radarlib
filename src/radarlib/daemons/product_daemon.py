@@ -1350,16 +1350,34 @@ class ProductGenerationDaemon:
                     rhohv_2d=_ct_rhohv_2d,
                 )
 
-                if primary_path is not None and ceiled_dt != rounded_dt:
+                if ceiled_dt != rounded_dt:
                     rounded_ts = rounded_dt.strftime("%Y%m%dT%H%M%SZ")
-                    rounded_path = primary_path.parent / (
+                    rounded_subdir = (
+                        Path(self.config.tops_and_cores_output_dir)
+                        / f"{rounded_dt.year:04d}"
+                        / f"{rounded_dt.month:02d}"
+                        / f"{rounded_dt.day:02d}"
+                    )
+                    rounded_path = rounded_subdir / (
                         f"{self.config.radar_name}_{volume_info['strategy']}"
                         f"_{volume_info['vol_nr']}_{rounded_ts}_TOPS_CORES.geojson"
                     )
-                    shutil.copy2(str(primary_path), str(rounded_path))
-                    logger.debug(
-                        f"[{self.config.radar_name}] Created rounded-timestamp TOPS_CORES variant: {rounded_path.name}"
-                    )
+                    if primary_path is not None:
+                        shutil.copy2(str(primary_path), str(rounded_path))
+                        logger.debug(
+                            f"[{self.config.radar_name}] Created rounded-timestamp TOPS_CORES variant: {rounded_path.name}"
+                        )
+                    else:
+                        # No detections this scan, but the COG rounded copy already
+                        # overwrote the COG at rounded_dt. Remove any stale tops/cores
+                        # at that timestamp left by an earlier scan so COG and
+                        # tops/cores stay in sync.
+                        if rounded_path.exists():
+                            rounded_path.unlink()
+                            logger.debug(
+                                f"[{self.config.radar_name}] Removed stale rounded-timestamp TOPS_CORES "
+                                f"(no detections this scan): {rounded_path.name}"
+                            )
 
         except Exception as _ct_exc:
             logger.error(

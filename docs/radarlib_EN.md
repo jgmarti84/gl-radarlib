@@ -1043,6 +1043,14 @@ The `observation_time` property embedded in every GeoJSON feature always reflect
 the **ceiled** timestamp, matching the primary filename and the associated COG
 products for the same volume.
 
+**Stale-file cleanup:** When no convective cells are detected, no GeoJSON is
+written for the ceiled timestamp, and no rounded copy is produced. However, the
+COG rounded copy is always written unconditionally. If a later scan with no
+detections collides at the same rounded bucket as an earlier scan that *did*
+produce detections, the pipeline explicitly deletes the stale rounded-timestamp
+GeoJSON so that the tops/cores state stays in sync with the COG at every
+timestamp.
+
 **Critical rules:**
 - File is **NOT written** if both core and top lists are empty.
 - `observation_time` is always ISO 8601 UTC, rounded to a 10-minute boundary.

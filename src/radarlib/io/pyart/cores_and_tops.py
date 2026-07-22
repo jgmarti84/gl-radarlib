@@ -74,6 +74,14 @@ with the corresponding COG products.  When the ceiled and rounded timestamps
 differ, the caller also writes a second copy of the file using the rounded
 timestamp — the same dual-write pattern used for COGs.  This module always
 writes exactly one file at whatever ``observation_time`` it receives.
+
+When this function returns ``None`` (no detections) and the ceiled and rounded
+timestamps differ, the caller must also **delete** any pre-existing
+rounded-timestamp GeoJSON from an earlier scan that landed in the same bucket,
+because the COG rounded copy has already been overwritten unconditionally.
+Failing to do this leaves a stale tops/cores file paired with a newer COG that
+contains no convective cells — the adjacent-frame mismatch visible in the
+frontend.
 """
 
 from __future__ import annotations
