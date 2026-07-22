@@ -1028,11 +1028,24 @@ ROOT_RADAR_PRODUCTS_PATH/
             └── DD/
                 └── {radar_code}_{strategy}_{vol_nr}_{timestamp}_TOPS_CORES.geojson
 ```
-Example: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
+Example: `RMA6_0315_01_20260505T164000Z_TOPS_CORES.geojson`
+
+**Dual-timestamp write behaviour** (mirrors COG products):
+
+Each GeoJSON is written at two timestamps to aid consumer lookup:
+
+| Variant | Formula | Purpose |
+|---------|---------|---------|
+| **Ceiled** | `floor(obs_time + 10 min, 10 min)` | "Next" 10-minute boundary after observation — primary file |
+| **Rounded** | `round(obs_time, 10 min)` | Nearest 10-minute boundary — copy written only when it differs from ceiled |
+
+The `observation_time` property embedded in every GeoJSON feature always reflects
+the **ceiled** timestamp, matching the primary filename and the associated COG
+products for the same volume.
 
 **Critical rules:**
 - File is **NOT written** if both core and top lists are empty.
-- `observation_time` is always ISO 8601 UTC.
+- `observation_time` is always ISO 8601 UTC, rounded to a 10-minute boundary.
 - Coordinates are `[lon, lat]` — GeoJSON standard order.
 - Timestamp format in filename is `YYYYMMDDTHHMMSSZ` — same as COG filenames.
 - `webmet25` indexer depends on this filename pattern — never change it without
@@ -1048,7 +1061,7 @@ Example: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
     "type": "core",
     "intensity_dbz": 52,
     "radar_code": "RMA6",
-    "observation_time": "2026-05-05T16:38:54Z"
+    "observation_time": "2026-05-05T16:40:00Z"
   }
 }
 
@@ -1062,7 +1075,7 @@ Example: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
     "dbz": 25.5,
     "parent_core_dbz": 52,
     "radar_code": "RMA6",
-    "observation_time": "2026-05-05T16:38:54Z"
+    "observation_time": "2026-05-05T16:40:00Z"
   }
 }
 ```

@@ -1268,6 +1268,7 @@ class ProductGenerationDaemon:
             rhv_field: Resolved cross-correlation ratio field name.
             sweep: Lowest-elevation sweep index.
         """
+        import datetime as _dt
         import gc
 
         from radarlib.daemons.field_processor import apply_coverage_radius_mask
@@ -1320,9 +1321,19 @@ class ProductGenerationDaemon:
                 _ct_yy, _ct_xx = np.meshgrid(_ct_y_1d, _ct_x_1d, indexing="ij")
                 _ct_z_1d = geom.z_levels().astype(np.float32)
 
-                observation_time = get_time_from_RMA_filename(filename_stem)
+                obs_dt = get_time_from_RMA_filename(filename_stem)
 
-                generate_cores_and_tops(
+                ceiled_dt_raw = obs_dt + _dt.timedelta(minutes=10)
+                ceiled_min = (ceiled_dt_raw.minute // 10) * 10
+                ceiled_dt = ceiled_dt_raw.replace(minute=ceiled_min, second=0, microsecond=0)
+
+                rounded_min_val = round(obs_dt.minute / 10) * 10
+                if rounded_min_val == 60:
+                    rounded_dt = obs_dt.replace(minute=0, second=0, microsecond=0) + _dt.timedelta(hours=1)
+                else:
+                    rounded_dt = obs_dt.replace(minute=rounded_min_val, second=0, microsecond=0)
+
+                primary_path = generate_cores_and_tops(
                     colmax_2d=_ct_colmax_2d,
                     dbzh_3d=_ct_dbzh_3d,
                     x_coords=_ct_xx,
@@ -1330,7 +1341,7 @@ class ProductGenerationDaemon:
                     z_coords=_ct_z_1d,
                     radar_lat=float(radar.latitude["data"].data[0]),
                     radar_lon=float(radar.longitude["data"].data[0]),
-                    observation_time=observation_time,
+                    observation_time=ceiled_dt,
                     radar_code=self.config.radar_name,
                     strategy=volume_info["strategy"],
                     vol_nr=volume_info["vol_nr"],
@@ -1338,6 +1349,17 @@ class ProductGenerationDaemon:
                     rhohv_3d=_ct_rhohv_3d,
                     rhohv_2d=_ct_rhohv_2d,
                 )
+
+                if primary_path is not None and ceiled_dt != rounded_dt:
+                    rounded_ts = rounded_dt.strftime("%Y%m%dT%H%M%SZ")
+                    rounded_path = primary_path.parent / (
+                        f"{self.config.radar_name}_{volume_info['strategy']}"
+                        f"_{volume_info['vol_nr']}_{rounded_ts}_TOPS_CORES.geojson"
+                    )
+                    shutil.copy2(str(primary_path), str(rounded_path))
+                    logger.debug(
+                        f"[{self.config.radar_name}] Created rounded-timestamp TOPS_CORES variant: {rounded_path.name}"
+                    )
 
         except Exception as _ct_exc:
             logger.error(

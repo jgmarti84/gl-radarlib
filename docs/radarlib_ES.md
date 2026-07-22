@@ -1029,11 +1029,24 @@ ROOT_RADAR_PRODUCTS_PATH/
             └── DD/
                 └── {radar_code}_{strategy}_{vol_nr}_{timestamp}_TOPS_CORES.geojson
 ```
-Ejemplo: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
+Ejemplo: `RMA6_0315_01_20260505T164000Z_TOPS_CORES.geojson`
+
+**Comportamiento de escritura con doble marca de tiempo** (igual que los productos COG):
+
+Cada GeoJSON se escribe con dos marcas de tiempo para facilitar la búsqueda del consumidor:
+
+| Variante | Fórmula | Propósito |
+|---------|---------|---------|
+| **Redondeada hacia arriba** | `floor(obs_time + 10 min, 10 min)` | Próximo límite de 10 minutos tras la observación — archivo primario |
+| **Redondeada** | `round(obs_time, 10 min)` | Límite de 10 minutos más cercano — copia escrita solo cuando difiere de la redondeada hacia arriba |
+
+La propiedad `observation_time` incrustada en cada feature GeoJSON siempre refleja
+la marca de tiempo **redondeada hacia arriba**, coincidiendo con el nombre del archivo
+primario y los productos COG asociados para el mismo volumen.
 
 **Reglas críticas:**
 - El archivo **NO se escribe** si tanto la lista de núcleos como la de topes están vacías.
-- `observation_time` siempre en ISO 8601 UTC.
+- `observation_time` siempre en ISO 8601 UTC, redondeada a un límite de 10 minutos.
 - Las coordenadas son `[lon, lat]` — orden estándar GeoJSON.
 - El formato de marca de tiempo en el nombre de archivo es `YYYYMMDDTHHMMSSZ` — igual que los nombres de archivos COG.
 - El indexador de `webmet25` depende de este patrón de nombre de archivo — nunca lo cambies sin actualizar `TopsAndCoresFilenameParser` en el repositorio webmet25.
@@ -1048,7 +1061,7 @@ Ejemplo: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
     "type": "core",
     "intensity_dbz": 52,
     "radar_code": "RMA6",
-    "observation_time": "2026-05-05T16:38:54Z"
+    "observation_time": "2026-05-05T16:40:00Z"
   }
 }
 
@@ -1062,7 +1075,7 @@ Ejemplo: `RMA6_0315_01_20260505T163854Z_TOPS_CORES.geojson`
     "dbz": 25.5,
     "parent_core_dbz": 52,
     "radar_code": "RMA6",
-    "observation_time": "2026-05-05T16:38:54Z"
+    "observation_time": "2026-05-05T16:40:00Z"
   }
 }
 ```

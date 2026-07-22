@@ -43,7 +43,7 @@ GeoJSON schema reference
             "type": "core",
             "intensity_dbz": 54,
             "radar_code": "RMA1",
-            "observation_time": "2026-04-28T15:00:00Z"
+            "observation_time": "2026-04-28T15:10:00Z"
           }
         },
         {
@@ -55,7 +55,7 @@ GeoJSON schema reference
             "dbz": 25.5,
             "parent_core_dbz": 54,
             "radar_code": "RMA1",
-            "observation_time": "2026-04-28T15:00:00Z"
+            "observation_time": "2026-04-28T15:10:00Z"
           }
         }
       ]
@@ -67,6 +67,13 @@ Output file path
 
 where ``{timestamp}`` follows the same ``%Y%m%dT%H%M%SZ`` format used for COG
 filenames throughout this codebase.
+
+The caller is responsible for passing a **ceiled** ``observation_time``
+(``floor(obs_time + 10 min, 10 min)``) so that the GeoJSON timestamp aligns
+with the corresponding COG products.  When the ceiled and rounded timestamps
+differ, the caller also writes a second copy of the file using the rounded
+timestamp — the same dual-write pattern used for COGs.  This module always
+writes exactly one file at whatever ``observation_time`` it receives.
 """
 
 from __future__ import annotations
