@@ -1346,6 +1346,29 @@ class ProductGenerationDaemon:
                     rhohv_2d=_ct_rhohv_2d,
                 )
 
+                if primary_path is None:
+                    # No detections this scan. The COG at ceiled_dt was just
+                    # overwritten unconditionally; remove any stale tops/cores
+                    # at that same timestamp left by an earlier scan in the same
+                    # 10-min bucket so COG and tops/cores stay in sync.
+                    ceiled_ts = ceiled_dt.strftime("%Y%m%dT%H%M%SZ")
+                    ceiled_subdir = (
+                        Path(self.config.tops_and_cores_output_dir)
+                        / f"{ceiled_dt.year:04d}"
+                        / f"{ceiled_dt.month:02d}"
+                        / f"{ceiled_dt.day:02d}"
+                    )
+                    ceiled_stale_path = ceiled_subdir / (
+                        f"{self.config.radar_name}_{volume_info['strategy']}"
+                        f"_{volume_info['vol_nr']}_{ceiled_ts}_TOPS_CORES.geojson"
+                    )
+                    if ceiled_stale_path.exists():
+                        ceiled_stale_path.unlink()
+                        logger.debug(
+                            f"[{self.config.radar_name}] Removed stale ceiled-timestamp TOPS_CORES "
+                            f"(no detections this scan): {ceiled_stale_path.name}"
+                        )
+
                 if ceiled_dt != rounded_dt:
                     rounded_ts = rounded_dt.strftime("%Y%m%dT%H%M%SZ")
                     rounded_subdir = (
@@ -1364,10 +1387,8 @@ class ProductGenerationDaemon:
                             f"[{self.config.radar_name}] Created rounded-timestamp TOPS_CORES variant: {rounded_path.name}"
                         )
                     else:
-                        # No detections this scan, but the COG rounded copy already
-                        # overwrote the COG at rounded_dt. Remove any stale tops/cores
-                        # at that timestamp left by an earlier scan so COG and
-                        # tops/cores stay in sync.
+                        # COG rounded copy already overwrote the COG at rounded_dt;
+                        # remove any stale tops/cores there too.
                         if rounded_path.exists():
                             rounded_path.unlink()
                             logger.debug(
