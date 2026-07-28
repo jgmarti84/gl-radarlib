@@ -223,6 +223,7 @@ def _run(
     """Internal worker — called exclusively from :func:`generate_cores_and_tops`."""
     # Lazy imports: only pulled in when actually called, keeping daemon startup fast.
     import pyproj
+    from scipy.spatial import ConvexHull
 
     from radarlib.radar_grid import detect_cores_from_colmax, detect_tops_from_cores
 
@@ -277,6 +278,39 @@ def _run(
         px_merc_x = _west_m + (cog_col + 0.5) * _dx_m
         px_merc_y = _north_m - (cog_row + 0.5) * _dy_m
         return _from_3857.transform(px_merc_x, px_merc_y)
+
+    def _blob_to_polygon(blob_mask: np.ndarray):
+        """Convert a boolean blob mask to a closed GeoJSON coordinate ring via convex hull.
+
+        Returns a list of [lon, lat] pairs (ring closed: first == last), or None
+        when the blob is too small to form a valid convex hull.
+        """
+        rows, cols = np.where(blob_mask)
+        if len(rows) < 3:
+            return None
+
+        grid_cols = np.round((x_coords[rows, cols] - x_min) / dx_aeqd).astype(int)
+        grid_rows = np.round((y_coords[rows, cols] - y_min) / dy_aeqd).astype(int)
+        np.clip(grid_cols, 0, nx - 1, out=grid_cols)
+        np.clip(grid_rows, 0, ny - 1, out=grid_rows)
+
+        cog_rows_arr = (ny - 1) - grid_rows
+        merc_xs = _west_m + (grid_cols + 0.5) * _dx_m
+        merc_ys = _north_m - (cog_rows_arr + 0.5) * _dy_m
+
+        lons, lats = _from_3857.transform(merc_xs, merc_ys)
+        unique_pts = np.unique(np.column_stack([lons, lats]), axis=0)
+
+        if len(unique_pts) < 3:
+            return None
+
+        try:
+            hull = ConvexHull(unique_pts)
+            ring = [[float(unique_pts[v, 0]), float(unique_pts[v, 1])] for v in hull.vertices]
+            ring.append(ring[0])
+            return ring
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # Convective core detection
@@ -361,6 +395,29 @@ def _run(
                 },
             }
         )
+
+        # Blob footprint polygon (convex hull of the core's pixel cluster)
+        blob_mask = core.get("blob_mask")
+        if blob_mask is not None:
+            ring = _blob_to_polygon(blob_mask)
+            if ring is not None:
+                features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [ring],
+                        },
+                        "properties": {
+                            "type": "blob",
+                            "intensity_dbz": int(core["mean_dbz"]),
+                            "max_dbz": int(core["max_dbz"]),
+                            "pixel_count": int(core["pixel_count"]),
+                            "radar_code": radar_code,
+                            "observation_time": obs_time_str,
+                        },
+                    }
+                )
 
     for top in tops:
         lon, lat = _cog_pixel_lonlat(top["x_m"], top["y_m"])

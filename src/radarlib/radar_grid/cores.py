@@ -104,6 +104,10 @@ def detect_cores_from_colmax(
         * ``"max_dbz"`` – maximum dBZ in the blob (*float*)
         * ``"pixel_count"`` – number of pixels in the blob (*int*)
         * ``"range_m"`` – distance of centroid from radar origin (*float*)
+        * ``"blob_mask"`` – boolean 2D array (same shape as ``colmax``) marking
+          all pixels belonging to this core's blob.  When two blobs are merged
+          during deduplication their masks are unioned so the footprint covers
+          both original blobs.
 
         Returns an empty list if no cores are detected.
 
@@ -225,6 +229,7 @@ def detect_cores_from_colmax(
                     "max_dbz": max_dbz,
                     "pixel_count": pixel_count,
                     "range_m": range_m,
+                    "blob_mask": blob_mask,
                 }
             )
 
@@ -263,6 +268,14 @@ def detect_cores_from_colmax(
                 # centroid, because the average of two peak pixels may fall in a low-dBZ
                 # gap between the blobs and make the dot appear outside the storm.
                 merged_core = close_candidates[0].copy()
+
+                # Union blob masks so the footprint covers all merged blobs.
+                merged_blob = close_candidates[0]["blob_mask"].copy()
+                for other in close_candidates[1:]:
+                    merged_blob |= other["blob_mask"]
+                merged_core["blob_mask"] = merged_blob
+                merged_core["pixel_count"] = int(merged_blob.sum())
+
                 deduplicated.append(merged_core)
 
                 # Mark all merged candidates
