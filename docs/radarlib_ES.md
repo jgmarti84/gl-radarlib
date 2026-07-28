@@ -711,7 +711,7 @@ Motor de interpolación Barnes polar-cartesiana con geometría precomputada. Uti
 - `constant_elevation_ppi(grid_3d, geometry, elevation_angle, interpolation)` — Extraer slice 2D a elevación constante
 - `column_max(grid_3d, geometry)` — Computar reflectividad máxima columnar 2D
 - `create_raw_cog(data_2d, geometry, lat, lon, path, cmap, vmin, vmax, ...)` — Escribir COG float32
-- `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Detección de núcleos convectivos
+- `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Detección de núcleos convectivos; retorna `blob_mask` (arreglo booleano 2D) por dict de núcleo
 - `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords)` — Detección de topes de tormenta (anclada en núcleos)
 - `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Detección alternativa independiente de topes
 - `GateFilter(radar)` — Filtro de calidad de gate polar (exclude_below, exclude_above)
@@ -1087,7 +1087,30 @@ marca de tiempo.
     "observation_time": "2026-05-05T16:40:00Z"
   }
 }
+
+// Feature de huella blob:
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[lon1, lat1], [lon2, lat2], ..., [lon1, lat1]]]
+  },
+  "properties": {
+    "type": "blob",
+    "mean_dbz": 47.3,
+    "max_dbz": 63.0,
+    "pixel_count": 1107,
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:40:00Z"
+  }
+}
 ```
+
+**Geometría de huella blob:** Cada núcleo convectivo aceptado produce un feature Polygon de tipo `blob` cuyo anillo es la **envolvente convexa** de todos los píxeles pertenecientes a la máscara blob de ese núcleo (en lon/lat WGS84). La envolvente convexa se calcula con `scipy.spatial.ConvexHull` sobre el conjunto de coordenadas de centro de píxel, previa conversión desde la cuadrícula de proyección Mercator a coordenadas geográficas. Los blobs con menos de 3 puntos de coordenada únicos se omiten. Se emite un feature `blob` por núcleo detectado (tras deduplicación); si dos blobs se fusionan durante la deduplicación, sus máscaras de píxeles se unen antes de calcular la envolvente.
+
+**Posición del centroide del núcleo:** La coordenada Point del `core` se ubica en el **píxel de mayor dBZ** del blob (la columna de actualización más intensa), no en el centroide geométrico ni en la media ponderada. Esto garantiza que el marcador siempre caiga dentro de la parte más intensa de la tormenta, que es la ubicación operacionalmente relevante.
+
+**Conteo de features por archivo:** Cada escaneo de volumen produce `N_cores` Points de núcleo + `N_tops` Points de tope + `N_blobs` Polygons blob, donde `N_blobs == N_cores` (un blob por núcleo aceptado). El campo `feature_count` en el registro de base de datos abarca los tres tipos de features.
 
 ### Campos de Metadatos de GeoTIFF
 

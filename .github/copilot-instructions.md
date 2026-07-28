@@ -102,9 +102,9 @@ tops_and_cores/
 ```
 Example: `RMA6_A_00_20260505163854_TOPS_CORES.geojson`
 
-GeoJSON schema per feature:
+GeoJSON schema per feature (three types):
 ```json
-// Core feature:
+// Core feature — Point at peak-dBZ pixel:
 {
   "type": "Feature",
   "geometry": { "type": "Point", "coordinates": [lon, lat] },
@@ -116,7 +116,7 @@ GeoJSON schema per feature:
   }
 }
 
-// Top feature:
+// Top feature — Point at highest valid echo above the core cylinder:
 {
   "type": "Feature",
   "geometry": { "type": "Point", "coordinates": [lon, lat] },
@@ -129,7 +129,32 @@ GeoJSON schema per feature:
     "observation_time": "2026-05-05T16:38:54Z"
   }
 }
+
+// Blob footprint feature — convex-hull Polygon of core's COLMAX pixel blob:
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[lon1, lat1], [lon2, lat2], ..., [lon1, lat1]]]
+  },
+  "properties": {
+    "type": "blob",
+    "mean_dbz": 47.3,              ← float, mean dBZ of all pixels in the blob
+    "max_dbz": 63.0,               ← float, peak dBZ in the blob
+    "pixel_count": 1107,           ← int, number of pixels in the blob
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:38:54Z"
+  }
+}
 ```
+
+One `blob` Polygon is written per accepted core after deduplication (`N_blobs == N_cores`).
+The convex hull is computed by `scipy.spatial.ConvexHull` on the WGS84 pixel-centre coordinates.
+Blobs with fewer than 3 unique geographic points are silently skipped.
+When two blobs are merged during deduplication their pixel masks are unioned before the hull is computed.
+
+Core centroid placement: the `core` Point is placed at the **peak-dBZ pixel** of the blob (the
+strongest updraft column), not at the geometric or weighted-mean centroid.
 
 Critical rules:
 - File is NOT written if both core list and top list are empty.
@@ -327,12 +352,11 @@ Inputs:
 **Core detection** — `detect_cores_from_colmax()` in `src/radarlib/radar_grid/cores.py`:
 1. Threshold COLMAX 2D ≥ `CORES_MIN_Z`, exclude masked pixels
 2. `scipy.ndimage.label()` connected-component labelling (4-neighbour, conservative)
-3. Per blob: reject if pixel_count ≤ 1; compute centroid via `x_coords[mask].mean()` / `y_coords[mask].mean()`
+3. Per blob: reject if pixel_count ≤ 1; centroid = **peak-dBZ pixel** (`x_coords[blob_mask][argmax_dbz]` / `y_coords[blob_mask][argmax_dbz]`); returns `blob_mask` (2D boolean array, same shape as COLMAX)
 4. Reject blobs with centroid range < `CORES_MIN_RANGE`
 5. Quality gate: `rhohv_ok = (mean_rhohv > CORES_RHOHV_THRESHOLD) AND (pixel_count > CORES_MIN_PIXELS)` OR
    `updraft_ok = (max_dbz > CORES_MIN_Z_UPDRAFT) AND (pixel_count > CORES_MIN_PIXELS_UPDRAFT)`
-6. Deduplication: pairs within `CORES_DEDUP_RADIUS` → **weighted-mean centroid** (weight = mean_dBZ),
-   keep strongest core's intensity stats
+6. Deduplication: pairs within `CORES_DEDUP_RADIUS` → keep **strongest core's peak-pixel location**; union their `blob_mask` arrays so the merged footprint covers both original blobs; update `pixel_count` from the unioned mask
 
 **Top detection** — `detect_tops_from_cores()` in `src/radarlib/radar_grid/tops.py`:
 1. For each detected core: define a cylinder of radius `TOPS_DEDUP_RADIUS_M` around its (x_m, y_m)
@@ -431,7 +455,7 @@ Tops & cores settings are split across both config layers:
 | `CORES_MIN_Z` | `40.0` | float | COLMAX threshold for blob detection [dBZ] |
 | `CORES_MIN_RANGE` | `10000.0` | float | Min centroid range from radar [m] |
 | `CORES_MIN_Z_UPDRAFT` | `58.0` | float | Violent updraft max-dBZ gate [dBZ] |
-| `CORES_DEDUP_RADIUS` | `5000.0` | float | Weighted-mean merge radius for cores [m] |
+| `CORES_DEDUP_RADIUS` | `5000.0` | float | Merge radius for nearby cores [m]; blobs within this distance are unioned and the strongest core's peak-pixel location is kept |
 | `CORES_RHOHV_THRESHOLD` | `0.85` | float | Min mean RhoHV to pass quality gate |
 | `CORES_MIN_PIXELS` | `4` | int | Min blob pixel count for RhoHV gate path |
 | `CORES_MIN_PIXELS_UPDRAFT` | `6` | int | Min blob pixel count for updraft gate path |
