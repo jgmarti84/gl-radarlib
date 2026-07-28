@@ -17,7 +17,7 @@ Algorithm Overview
 1. **Core Detection** (from COLMAX 2D):
    - Connected-component labelling on column-maximum reflectivity grid
    - Quality gates: RhoHV (mean > 0.85) OR violent updraft (max > 56 dBZ)
-   - Deduplication using **weighted mean centroids** (weight = mean dBZ)
+   - Deduplication: keep strongest core's peak-pixel location
    - Output: List of core dicts with centroid (x_m, y_m) and intensity metrics
 
 2. **Top Detection** (from DBZH 3D, relative to cores):
@@ -222,11 +222,61 @@ def _run(
 ) -> Optional[Path]:
     """Internal worker — called exclusively from :func:`generate_cores_and_tops`."""
     # Lazy imports: only pulled in when actually called, keeping daemon startup fast.
-    from pyart.core.transforms import cartesian_to_geographic_aeqd
+    import pyproj
 
     from radarlib.radar_grid import detect_cores_from_colmax, detect_tops_from_cores
 
     obs_time_str = observation_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # ------------------------------------------------------------------
+    # Compute the COG affine transform (EPSG:3857) using exactly the same
+    # algorithm as _compute_crs_bounds in geotiff.py, so that each dot's
+    # lon/lat resolves to the geographic CENTER of its corresponding COG
+    # pixel rather than to the AEQD cell's theoretical geographic position.
+    # The two differ by up to 3–4 km at long range (non-linear AEQD→EPSG:3857
+    # distortion inside an affine approximation), which is enough to place a
+    # dot several pixels away from the high-dBZ pixel it represents.
+    # ------------------------------------------------------------------
+    ny, nx = x_coords.shape
+    x_min = float(x_coords[0, 0])
+    x_max = float(x_coords[0, -1])
+    y_min = float(y_coords[0, 0])
+    y_max = float(y_coords[-1, 0])
+    dx_aeqd = (x_max - x_min) / (nx - 1) if nx > 1 else 1.0
+    dy_aeqd = (y_max - y_min) / (ny - 1) if ny > 1 else 1.0
+
+    _local_proj = pyproj.Proj(proj="aeqd", lat_0=radar_lat, lon_0=radar_lon, x_0=0, y_0=0, datum="WGS84")
+    _to_wgs84 = pyproj.Transformer.from_proj(_local_proj, pyproj.CRS("EPSG:4326"), always_xy=True)
+    _corner_lons, _corner_lats = [], []
+    for _x in [x_min, x_max]:
+        for _y in [y_min, y_max]:
+            _lon, _lat = _to_wgs84.transform(_x, _y)
+            _corner_lons.append(_lon)
+            _corner_lats.append(_lat)
+    _west, _east = min(_corner_lons), max(_corner_lons)
+    _south, _north = min(_corner_lats), max(_corner_lats)
+
+    _to_3857 = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    _from_3857 = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+    _merc_pts = [_to_3857.transform(_lon, _lat) for _lon in [_west, _east] for _lat in [_south, _north]]
+    _west_m = min(p[0] for p in _merc_pts)
+    _east_m = max(p[0] for p in _merc_pts)
+    _south_m = min(p[1] for p in _merc_pts)
+    _north_m = max(p[1] for p in _merc_pts)
+    _dx_m = (_east_m - _west_m) / nx
+    _dy_m = (_north_m - _south_m) / ny
+
+    def _cog_pixel_lonlat(aeqd_x: float, aeqd_y: float) -> tuple:
+        """Return (lon, lat) of the geographic centre of the COG pixel for (aeqd_x, aeqd_y)."""
+        col = int(round((aeqd_x - x_min) / dx_aeqd))
+        row = int(round((aeqd_y - y_min) / dy_aeqd))
+        col = max(0, min(nx - 1, col))
+        row = max(0, min(ny - 1, row))
+        cog_col = col
+        cog_row = (ny - 1) - row  # flipud: row 0 of COG = northernmost AEQD row
+        px_merc_x = _west_m + (cog_col + 0.5) * _dx_m
+        px_merc_y = _north_m - (cog_row + 0.5) * _dy_m
+        return _from_3857.transform(px_merc_x, px_merc_y)
 
     # ------------------------------------------------------------------
     # Convective core detection
@@ -286,25 +336,22 @@ def _run(
         return None
 
     # ------------------------------------------------------------------
-    # Convert radar-relative Cartesian (m) → geographic (lon, lat)
-    # and build GeoJSON features.
-    # pyart.core.transforms.cartesian_to_geographic_aeqd returns (lon, lat).
+    # Build GeoJSON features.
+    # Each dot is placed at the geographic centre of its corresponding COG
+    # pixel (using the inverse of the same affine transform the COG was
+    # created with), so the dot always lands exactly on that pixel in the
+    # frontend display.
     # ------------------------------------------------------------------
     features: list = []
 
     for core in cores:
-        lon_arr, lat_arr = cartesian_to_geographic_aeqd(
-            np.array([core["x_m"]], dtype=np.float64),
-            np.array([core["y_m"]], dtype=np.float64),
-            radar_lon,
-            radar_lat,
-        )
+        lon, lat = _cog_pixel_lonlat(core["x_m"], core["y_m"])
         features.append(
             {
                 "type": "Feature",
                 "geometry": {
                     "type": "Point",
-                    "coordinates": [float(lon_arr[0]), float(lat_arr[0])],
+                    "coordinates": [float(lon), float(lat)],
                 },
                 "properties": {
                     "type": "core",
@@ -316,18 +363,13 @@ def _run(
         )
 
     for top in tops:
-        lon_arr, lat_arr = cartesian_to_geographic_aeqd(
-            np.array([top["x_m"]], dtype=np.float64),
-            np.array([top["y_m"]], dtype=np.float64),
-            radar_lon,
-            radar_lat,
-        )
+        lon, lat = _cog_pixel_lonlat(top["x_m"], top["y_m"])
         features.append(
             {
                 "type": "Feature",
                 "geometry": {
                     "type": "Point",
-                    "coordinates": [float(lon_arr[0]), float(lat_arr[0])],
+                    "coordinates": [float(lon), float(lat)],
                 },
                 "properties": {
                     "type": "top",

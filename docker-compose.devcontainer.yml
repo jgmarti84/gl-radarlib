@@ -51,4 +51,6 @@ services:
       # Mount tops_and_cores output dir so GeoJSON products written by the
       # product daemon are visible on the host and persist across container restarts.
       - ./tests/data/tops_and_cores:/app/tops_and_cores
+      - ./convective_core_testing_framework:/app/convective_core_testing_framework
+      - ./RMA5_0315_01_RES1000x600_TOA15000_HF1p0000_MR900_MN1_NB1p30_BSP1p10_nearest_geometry.npz:/app/geometry/RMA5_geometry.npz:ro
     command: [ "tail", "-f", "/dev/null" ]

@@ -350,7 +350,7 @@ class ProductGenerationDaemon:
                 max_neighbors=roi_params["max_neighbors"],
                 blind_range_m=gate_coords.get("blind_range_m", None),
                 lowest_elev_deg=gate_coords.get("lowest_elev_deg", None),
-                n_workers=8,
+                n_workers=2,
             )
 
         logger.info(f"Successfully built geometry for {self.config.radar_name} {strategy}-{vol_num}")
@@ -1382,7 +1382,15 @@ class ProductGenerationDaemon:
                         f"_{volume_info['vol_nr']}_{rounded_ts}_TOPS_CORES.geojson"
                     )
                     if primary_path is not None:
-                        shutil.copy2(str(primary_path), str(rounded_path))
+                        rounded_ts_iso = rounded_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                        with open(str(primary_path), "r", encoding="utf-8") as _f:
+                            _geojson = json.load(_f)
+                        for _feat in _geojson.get("features", []):
+                            if _feat.get("properties"):
+                                _feat["properties"]["observation_time"] = rounded_ts_iso
+                        rounded_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(str(rounded_path), "w", encoding="utf-8") as _f:
+                            json.dump(_geojson, _f)
                         logger.debug(
                             f"[{self.config.radar_name}] Created rounded-timestamp TOPS_CORES variant: {rounded_path.name}"
                         )
