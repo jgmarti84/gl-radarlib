@@ -709,7 +709,7 @@ Pre-computed polar-to-Cartesian Barnes interpolation engine. Uses pre-built
 - `constant_elevation_ppi(grid_3d, geometry, elevation_angle, interpolation)` — Extract constant-elevation 2D slice
 - `column_max(grid_3d, geometry)` — Compute 2D column-maximum reflectivity
 - `create_raw_cog(data_2d, geometry, lat, lon, path, cmap, vmin, vmax, ...)` — Write float32 COG
-- `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Convective core detection
+- `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Convective core detection; returns list of dicts including `blob_mask` (2D boolean footprint array)
 - `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords)` — Storm top detection (core-anchored)
 - `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Alternative independent top detection
 - `GateFilter(radar)` — Polar gate quality filter (exclude_below, exclude_above)
@@ -1086,7 +1086,30 @@ timestamp.
     "observation_time": "2026-05-05T16:40:00Z"
   }
 }
+
+// Blob footprint feature:
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[lon1, lat1], [lon2, lat2], ..., [lon1, lat1]]]
+  },
+  "properties": {
+    "type": "blob",
+    "intensity_dbz": 47,
+    "max_dbz": 63.0,
+    "pixel_count": 1107,
+    "radar_code": "RMA6",
+    "observation_time": "2026-05-05T16:40:00Z"
+  }
+}
 ```
+
+**Blob footprint geometry:** Each accepted convective core produces one `blob` Polygon feature whose ring is the **convex hull** of all pixels belonging to that core's blob mask (in WGS84 lon/lat). The convex hull is computed by `scipy.spatial.ConvexHull` on the set of pixel centre coordinates after converting from the Mercator projection grid to geographic coordinates. Blobs with fewer than 3 unique coordinate points are omitted. One `blob` feature is emitted per detected core (after deduplication); if two blobs are merged during deduplication their pixel masks are unioned before the hull is computed.
+
+**Core centroid placement:** The `core` Point coordinate is placed at the **peak-dBZ pixel** of the blob (the strongest updraft column), not at the geometric or weighted-mean centroid. This ensures the marker always falls inside the most intense part of the storm, which is the operationally relevant location.
+
+**Feature count per file:** Each volume scan produces `N_cores` core Points + `N_tops` top Points + `N_blobs` blob Polygons where `N_blobs == N_cores` (one blob per accepted core). The `feature_count` field in the database record covers all three feature types.
 
 ### GeoTIFF Metadata Fields
 
