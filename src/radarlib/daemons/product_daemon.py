@@ -1384,7 +1384,9 @@ class ProductGenerationDaemon:
                     if primary_path is not None:
                         shutil.copy2(str(primary_path), str(rounded_path))
                         logger.debug(
-                            f"[{self.config.radar_name}] Created rounded-timestamp TOPS_CORES variant: {rounded_path.name}"
+                            "[%s] Created rounded-timestamp TOPS_CORES variant: %s",
+                            self.config.radar_name,
+                            rounded_path.name,
                         )
                     else:
                         # COG rounded copy already overwrote the COG at rounded_dt;
