@@ -52,8 +52,8 @@ class TestDetectCoresFromColmax:
         """
         colmax = _make_colmax(0.0)
         row_sl, col_sl = slice(14, 18), slice(14, 18)  # 4×4 = 16 pixels
-        colmax[row_sl, col_sl] = 54.0   # above min_dbz, below updraft threshold
-        colmax[17, 17] = 65.0           # clear peak — last pixel in the blob
+        colmax[row_sl, col_sl] = 54.0  # above min_dbz, below updraft threshold
+        colmax[17, 17] = 65.0  # clear peak — last pixel in the blob
 
         result = detect_cores_from_colmax(
             colmax,
@@ -73,12 +73,12 @@ class TestDetectCoresFromColmax:
         # Centroid must be at the peak-dBZ pixel (17, 17), not the blob mean
         expected_x = float(_XX[17, 17])
         expected_y = float(_YY[17, 17])
-        assert abs(core["x_m"] - expected_x) < 1e-3, (
-            f"Centroid x should be peak-pixel {expected_x:.1f}, got {core['x_m']:.1f}"
-        )
-        assert abs(core["y_m"] - expected_y) < 1e-3, (
-            f"Centroid y should be peak-pixel {expected_y:.1f}, got {core['y_m']:.1f}"
-        )
+        assert (
+            abs(core["x_m"] - expected_x) < 1e-3
+        ), f"Centroid x should be peak-pixel {expected_x:.1f}, got {core['x_m']:.1f}"
+        assert (
+            abs(core["y_m"] - expected_y) < 1e-3
+        ), f"Centroid y should be peak-pixel {expected_y:.1f}, got {core['y_m']:.1f}"
 
         assert core["pixel_count"] == 16
         assert abs(core["max_dbz"] - 65.0) < 1e-4
@@ -259,7 +259,7 @@ class TestDetectCoresFromColmax:
         colmax = _make_colmax(0.0)
         row_sl, col_sl = slice(14, 19), slice(14, 19)  # 5×5 = 25 pixels
         colmax[row_sl, col_sl] = 54.0
-        colmax[17, 17] = 65.0   # clear peak, away from masked pixel at (16, 16)
+        colmax[17, 17] = 65.0  # clear peak, away from masked pixel at (16, 16)
 
         # Mask the central pixel of the blob
         mask = np.zeros((_NY, _NX), dtype=bool)
