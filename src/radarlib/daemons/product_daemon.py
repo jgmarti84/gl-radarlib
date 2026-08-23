@@ -350,7 +350,7 @@ class ProductGenerationDaemon:
                 max_neighbors=roi_params["max_neighbors"],
                 blind_range_m=gate_coords.get("blind_range_m", None),
                 lowest_elev_deg=gate_coords.get("lowest_elev_deg", None),
-                n_workers=8,
+                n_workers=1,  # keep geometry build single-threaded to avoid memory spikes
             )
 
         logger.info(f"Successfully built geometry for {self.config.radar_name} {strategy}-{vol_num}")
@@ -717,7 +717,6 @@ class ProductGenerationDaemon:
             netcdf_path: Path to the NetCDF volume file to process.
             volume_info: Dictionary with volume metadata from the state database.
         """
-        import datetime as _dt
         import gc
 
         from radarlib.daemons.field_processor import RawCogFieldProcessor
@@ -729,17 +728,7 @@ class ProductGenerationDaemon:
         filename_stem = Path(filename).stem
         vol_types = self.config.volume_types
 
-        # Compute ceiled/rounded timestamps once here so every product for this
-        # volume (COG, COLMAX, tops/cores) uses exactly the same values.
         obs_dt = parse_observation_timestamp(volume_info["observation_datetime"])
-        ceiled_dt_raw = obs_dt + _dt.timedelta(minutes=10)
-        ceiled_min = (ceiled_dt_raw.minute // 10) * 10
-        ceiled_dt = ceiled_dt_raw.replace(minute=ceiled_min, second=0, microsecond=0)
-        rounded_min_val = round(obs_dt.minute / 10) * 10
-        if rounded_min_val == 60:
-            rounded_dt = obs_dt.replace(minute=0, second=0, microsecond=0) + _dt.timedelta(hours=1)
-        else:
-            rounded_dt = obs_dt.replace(minute=rounded_min_val, second=0, microsecond=0)
 
         try:
             # --- Load and standardize volume -------------------------------------------
@@ -815,8 +804,7 @@ class ProductGenerationDaemon:
                     wrad_field=wrad_field,
                     zdr_field=zdr_field,
                     colmax_field=colmax_field,
-                    ceiled_dt=ceiled_dt,
-                    rounded_dt=rounded_dt,
+                    obs_dt=obs_dt,
                 )
 
             # --- Unfiltered fields -------------------------------------------------------
@@ -875,8 +863,7 @@ class ProductGenerationDaemon:
                     hrefl_field=hrefl_field,
                     rhv_field=rhv_field,
                     sweep=sweep,
-                    ceiled_dt=ceiled_dt,
-                    rounded_dt=rounded_dt,
+                    obs_dt=obs_dt,
                 )
 
             # --- Filtered fields ---------------------------------------------------------
@@ -1065,8 +1052,7 @@ class ProductGenerationDaemon:
         wrad_field: str,
         zdr_field: str,
         colmax_field: str,
-        ceiled_dt: "datetime",
-        rounded_dt: "datetime",
+        obs_dt: "datetime",
     ) -> None:
         """Generate unfiltered and/or filtered COLMAX raw COG files.
 
@@ -1179,7 +1165,7 @@ class ProductGenerationDaemon:
                 #     gridf = GridFilter()
                 #     colmax_2d = gridf.apply_below(colmax_2d, config.COLMAX_THRESHOLD)
 
-                # Build metadata and output paths (v2 naming: ceiled + rounded variants)
+                # Build metadata and output path
                 metadata = build_product_metadata(
                     radar=radar,
                     volume_info=volume_info,
@@ -1193,16 +1179,7 @@ class ProductGenerationDaemon:
                     strategy,
                     vol_nr,
                     colmax_field,
-                    ceiled_dt,
-                    self.config.local_product_dir,
-                    filtered=filtered,
-                )
-                rounded_path = product_path_and_filename(
-                    self.config.radar_name,
-                    strategy,
-                    vol_nr,
-                    colmax_field,
-                    rounded_dt,
+                    obs_dt,
                     self.config.local_product_dir,
                     filtered=filtered,
                 )
@@ -1231,10 +1208,6 @@ class ProductGenerationDaemon:
                     shutil.move(str(output_file), str(target_path))
                     logger.info(f"Generated {label} raw COLMAX COG -> {target_path.name}")
 
-                if target_path != rounded_path:
-                    shutil.copy2(str(target_path), str(rounded_path))
-                    logger.debug(f"Created rounded-timestamp COLMAX variant: {rounded_path.name}")
-
             except Exception as e:
                 logger.error(f"Error generating {label} raw COLMAX: {e}", exc_info=True)
             finally:
@@ -1253,8 +1226,7 @@ class ProductGenerationDaemon:
         hrefl_field: str,
         rhv_field: str,
         sweep: int,
-        ceiled_dt: "datetime",
-        rounded_dt: "datetime",
+        obs_dt: "datetime",
     ) -> None:
         """Recompute Cartesian grids and run convective tops & cores detection.
 
@@ -1275,8 +1247,7 @@ class ProductGenerationDaemon:
             hrefl_field: Resolved horizontal reflectivity field name.
             rhv_field: Resolved cross-correlation ratio field name.
             sweep: Lowest-elevation sweep index.
-            ceiled_dt: Pre-computed ceiled observation datetime (shared with COG step).
-            rounded_dt: Pre-computed rounded observation datetime (shared with COG step).
+            obs_dt: Exact observation datetime from the BUFR volume.
         """
         import gc
 
@@ -1337,7 +1308,7 @@ class ProductGenerationDaemon:
                     z_coords=_ct_z_1d,
                     radar_lat=float(radar.latitude["data"].data[0]),
                     radar_lon=float(radar.longitude["data"].data[0]),
-                    observation_time=ceiled_dt,
+                    observation_time=obs_dt,
                     radar_code=self.config.radar_name,
                     strategy=volume_info["strategy"],
                     vol_nr=volume_info["vol_nr"],
@@ -1345,58 +1316,6 @@ class ProductGenerationDaemon:
                     rhohv_3d=_ct_rhohv_3d,
                     rhohv_2d=_ct_rhohv_2d,
                 )
-
-                if primary_path is None:
-                    # No detections this scan. The COG at ceiled_dt was just
-                    # overwritten unconditionally; remove any stale tops/cores
-                    # at that same timestamp left by an earlier scan in the same
-                    # 10-min bucket so COG and tops/cores stay in sync.
-                    ceiled_ts = ceiled_dt.strftime("%Y%m%dT%H%M%SZ")
-                    ceiled_subdir = (
-                        Path(self.config.tops_and_cores_output_dir)
-                        / f"{ceiled_dt.year:04d}"
-                        / f"{ceiled_dt.month:02d}"
-                        / f"{ceiled_dt.day:02d}"
-                    )
-                    ceiled_stale_path = ceiled_subdir / (
-                        f"{self.config.radar_name}_{volume_info['strategy']}"
-                        f"_{volume_info['vol_nr']}_{ceiled_ts}_TOPS_CORES.geojson"
-                    )
-                    if ceiled_stale_path.exists():
-                        ceiled_stale_path.unlink()
-                        logger.debug(
-                            f"[{self.config.radar_name}] Removed stale ceiled-timestamp TOPS_CORES "
-                            f"(no detections this scan): {ceiled_stale_path.name}"
-                        )
-
-                if ceiled_dt != rounded_dt:
-                    rounded_ts = rounded_dt.strftime("%Y%m%dT%H%M%SZ")
-                    rounded_subdir = (
-                        Path(self.config.tops_and_cores_output_dir)
-                        / f"{rounded_dt.year:04d}"
-                        / f"{rounded_dt.month:02d}"
-                        / f"{rounded_dt.day:02d}"
-                    )
-                    rounded_path = rounded_subdir / (
-                        f"{self.config.radar_name}_{volume_info['strategy']}"
-                        f"_{volume_info['vol_nr']}_{rounded_ts}_TOPS_CORES.geojson"
-                    )
-                    if primary_path is not None:
-                        shutil.copy2(str(primary_path), str(rounded_path))
-                        logger.debug(
-                            "[%s] Created rounded-timestamp TOPS_CORES variant: %s",
-                            self.config.radar_name,
-                            rounded_path.name,
-                        )
-                    else:
-                        # COG rounded copy already overwrote the COG at rounded_dt;
-                        # remove any stale tops/cores there too.
-                        if rounded_path.exists():
-                            rounded_path.unlink()
-                            logger.debug(
-                                f"[{self.config.radar_name}] Removed stale rounded-timestamp TOPS_CORES "
-                                f"(no detections this scan): {rounded_path.name}"
-                            )
 
         except Exception as _ct_exc:
             logger.error(
