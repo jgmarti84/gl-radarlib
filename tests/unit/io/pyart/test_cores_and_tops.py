@@ -3,10 +3,10 @@ Unit tests for radarlib.io.pyart.cores_and_tops.generate_cores_and_tops.
 
 These tests use:
   - Synthetic NumPy arrays — no real radar data required.
-  - ``unittest.mock.patch`` to replace the detection functions and the PyART
-    coordinate transform so that neither scipy nor pyart need to execute
-    real code.  The patches target the *source* module attributes so they are
-    picked up by the lazy ``from X import Y`` inside ``_run()``.
+  - ``unittest.mock.patch`` to replace the detection functions so that neither
+    scipy nor pyart need to execute real code.  The patches target the *source*
+    module attributes so they are picked up by the lazy ``from X import Y``
+    inside ``_run()``.
 
 The entire module is skipped when scipy or pyart are not importable (e.g. local
 dev environments without the full dependency stack).  In Docker (requirements.txt
@@ -37,7 +37,6 @@ from radarlib.io.pyart.cores_and_tops import generate_cores_and_tops  # noqa: E4
 # picks up the mock when the module attribute has been replaced.
 PATCH_CORES = "radarlib.radar_grid.detect_cores_from_colmax"
 PATCH_TOPS = "radarlib.radar_grid.detect_tops_from_cores"
-PATCH_GEO = "pyart.core.transforms.cartesian_to_geographic_aeqd"
 
 # ---------------------------------------------------------------------------
 # Synthetic detection results
@@ -62,14 +61,6 @@ TOP = {
 }
 
 
-def _mock_geo(x_arr, y_arr, lon_0, lat_0, R=6370997.0):
-    """Fake coordinate transform: return constant lon/lat offsets."""
-    return (
-        np.full_like(x_arr, lon_0 + 0.01, dtype=np.float64),
-        np.full_like(x_arr, lat_0 + 0.01, dtype=np.float64),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -78,11 +69,14 @@ def _mock_geo(x_arr, y_arr, lon_0, lat_0, R=6370997.0):
 @pytest.fixture()
 def arrays():
     ny, nx, nz = 10, 10, 4
+    x_lin = np.linspace(-50_000.0, 50_000.0, nx)
+    y_lin = np.linspace(-50_000.0, 50_000.0, ny)
+    yy, xx = np.meshgrid(y_lin, x_lin, indexing="ij")
     return {
         "colmax_2d": np.zeros((ny, nx), dtype=np.float32),
         "dbzh_3d": np.zeros((nz, ny, nx), dtype=np.float32),
-        "x_coords": np.zeros((ny, nx), dtype=np.float32),
-        "y_coords": np.zeros((ny, nx), dtype=np.float32),
+        "x_coords": xx.astype(np.float32),
+        "y_coords": yy.astype(np.float32),
         "z_coords": np.array([1000.0, 3000.0, 6000.0, 9000.0], dtype=np.float32),
     }
 
@@ -117,7 +111,6 @@ def test_empty_results_no_file_written(kwargs, tmp_path):
     with (
         patch(PATCH_CORES, return_value=[]),
         patch(PATCH_TOPS, return_value=[]),
-        patch(PATCH_GEO, side_effect=_mock_geo),
     ):
         result = generate_cores_and_tops(**kwargs)
 
@@ -130,7 +123,6 @@ def test_geojson_written_with_cores(kwargs):
     with (
         patch(PATCH_CORES, return_value=[CORE]),
         patch(PATCH_TOPS, return_value=[]),
-        patch(PATCH_GEO, side_effect=_mock_geo),
     ):
         result = generate_cores_and_tops(**kwargs)
 
@@ -160,7 +152,6 @@ def test_geojson_written_with_tops(kwargs):
     with (
         patch(PATCH_CORES, return_value=[CORE]),
         patch(PATCH_TOPS, return_value=[TOP]),
-        patch(PATCH_GEO, side_effect=_mock_geo),
     ):
         result = generate_cores_and_tops(**kwargs)
 
@@ -184,7 +175,6 @@ def test_geojson_contains_both_types(kwargs):
     with (
         patch(PATCH_CORES, return_value=[CORE]),
         patch(PATCH_TOPS, return_value=[TOP]),
-        patch(PATCH_GEO, side_effect=_mock_geo),
     ):
         result = generate_cores_and_tops(**kwargs)
 
@@ -200,7 +190,6 @@ def test_output_path_format(kwargs, obs_time):
     with (
         patch(PATCH_CORES, return_value=[CORE]),
         patch(PATCH_TOPS, return_value=[]),
-        patch(PATCH_GEO, side_effect=_mock_geo),
     ):
         result = generate_cores_and_tops(**kwargs)
 
@@ -218,7 +207,6 @@ def test_write_failure_does_not_raise(kwargs):
     with (
         patch(PATCH_CORES, return_value=[CORE]),
         patch(PATCH_TOPS, return_value=[]),
-        patch(PATCH_GEO, side_effect=_mock_geo),
         patch("builtins.open", side_effect=IOError("disk full")),
     ):
         result = generate_cores_and_tops(**kwargs)
@@ -232,7 +220,6 @@ def test_missing_rhohv_passes_none(kwargs):
     with (
         patch(PATCH_CORES, return_value=[CORE]) as mock_cores,
         patch(PATCH_TOPS, return_value=[TOP]),
-        patch(PATCH_GEO, side_effect=_mock_geo),
     ):
         result = generate_cores_and_tops(**kwargs)
 
@@ -247,7 +234,6 @@ def test_observation_time_format(kwargs):
     with (
         patch(PATCH_CORES, return_value=[CORE]),
         patch(PATCH_TOPS, return_value=[]),
-        patch(PATCH_GEO, side_effect=_mock_geo),
     ):
         result = generate_cores_and_tops(**kwargs)
 
