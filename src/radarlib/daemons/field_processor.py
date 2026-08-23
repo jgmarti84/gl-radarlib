@@ -228,8 +228,6 @@ class RawCogFieldProcessor(FieldProcessor):
         See :meth:`FieldProcessor.process_and_save` for parameter documentation.
         """
         # Deferred heavy imports to avoid slowing down module loads
-        import datetime as _dt
-
         from radarlib import config as radarlib_config
         from radarlib.daemons.product_metadata import parse_observation_timestamp
         from radarlib.radar_grid import apply_geometry, constant_elevation_ppi, create_raw_cog
@@ -307,9 +305,9 @@ class RawCogFieldProcessor(FieldProcessor):
             )
 
             # --- Resolve output path (exact observation timestamp) --------------------
-            obs_dt   = parse_observation_timestamp(self.volume_info["observation_datetime"])
+            obs_dt = parse_observation_timestamp(self.volume_info["observation_datetime"])
             strategy = self.volume_info["strategy"]
-            vol_nr   = self.volume_info["vol_nr"]
+            vol_nr = self.volume_info["vol_nr"]
 
             target_path = product_path_and_filename(
                 self.radar_name,

@@ -1300,7 +1300,7 @@ class ProductGenerationDaemon:
                 _ct_yy, _ct_xx = np.meshgrid(_ct_y_1d, _ct_x_1d, indexing="ij")
                 _ct_z_1d = geom.z_levels().astype(np.float32)
 
-                primary_path = generate_cores_and_tops(
+                generate_cores_and_tops(
                     colmax_2d=_ct_colmax_2d,
                     dbzh_3d=_ct_dbzh_3d,
                     x_coords=_ct_xx,
