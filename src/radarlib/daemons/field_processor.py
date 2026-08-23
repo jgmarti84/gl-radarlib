@@ -228,8 +228,6 @@ class RawCogFieldProcessor(FieldProcessor):
         See :meth:`FieldProcessor.process_and_save` for parameter documentation.
         """
         # Deferred heavy imports to avoid slowing down module loads
-        import datetime as _dt
-
         from radarlib import config as radarlib_config
         from radarlib.daemons.product_metadata import parse_observation_timestamp
         from radarlib.radar_grid import apply_geometry, constant_elevation_ppi, create_raw_cog
@@ -306,43 +304,17 @@ class RawCogFieldProcessor(FieldProcessor):
                 filtered=filtered,
             )
 
-            # --- Resolve output paths (v2 naming, ceiled + rounded variants) ----------
-            # Reproduce pre-refactor dual-save behaviour:
-            #   ceiled  = floor(obs_time + 10 min, 10 min)  → "next" 10-min boundary
-            #   rounded = round(obs_time, 10 min)           → nearest 10-min boundary
-            # Both paths are written so that consumers can find the product even
-            # when the rounded and the ceiled timestamps differ.
+            # --- Resolve output path (exact observation timestamp) --------------------
             obs_dt = parse_observation_timestamp(self.volume_info["observation_datetime"])
             strategy = self.volume_info["strategy"]
             vol_nr = self.volume_info["vol_nr"]
-
-            # Ceiled: add 10 min then floor to 10-min boundary
-            ceiled_dt_raw = obs_dt + _dt.timedelta(minutes=10)
-            ceiled_min = (ceiled_dt_raw.minute // 10) * 10
-            ceiled_dt = ceiled_dt_raw.replace(minute=ceiled_min, second=0, microsecond=0)
-
-            # Rounded: round obs_dt to nearest 10 min (handles roll-over to next hour)
-            rounded_min_val = round(obs_dt.minute / 10) * 10
-            if rounded_min_val == 60:
-                rounded_dt = obs_dt.replace(minute=0, second=0, microsecond=0) + _dt.timedelta(hours=1)
-            else:
-                rounded_dt = obs_dt.replace(minute=rounded_min_val, second=0, microsecond=0)
 
             target_path = product_path_and_filename(
                 self.radar_name,
                 strategy,
                 vol_nr,
                 field_name,
-                ceiled_dt,
-                output_dir,
-                filtered=filtered,
-            )
-            rounded_path = product_path_and_filename(
-                self.radar_name,
-                strategy,
-                vol_nr,
-                field_name,
-                rounded_dt,
+                obs_dt,
                 output_dir,
                 filtered=filtered,
             )
@@ -374,11 +346,6 @@ class RawCogFieldProcessor(FieldProcessor):
                     return None
 
                 shutil.move(str(temp_cog_path), str(target_path))
-
-            # --- Create rounded timestamp variant ----------------------------------------
-            if target_path != rounded_path:
-                shutil.copy2(str(target_path), str(rounded_path))
-                logger.debug(f"Created rounded-timestamp variant: {rounded_path.name}")
 
             logger.info(
                 f"Generated {'filtered' if filtered else 'unfiltered'} raw COG: "
