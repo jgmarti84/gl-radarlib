@@ -81,10 +81,9 @@ def detect_cores_from_colmax(
         artefacts.  Defaults to ``config.CORES_MIN_RANGE`` (12 000 m).
     dedup_radius_m : float, optional
         Merge radius for nearby centroids (metres).  When two cores are within
-        this distance of each other, their centroids are merged using a weighted
-        mean (weight = mean dBZ), and the merged core retains the intensity
-        metrics of the stronger core.  Defaults to ``config.CORES_DEDUP_RADIUS``
-        (8 000 m).
+        this distance of each other, the strongest core's peak-pixel location
+        is kept and weaker ones are discarded.  Defaults to
+        ``config.CORES_DEDUP_RADIUS`` (8 000 m).
     rhohv_threshold : float, optional
         Minimum mean RhoHV to pass the meteorological echo gate (default
         0.85).
@@ -105,6 +104,10 @@ def detect_cores_from_colmax(
         * ``"max_dbz"`` – maximum dBZ in the blob (*float*)
         * ``"pixel_count"`` – number of pixels in the blob (*int*)
         * ``"range_m"`` – distance of centroid from radar origin (*float*)
+        * ``"blob_mask"`` – boolean 2D array (same shape as ``colmax``) marking
+          all pixels belonging to this core's blob.  When two blobs are merged
+          during deduplication their masks are unioned so the footprint covers
+          both original blobs.
 
         Returns an empty list if no cores are detected.
 
@@ -116,11 +119,10 @@ def detect_cores_from_colmax(
     Conservative to avoid merging adjacent but distinct cells.
 
     **Deduplication strategy:**
-    When two accepted cores within ``dedup_radius_m`` are identified, their
-    centroids are merged using a weighted mean where the weight is the core's
-    mean dBZ. The merged core retains the intensity statistics (mean_dbz,
-    max_dbz, pixel_count) of the stronger core. This approach reduces fragmentation
-    from wind shear while respecting both cells' spatial contributions.
+    When two accepted cores within ``dedup_radius_m`` are identified, the
+    strongest core's peak-pixel location is kept and the weaker cores are
+    discarded.  A weighted-mean centroid is intentionally avoided because it
+    can fall in a low-dBZ gap between adjacent blobs.
 
     **Error handling:**
     This function never raises.  Exceptions encountered during processing
@@ -227,11 +229,12 @@ def detect_cores_from_colmax(
                     "max_dbz": max_dbz,
                     "pixel_count": pixel_count,
                     "range_m": range_m,
+                    "blob_mask": blob_mask,
                 }
             )
 
         # ------------------------------------------------------------------
-        # Step 4 — deduplicate by proximity with weighted mean centroids
+        # Step 4 — deduplicate by proximity (keep strongest core)
         # ------------------------------------------------------------------
         accepted.sort(key=lambda c: c["mean_dbz"], reverse=True)
 
@@ -261,16 +264,17 @@ def detect_cores_from_colmax(
             if len(close_candidates) == 1:
                 deduplicated.append(candidate)
             else:
-                # Compute weighted mean centroid using mean_dbz as weight
-                total_weight = sum(c["mean_dbz"] for c in close_candidates)
-                weighted_x = sum(c["x_m"] * c["mean_dbz"] for c in close_candidates) / total_weight
-                weighted_y = sum(c["y_m"] * c["mean_dbz"] for c in close_candidates) / total_weight
-
-                # Merge: keep strongest core's dBZ stats, update centroid
+                # Keep the strongest core's peak location — do NOT compute a weighted
+                # centroid, because the average of two peak pixels may fall in a low-dBZ
+                # gap between the blobs and make the dot appear outside the storm.
                 merged_core = close_candidates[0].copy()
-                merged_core["x_m"] = float(weighted_x)
-                merged_core["y_m"] = float(weighted_y)
-                merged_core["range_m"] = math.sqrt(weighted_x * weighted_x + weighted_y * weighted_y)
+
+                # Union blob masks so the footprint covers all merged blobs.
+                merged_blob = close_candidates[0]["blob_mask"].copy()
+                for other in close_candidates[1:]:
+                    merged_blob |= other["blob_mask"]
+                merged_core["blob_mask"] = merged_blob
+                merged_core["pixel_count"] = int(merged_blob.sum())
 
                 deduplicated.append(merged_core)
 
@@ -280,12 +284,12 @@ def detect_cores_from_colmax(
 
                 logger.debug(
                     "detect_cores_from_colmax: merged %d core(s) within %.0f m; "
-                    "weighted centroid: (%.1f, %.1f) m, mean_dbz=%.1f dBZ",
+                    "kept strongest centroid: (%.1f, %.1f) m, mean_dbz=%.1f dBZ",
                     len(close_candidates),
                     dedup_radius_m,
-                    weighted_x,
-                    weighted_y,
-                    close_candidates[0]["mean_dbz"],
+                    merged_core["x_m"],
+                    merged_core["y_m"],
+                    merged_core["mean_dbz"],
                 )
 
         logger.debug(

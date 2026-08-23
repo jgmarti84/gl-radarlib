@@ -8,6 +8,10 @@ local:
     "1000":
       "03":
         - DBZH
+      "02":
+        - VRAD
+      "01":
+        - DBZH
 
 
   DAEOMN_PARAMS:
@@ -22,7 +26,8 @@ local:
     PRODUCT_POLL_INTERVAL: 150
     CLEANUP_POLL_INTERVAL: 1800
     PRODUCT_TYPE: "raw_cog"
-    ADD_COLMAX: False
-    ADD_TOPS_AND_CORES: False
+    ADD_COLMAX: True
+    ADD_TOPS_AND_CORES: True
+    TOPS_AND_CORES_VOL_NR: "03"
     NETCDF_RETENTION_DAYS: 0.08333333333333333
     BUFR_RETENTION_DAYS: 0.08333333333333333

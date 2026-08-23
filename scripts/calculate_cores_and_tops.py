@@ -1422,13 +1422,13 @@ def _process_scan(
     production daemon).  When ceiled_dt ≠ rounded_dt a second GeoJSON copy is
     written at the rounded timestamp — also matching daemon behaviour.
     """
+    import radarlib.config as _rlib_cfg
     from radarlib.daemons.field_processor import apply_coverage_radius_mask
     from radarlib.io.pyart.pyart_radar import estandarizar_campos_RMA, read_radar_netcdf
     from radarlib.radar_grid.interpolate import apply_geometry as _apply_geom
     from radarlib.radar_grid.products import column_max, constant_elevation_ppi
     from radarlib.radar_grid.utils import get_field_data
     from radarlib.utils.fields_utils import determine_reflectivity_fields, get_lowest_nsweep
-    import radarlib.config as _rlib_cfg
 
     # ------------------------------------------------------------------
     # Timestamp rounding — matches production daemon
@@ -1441,7 +1441,9 @@ def _process_scan(
     if ceiled_dt != rounded_dt:
         logger.info(
             "Timestamps: raw=%s  ceiled=%s  rounded=%s",
-            raw_ts, ceiled_ts, rounded_dt.strftime("%Y%m%dT%H%M%SZ"),
+            raw_ts,
+            ceiled_ts,
+            rounded_dt.strftime("%Y%m%dT%H%M%SZ"),
         )
     else:
         logger.info("Timestamps: raw=%s  ceiled/rounded=%s", raw_ts, ceiled_ts)
@@ -1497,8 +1499,10 @@ def _process_scan(
     if len(valid_px) > 0:
         logger.info(
             "COLMAX stats — min=%.1f  max=%.1f  mean=%.1f  valid_px=%d",
-            float(np.min(valid_px)), float(np.max(valid_px)),
-            float(np.mean(valid_px)), len(valid_px),
+            float(np.min(valid_px)),
+            float(np.max(valid_px)),
+            float(np.mean(valid_px)),
+            len(valid_px),
         )
     else:
         logger.warning("COLMAX grid is all NaN — nothing will be detected.")
@@ -1508,14 +1512,14 @@ def _process_scan(
     # ------------------------------------------------------------------
     rhohv_3d: Optional[np.ndarray] = None
     rhohv_2d: Optional[np.ndarray] = None
-    rhohv_field_name = _find_rhohv_field(radar)
+    rhohv_field_name = _find_rhohv_field(radar)  # noqa: F821
     if rhohv_field_name is not None:
         logger.info("Extracting RhoHV …")
         try:
-            rhohv_field_data = get_field_data(radar, rhohv_field_name)
+            rhohv_field_data = get_field_data(radar, rhohv_field_name)  # noqa: F821
             rhohv_3d = _apply_geom(geometry, rhohv_field_data)
-            lowest_sweep = get_lowest_nsweep(radar)
-            elevation_angle = float(np.unique(radar.get_elevation(lowest_sweep))[0])
+            lowest_sweep = get_lowest_nsweep(radar)  # noqa: F821
+            elevation_angle = float(np.unique(radar.get_elevation(lowest_sweep))[0])  # noqa: F821
             rhohv_2d = constant_elevation_ppi(
                 rhohv_3d, geometry, elevation_angle=elevation_angle, interpolation="linear"
             )
@@ -1532,7 +1536,7 @@ def _process_scan(
     else:
         logger.warning("No RhoHV field found — quality gate disabled.")
 
-    del radar
+    del radar  # noqa: F821
     gc.collect()
 
     # ------------------------------------------------------------------
@@ -1606,12 +1610,7 @@ def _process_scan(
     # ------------------------------------------------------------------
     if ceiled_dt != rounded_dt:
         rounded_ts = rounded_dt.strftime("%Y%m%dT%H%M%SZ")
-        rounded_subdir = (
-            output_dir
-            / f"{rounded_dt.year:04d}"
-            / f"{rounded_dt.month:02d}"
-            / f"{rounded_dt.day:02d}"
-        )
+        rounded_subdir = output_dir / f"{rounded_dt.year:04d}" / f"{rounded_dt.month:02d}" / f"{rounded_dt.day:02d}"
         rounded_path = rounded_subdir / f"{radar_name}_{strategy}_{vol_nr}_{rounded_ts}_TOPS_CORES.geojson"
         if geojson_path is not None:
             try:
@@ -1693,7 +1692,10 @@ def main() -> None:
         print("ERROR: --datetime is mutually exclusive with --start-datetime/--end-datetime.", file=sys.stderr)
         sys.exit(1)
     if not has_single and not has_batch:
-        print("ERROR: Provide either --datetime (single scan) or --start-datetime + --end-datetime (batch).", file=sys.stderr)
+        print(
+            "ERROR: Provide either --datetime (single scan) or --start-datetime + --end-datetime (batch).",
+            file=sys.stderr,
+        )
         sys.exit(1)
     if has_batch and (args.start_datetime is None or args.end_datetime is None):
         print("ERROR: Both --start-datetime and --end-datetime are required for batch mode.", file=sys.stderr)
@@ -1737,7 +1739,11 @@ def main() -> None:
     xx, yy, z_1d = _extract_coordinates(geometry)
     logger.info(
         "Grid: nz=%d  ny=%d  nx=%d  z_range=[%.0f, %.0f] m",
-        len(z_1d), xx.shape[0], xx.shape[1], float(z_1d[0]), float(z_1d[-1]),
+        len(z_1d),
+        xx.shape[0],
+        xx.shape[1],
+        float(z_1d[0]),
+        float(z_1d[-1]),
     )
 
     # ------------------------------------------------------------------
@@ -1752,7 +1758,10 @@ def main() -> None:
 
         logger.info(
             "Single scan mode: radar=%s  strategy=%s  vol_nr=%s  time=%s",
-            radar_name, strategy, vol_nr, obs_time.strftime("%Y%m%dT%H%M%SZ"),
+            radar_name,
+            strategy,
+            vol_nr,
+            obs_time.strftime("%Y%m%dT%H%M%SZ"),
         )
 
         _temp_netcdf: Optional[Path] = None
@@ -1763,8 +1772,12 @@ def main() -> None:
             logger.info("NetCDF not found locally — fetching BUFR from FTP …")
             try:
                 netcdf_path, actual_obs_time = _fetch_and_decode_bufr(
-                    radar_name=radar_name, strategy=strategy, vol_nr=vol_nr,
-                    obs_time=obs_time, ftp_cfg=app_cfg, window_hours=args.search_window_hours,
+                    radar_name=radar_name,
+                    strategy=strategy,
+                    vol_nr=vol_nr,
+                    obs_time=obs_time,
+                    ftp_cfg=app_cfg,
+                    window_hours=args.search_window_hours,
                 )
                 _temp_netcdf = netcdf_path
             except RuntimeError as exc:
@@ -1775,9 +1788,16 @@ def main() -> None:
             _process_scan(
                 netcdf_path=netcdf_path,
                 actual_obs_time=actual_obs_time,
-                geometry=geometry, xx=xx, yy=yy, z_1d=z_1d,
-                radar_name=radar_name, strategy=strategy, vol_nr=vol_nr,
-                output_dir=output_dir, args=args, app_cfg=app_cfg,
+                geometry=geometry,
+                xx=xx,
+                yy=yy,
+                z_1d=z_1d,
+                radar_name=radar_name,
+                strategy=strategy,
+                vol_nr=vol_nr,
+                output_dir=output_dir,
+                args=args,
+                app_cfg=app_cfg,
             )
         finally:
             if _temp_netcdf is not None and _temp_netcdf.exists():
@@ -1803,8 +1823,11 @@ def main() -> None:
 
         logger.info(
             "Batch mode: radar=%s  strategy=%s  vol_nr=%s  window=[%s, %s]",
-            radar_name, strategy, vol_nr,
-            start_dt.strftime("%Y%m%dT%H%M%SZ"), end_dt.strftime("%Y%m%dT%H%M%SZ"),
+            radar_name,
+            strategy,
+            vol_nr,
+            start_dt.strftime("%Y%m%dT%H%M%SZ"),
+            end_dt.strftime("%Y%m%dT%H%M%SZ"),
         )
 
         logger.info("Listing available scans from FTP …")
@@ -1826,23 +1849,38 @@ def main() -> None:
         for i, (obs_time, dbzh_remote, dbzh_fname, rhohv_remote, rhohv_fname) in enumerate(pairs, start=1):
             logger.info(
                 "=== Scan %d/%d  obs_time=%s ===",
-                i, len(pairs), obs_time.strftime("%Y%m%dT%H%M%SZ"),
+                i,
+                len(pairs),
+                obs_time.strftime("%Y%m%dT%H%M%SZ"),
             )
             _temp_netcdf = None
             try:
                 _temp_netcdf = _fetch_pair_to_netcdf(
-                    app_cfg, dbzh_remote, dbzh_fname, rhohv_remote, rhohv_fname,
+                    app_cfg,
+                    dbzh_remote,
+                    dbzh_fname,
+                    rhohv_remote,
+                    rhohv_fname,
                 )
                 _process_scan(
                     netcdf_path=_temp_netcdf,
                     actual_obs_time=obs_time,
-                    geometry=geometry, xx=xx, yy=yy, z_1d=z_1d,
-                    radar_name=radar_name, strategy=strategy, vol_nr=vol_nr,
-                    output_dir=output_dir, args=args, app_cfg=app_cfg,
+                    geometry=geometry,
+                    xx=xx,
+                    yy=yy,
+                    z_1d=z_1d,
+                    radar_name=radar_name,
+                    strategy=strategy,
+                    vol_nr=vol_nr,
+                    output_dir=output_dir,
+                    args=args,
+                    app_cfg=app_cfg,
                 )
             except Exception as exc:
                 logger.error(
-                    "Failed to process scan %s: %s", obs_time.strftime("%Y%m%dT%H%M%SZ"), exc,
+                    "Failed to process scan %s: %s",
+                    obs_time.strftime("%Y%m%dT%H%M%SZ"),
+                    exc,
                     exc_info=True,
                 )
             finally:

@@ -44,13 +44,16 @@ class TestDetectCoresFromColmax:
         """One clear blob above threshold passes range, size and updraft gate.
 
         The blob is a 4×4 region (16 pixels) at the far corner of the grid.
-        Because max_dbz=60 > min_dbz_updraft=56 and pixel_count=16 > 5,
+        Because max_dbz=65 > min_dbz_updraft=56 and pixel_count=16 > 5,
         the updraft gate must accept it even without RhoHV.
-        The centroid should be the mean of the blob pixel coordinates.
+        The centroid must be placed at the peak-dBZ pixel, not the geometric
+        centre.  The peak is forced to (row=17, col=17) — the last pixel in
+        row-major order — so the test would fail with a mean-centroid algorithm.
         """
         colmax = _make_colmax(0.0)
         row_sl, col_sl = slice(14, 18), slice(14, 18)  # 4×4 = 16 pixels
-        colmax[row_sl, col_sl] = 60.0
+        colmax[row_sl, col_sl] = 54.0  # above min_dbz, below updraft threshold
+        colmax[17, 17] = 65.0  # clear peak — last pixel in the blob
 
         result = detect_cores_from_colmax(
             colmax,
@@ -67,15 +70,18 @@ class TestDetectCoresFromColmax:
         assert len(result) == 1, f"Expected 1 core, got {len(result)}"
         core = result[0]
 
-        # Verify centroid is the mean of the blob x/y coords
-        expected_x = float(_XX[row_sl, col_sl].mean())
-        expected_y = float(_YY[row_sl, col_sl].mean())
-        assert abs(core["x_m"] - expected_x) < 1e-3
-        assert abs(core["y_m"] - expected_y) < 1e-3
+        # Centroid must be at the peak-dBZ pixel (17, 17), not the blob mean
+        expected_x = float(_XX[17, 17])
+        expected_y = float(_YY[17, 17])
+        assert (
+            abs(core["x_m"] - expected_x) < 1e-3
+        ), f"Centroid x should be peak-pixel {expected_x:.1f}, got {core['x_m']:.1f}"
+        assert (
+            abs(core["y_m"] - expected_y) < 1e-3
+        ), f"Centroid y should be peak-pixel {expected_y:.1f}, got {core['y_m']:.1f}"
 
         assert core["pixel_count"] == 16
-        assert abs(core["mean_dbz"] - 60.0) < 1e-4
-        assert abs(core["max_dbz"] - 60.0) < 1e-4
+        assert abs(core["max_dbz"] - 65.0) < 1e-4
         assert core["range_m"] > 0.0
 
     def test_blob_below_min_range(self):
@@ -245,13 +251,15 @@ class TestDetectCoresFromColmax:
     def test_masked_array_input(self):
         """Masked pixels in colmax are excluded from blobs.
 
-        The threshold value is written everywhere, but the centre of the blob
-        is masked out along with all background pixels below threshold.
-        This guarantees the masked pixels don't contribute to any blob.
+        A 5×5 blob is created with most pixels at 54 dBZ and a distinct peak
+        at (17, 17) = 65 dBZ.  The central pixel (16, 16) is masked out.
+        The centroid must land at (17, 17) — the unmasked peak-dBZ pixel —
+        confirming that masking is respected and centroid = peak, not mean.
         """
         colmax = _make_colmax(0.0)
-        row_sl, col_sl = slice(14, 19), slice(14, 19)  # 5×5 = 25 pixels at 60 dBZ
-        colmax[row_sl, col_sl] = 60.0
+        row_sl, col_sl = slice(14, 19), slice(14, 19)  # 5×5 = 25 pixels
+        colmax[row_sl, col_sl] = 54.0
+        colmax[17, 17] = 65.0  # clear peak, away from masked pixel at (16, 16)
 
         # Mask the central pixel of the blob
         mask = np.zeros((_NY, _NX), dtype=bool)
@@ -273,16 +281,14 @@ class TestDetectCoresFromColmax:
         # The blob is still large enough (24 unmasked pixels) to be detected
         assert len(result) == 1, f"Expected 1 core from masked array input, got {result}"
 
-        # Centroid must NOT include the masked pixel
+        # Centroid must be at the peak-dBZ pixel (17, 17), not the blob mean
         core = result[0]
-        unmasked_x = _XX[row_sl, col_sl][~mask[row_sl, col_sl]]
-        unmasked_y = _YY[row_sl, col_sl][~mask[row_sl, col_sl]]
-        expected_x = float(unmasked_x.mean())
-        expected_y = float(unmasked_y.mean())
+        expected_x = float(_XX[17, 17])
+        expected_y = float(_YY[17, 17])
         assert (
             abs(core["x_m"] - expected_x) < 1e-3
-        ), f"Centroid x mismatch: got {core['x_m']:.2f}, expected {expected_x:.2f}"
+        ), f"Centroid x should be peak-pixel {expected_x:.2f}, got {core['x_m']:.2f}"
         assert (
             abs(core["y_m"] - expected_y) < 1e-3
-        ), f"Centroid y mismatch: got {core['y_m']:.2f}, expected {expected_y:.2f}"
+        ), f"Centroid y should be peak-pixel {expected_y:.2f}, got {core['y_m']:.2f}"
         assert core["pixel_count"] == 24  # 25 - 1 masked pixel
