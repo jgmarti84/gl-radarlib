@@ -1,7 +1,7 @@
 # Plan de despliegue en producción
 ## Cambios radarlib + webmet25 — Agosto 2026
 
-**Preparado por:** Javier Marti  
+**Preparado por:** Javier Marti
 **Fecha:** 28 de agosto de 2026
 
 ---
