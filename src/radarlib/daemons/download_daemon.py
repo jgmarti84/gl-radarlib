@@ -446,8 +446,8 @@ class DownloadDaemon:
                         #     base_delay=self.config.bufr_download_base_delay,
                         #     max_delay=self.config.bufr_download_max_delay,
                         # )
-                        current_remote = remote_path
-                        current_local = str(local_path)
+                        current_remote = Path(remote_path)
+                        current_local = local_path
 
                         await exponential_backoff_retry(
                             lambda cr=current_remote, cl=current_local: client.download_file_async(cr, cl),
