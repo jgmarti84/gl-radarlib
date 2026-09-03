@@ -615,6 +615,11 @@ class ProcessingDaemon:
         decoded_fields = []
 
         for bufr_path in bufr_paths:
+            # Guard against 0-byte files that cause the BUFR C library to call _exit(1),
+            # silently killing the entire process with no traceback.
+            if Path(bufr_path).stat().st_size == 0:
+                logger.error(f"Skipping 0-byte BUFR file (corrupt download, will crash C library): {bufr_path}")
+                continue
             try:
                 # Serialize BUFR decoding to avoid C library thread-safety issues
                 # The BUFR C library uses global state and is not thread-safe
