@@ -421,7 +421,7 @@ class RadarFTPClientAsync(RadarFTPClient):
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            with ftplib.FTP(self.host) as ftp:
+            with ftplib.FTP(self.host, timeout=self.timeout) as ftp:
                 ftp.login(self.user, self.password)
                 dir_path = remote_path.parent.as_posix()
                 fname = remote_path.name
