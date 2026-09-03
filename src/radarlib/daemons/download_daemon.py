@@ -242,9 +242,9 @@ class DownloadDaemon:
             ) as client:
                 logger.debug(f"[{self.radar_name}] Connected to FTP server. Checking for new files...")
 
-                # Run synchronous FTP traversal in a thread so the event loop stays alive.
-                # A background task keeps the watchdog heartbeat fresh during long backfill
-                # traversals that can take many minutes.
+                # Heartbeat refresh covers the entire cycle (traversal + downloads + retry)
+                # so the watchdog only fires when the daemon is truly unresponsive, not
+                # just busy with a large batch of retrying downloads.
                 async def _refresh_heartbeat():
                     while True:
                         self._last_heartbeat = datetime.now(timezone.utc)
@@ -260,81 +260,82 @@ class DownloadDaemon:
                         end_date=None,
                         vol_types=self.vol_types,
                     )
+
+                    if files:
+                        tasks = []
+                        for remote, local, fname, dt, status in files:
+
+                            async def download_one(remote_path=remote, local_path=local, fname=fname, dt=dt, status=status):
+                                components = extract_bufr_filename_components(fname)
+                                try:
+                                    await exponential_backoff_retry(
+                                        lambda: client.download_file_async(remote_path, local_path),
+                                        max_retries=self.config.bufr_download_max_retries,
+                                        base_delay=self.config.bufr_download_base_delay,
+                                        max_delay=self.config.bufr_download_max_delay,
+                                    )
+                                    # success → update DB
+                                    # Calculate checksum if enabled
+                                    checksum = None
+                                    # TODO: implement checksum calculation asynchronously
+                                    # Get file size
+                                    file_size = local_path.stat().st_size
+
+                                    self.state_tracker.mark_downloaded(
+                                        fname,
+                                        str(remote_path),
+                                        str(local_path),
+                                        file_size=file_size,
+                                        checksum=checksum,
+                                        radar_name=self.radar_name,
+                                        strategy=components["strategy"],
+                                        vol_nr=components["vol_nr"],
+                                        field_type=components["field_type"],
+                                        observation_datetime=dt.isoformat(),
+                                    )
+                                    logger.info(f"[{self.radar_name}] Downloaded {fname}")
+                                except FTPError as e:
+                                    self.state_tracker.mark_failed(
+                                        fname,
+                                        str(remote_path),
+                                        str(local_path),
+                                        radar_name=self.radar_name,
+                                        strategy=components["strategy"],
+                                        vol_nr=components["vol_nr"],
+                                        field_type=components["field_type"],
+                                        observation_datetime=dt.isoformat(),
+                                    )
+                                    logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
+                                finally:
+                                    # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
+                                    if "components" in locals():
+                                        del components
+                                    gc.collect()
+
+                            tasks.append(asyncio.create_task(download_one()))
+
+                        await asyncio.gather(*tasks)
+                        logger.info(f"[{self.radar_name}] Processed {len(files)} files.")
+
+                        # Cleanup task list to release closure references (per copilot-instructions.md Rules 1, 3)
+                        tasks = []
+                        gc.collect()
+
+                        _cycle_count += 1
+                        if _cycle_count % 5 == 0:  # Every 5 cycles, same cadence as other daemons
+                            log_memory_usage(f"[{self.radar_name}] DownloadDaemon cycle {_cycle_count}")
+                            aggressive_cleanup(f"DownloadDaemon cycle {_cycle_count}")
+                    else:
+                        logger.info(f"[{self.radar_name}] No new files.")
+
+                    # Periodically retry failed downloads
+                    await self._retry_failed_downloads_async()
                 finally:
                     _heartbeat_task.cancel()
                     try:
                         await _heartbeat_task
                     except asyncio.CancelledError:
                         pass
-                if files:
-                    tasks = []
-                    for remote, local, fname, dt, status in files:
-
-                        async def download_one(remote_path=remote, local_path=local, fname=fname, dt=dt, status=status):
-                            components = extract_bufr_filename_components(fname)
-                            try:
-                                await exponential_backoff_retry(
-                                    lambda: client.download_file_async(remote_path, local_path),
-                                    max_retries=self.config.bufr_download_max_retries,
-                                    base_delay=self.config.bufr_download_base_delay,
-                                    max_delay=self.config.bufr_download_max_delay,
-                                )
-                                # success → update DB
-                                # Calculate checksum if enabled
-                                checksum = None
-                                # TODO: implement checksum calculation asynchronously
-                                # Get file size
-                                file_size = local_path.stat().st_size
-
-                                self.state_tracker.mark_downloaded(
-                                    fname,
-                                    str(remote_path),
-                                    str(local_path),
-                                    file_size=file_size,
-                                    checksum=checksum,
-                                    radar_name=self.radar_name,
-                                    strategy=components["strategy"],
-                                    vol_nr=components["vol_nr"],
-                                    field_type=components["field_type"],
-                                    observation_datetime=dt.isoformat(),
-                                )
-                                logger.info(f"[{self.radar_name}] Downloaded {fname}")
-                            except FTPError as e:
-                                self.state_tracker.mark_failed(
-                                    fname,
-                                    str(remote_path),
-                                    str(local_path),
-                                    radar_name=self.radar_name,
-                                    strategy=components["strategy"],
-                                    vol_nr=components["vol_nr"],
-                                    field_type=components["field_type"],
-                                    observation_datetime=dt.isoformat(),
-                                )
-                                logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
-                            finally:
-                                # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
-                                if "components" in locals():
-                                    del components
-                                gc.collect()
-
-                        tasks.append(asyncio.create_task(download_one()))
-
-                    await asyncio.gather(*tasks)
-                    logger.info(f"[{self.radar_name}] Processed {len(files)} files.")
-
-                    # Cleanup task list to release closure references (per copilot-instructions.md Rules 1, 3)
-                    tasks = []
-                    gc.collect()
-
-                    _cycle_count += 1
-                    if _cycle_count % 5 == 0:  # Every 5 cycles, same cadence as other daemons
-                        log_memory_usage(f"[{self.radar_name}] DownloadDaemon cycle {_cycle_count}")
-                        aggressive_cleanup(f"DownloadDaemon cycle {_cycle_count}")
-                else:
-                    logger.info(f"[{self.radar_name}] No new files.")
-
-                # Periodically retry failed downloads
-                await self._retry_failed_downloads_async()
 
         except Exception as e:
             logger.exception(f"[{self.radar_name}] Error during FTP poll cycle: {e}")
