@@ -59,7 +59,7 @@ class RadarFTPClient:
     # Context Manager
     # ----------------------
     def __enter__(self):
-        self._connect()
+        self._ensure_connection()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
