@@ -13,6 +13,14 @@ from .geometry import GridGeometry
 logger = logging.getLogger(__name__)
 
 
+class GeometryDimensionMismatchError(IndexError):
+    """Scan has fewer gates than the precomputed geometry was built from.
+
+    This is transient: it happens when the radar temporarily reduces its range.
+    The caller should skip this field and continue with others.
+    """
+
+
 def apply_geometry(
     geometry: GridGeometry,
     field_data: np.ndarray,
@@ -75,12 +83,9 @@ def apply_geometry(
     n_gates = field_data.shape[0]
     max_gate_index = gate_indices.max() if len(gate_indices) > 0 else 0
     if max_gate_index >= n_gates:
-        raise IndexError(
+        raise GeometryDimensionMismatchError(
             f"Geometry gate_indices (max={max_gate_index}) exceed field_data size ({n_gates}). "
-            f"The geometry was likely built from a radar with different dimensions "
-            f"(e.g., different nrays or ngates). "
-            f"Delete the geometry .npz file and gate_coordinates .npz file for this "
-            f"volume type and let them be regenerated from a matching radar file."
+            f"Scan likely has fewer gates than the geometry was built from."
         )
 
     # Get all values and masks at once
