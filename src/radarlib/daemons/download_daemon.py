@@ -217,15 +217,18 @@ class DownloadDaemon:
                                 f"[{self.radar_name}] Failed to parse observation_datetime for vol{vol_nr}: {e}"
                             )
 
-            # Use the MINIMUM observation_datetime from all volumes as resume point
+            # Use the MAXIMUM observation_datetime from all volumes as resume point.
+            # Using max (most recent) rather than min (oldest) keeps the traversal window
+            # small (~15 min) regardless of minor per-volume lag. A 15-minute buffer is
+            # sufficient for any realistic clock skew between FTP server and container;
+            # using min + 60 min caused the window to grow by 1 h every cycle when one
+            # volume lagged slightly, eventually exceeding the 3600 s cycle timeout.
             if latest_by_vol:
-                resume_date = min(latest_by_vol.values())
-                resume_date = resume_date - timedelta(
-                    minutes=60  # Add buffer to ensure we don't miss files due to clock skew
-                )
+                resume_date = max(latest_by_vol.values())
+                resume_date = resume_date - timedelta(minutes=15)
                 logger.info(
-                    f"[{self.radar_name}] Resuming from oldest volume's latest download: {resume_date.isoformat()} "
-                    f"(vol{sorted(latest_by_vol.keys(), key=lambda k: latest_by_vol[k])[0]})"
+                    f"[{self.radar_name}] Resuming from newest volume's latest download minus 15 min: {resume_date.isoformat()} "
+                    f"(vol{sorted(latest_by_vol.keys(), key=lambda k: latest_by_vol[k])[-1]})"
                 )
             elif resume_date:
                 logger.info(
