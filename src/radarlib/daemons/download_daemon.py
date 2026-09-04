@@ -43,7 +43,7 @@ class DownloadDaemonConfig:
     poll_interval: int = 60
     start_date: Optional[datetime] = None
     vol_types: Optional[Dict] = None
-    max_concurrent_downloads: int = 5
+    max_concurrent_downloads: int = 2
     bufr_download_max_retries: int = 3
     bufr_download_base_delay: float = 1
     bufr_download_max_delay: float = 30
