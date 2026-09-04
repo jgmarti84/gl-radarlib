@@ -74,6 +74,19 @@ class RadarFTPClient:
         logger.info("FTP connection closed")
         self.ftp = None
 
+    def disconnect(self) -> None:
+        """Close the FTP control connection if open. Safe to call when already disconnected."""
+        if self.ftp is not None:
+            try:
+                self.ftp.quit()
+            except Exception:
+                try:
+                    self.ftp.close()
+                except Exception:
+                    pass
+            self.ftp = None
+            logger.debug(f"FTP control connection to {self.host} closed")
+
     def is_connected(self) -> bool:
         """
         Comprueba si la sesión FTP está viva realizando un NOOP.

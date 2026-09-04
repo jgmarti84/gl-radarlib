@@ -263,6 +263,10 @@ class DownloadDaemon:
                         end_date=None,
                         vol_types=self.vol_types,
                     )
+                    # Traversal complete — release the control connection now.
+                    # Parallel downloads use fresh per-file connections and don't need it.
+                    # This keeps the concurrent connection count low across all containers.
+                    client.disconnect()
 
                     if files:
                         tasks = []
@@ -418,75 +422,70 @@ class DownloadDaemon:
             logger.info(f"[{self.radar_name}] Retrying {len(failed_files)} failed downloads...")
             self._last_failed_retry_time = now
 
-            # Retry each failed file
+            # Retry each failed file.
+            # No context manager — downloads use fresh per-file connections so no
+            # persistent control connection is needed (avoids holding an idle socket).
             retry_count = 0
-            async with RadarFTPClientAsync(
+            client = RadarFTPClientAsync(
                 self.config.host,
                 self.config.username,
                 self.config.password,
                 max_workers=self.config.max_concurrent_downloads,
-            ) as client:
-                for failed_file in failed_files:
-                    filename = failed_file[0]
-                    remote_path = failed_file[1]
-                    local_path = Path(failed_file[2])
-                    field_type = failed_file[3]
-                    observation_datetime = failed_file[4]
+            )
+            for failed_file in failed_files:
+                filename = failed_file[0]
+                remote_path = failed_file[1]
+                local_path = Path(failed_file[2])
+                field_type = failed_file[3]
+                observation_datetime = failed_file[4]
 
-                    try:
-                        logger.debug(f"[{self.radar_name}] Retrying failed download: {filename} " f"from {remote_path}")
+                try:
+                    logger.debug(f"[{self.radar_name}] Retrying failed download: {filename} " f"from {remote_path}")
 
-                        # Remove local file if it partially exists
-                        if local_path.exists():
-                            try:
-                                local_path.unlink()
-                            except OSError:
-                                pass
+                    # Remove local file if it partially exists
+                    if local_path.exists():
+                        try:
+                            local_path.unlink()
+                        except OSError:
+                            pass
 
-                        # # Retry download with exponential backoff
-                        # await exponential_backoff_retry(
-                        #     lambda: client.download_file_async(remote_path, str(local_path)),
-                        #     max_retries=self.config.bufr_download_max_retries,
-                        #     base_delay=self.config.bufr_download_base_delay,
-                        #     max_delay=self.config.bufr_download_max_delay,
-                        # )
-                        current_remote = Path(remote_path)
-                        current_local = local_path
+                    current_remote = Path(remote_path)
+                    current_local = local_path
 
-                        await exponential_backoff_retry(
-                            lambda cr=current_remote, cl=current_local: client.download_file_async(cr, cl),
-                            max_retries=self.config.bufr_download_max_retries,
-                            base_delay=self.config.bufr_download_base_delay,
-                            max_delay=self.config.bufr_download_max_delay,
-                        )
+                    await exponential_backoff_retry(
+                        lambda cr=current_remote, cl=current_local: client.download_file_async(cr, cl),
+                        max_retries=self.config.bufr_download_max_retries,
+                        base_delay=self.config.bufr_download_base_delay,
+                        max_delay=self.config.bufr_download_max_delay,
+                    )
 
-                        # Mark as successfully downloaded
-                        file_size = local_path.stat().st_size
-                        components = extract_bufr_filename_components(filename)
+                    # Mark as successfully downloaded
+                    file_size = local_path.stat().st_size
+                    components = extract_bufr_filename_components(filename)
 
-                        self.state_tracker.mark_downloaded(
-                            filename,
-                            remote_path,
-                            str(local_path),
-                            file_size=file_size,
-                            checksum=None,
-                            radar_name=self.radar_name,
-                            strategy=components["strategy"],
-                            vol_nr=components["vol_nr"],
-                            field_type=field_type,
-                            observation_datetime=observation_datetime,
-                        )
+                    self.state_tracker.mark_downloaded(
+                        filename,
+                        remote_path,
+                        str(local_path),
+                        file_size=file_size,
+                        checksum=None,
+                        radar_name=self.radar_name,
+                        strategy=components["strategy"],
+                        vol_nr=components["vol_nr"],
+                        field_type=field_type,
+                        observation_datetime=observation_datetime,
+                    )
 
-                        logger.info(f"[{self.radar_name}] Successfully retried: {filename}")
-                        retry_count += 1
-                        self._stats["failed_files_retried"] += 1
+                    logger.info(f"[{self.radar_name}] Successfully retried: {filename}")
+                    retry_count += 1
+                    self._stats["failed_files_retried"] += 1
 
-                    except FTPError as e:
-                        logger.warning(f"[{self.radar_name}] Retry still failing for {filename}: {e}")
-                    except Exception as e:
-                        logger.error(f"[{self.radar_name}] Unexpected error retrying {filename}: {e}")
-                    finally:
-                        gc.collect()
+                except FTPError as e:
+                    logger.warning(f"[{self.radar_name}] Retry still failing for {filename}: {e}")
+                except Exception as e:
+                    logger.error(f"[{self.radar_name}] Unexpected error retrying {filename}: {e}")
+                finally:
+                    gc.collect()
 
             if retry_count > 0:
                 logger.info(
