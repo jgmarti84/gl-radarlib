@@ -59,7 +59,7 @@ class RadarFTPClient:
     # Context Manager
     # ----------------------
     def __enter__(self):
-        self._connect()
+        self._ensure_connection()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -73,6 +73,19 @@ class RadarFTPClient:
                     pass
         logger.info("FTP connection closed")
         self.ftp = None
+
+    def disconnect(self) -> None:
+        """Close the FTP control connection if open. Safe to call when already disconnected."""
+        if self.ftp is not None:
+            try:
+                self.ftp.quit()
+            except Exception:
+                try:
+                    self.ftp.close()
+                except Exception:
+                    pass
+            self.ftp = None
+            logger.debug(f"FTP control connection to {self.host} closed")
 
     def is_connected(self) -> bool:
         """
@@ -143,9 +156,14 @@ class RadarFTPClient:
         try:
             with open(local_path, "wb") as f:
                 self.ftp.retrbinary(f"RETR {remote_path}", f.write)  # type: ignore
+            # Server may return 226 Transfer complete but send 0 bytes — treat as error
+            if local_path.stat().st_size == 0:
+                local_path.unlink(missing_ok=True)
+                raise FTPError(f"Empty file after download (server sent 0 bytes): {remote_path}")
             logger.info(f"Downloaded {remote_path} -> {local_path}")
             return local_path
         except ftplib.all_errors as e:
+            local_path.unlink(missing_ok=True)  # clean up partial file on connection failure
             raise FTPError(f"Error downloading {remote_path}: {e}")
 
     def file_exists(self, remote_path: str) -> bool:
@@ -416,7 +434,7 @@ class RadarFTPClientAsync(RadarFTPClient):
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            with ftplib.FTP(self.host) as ftp:
+            with ftplib.FTP(self.host, timeout=self.timeout) as ftp:
                 ftp.login(self.user, self.password)
                 dir_path = remote_path.parent.as_posix()
                 fname = remote_path.name
@@ -424,10 +442,15 @@ class RadarFTPClientAsync(RadarFTPClient):
                 with open(local_path, "wb") as f:
                     ftp.retrbinary(f"RETR {fname}", f.write)
 
+            # Server may return 226 Transfer complete but send 0 bytes — treat as error
+            if local_path.stat().st_size == 0:
+                local_path.unlink(missing_ok=True)
+                raise FTPError(f"Empty file after download (server sent 0 bytes): {remote_path}")
             logger.info(f"Downloaded {remote_path} -> {local_path}")
             return local_path
 
         except ftplib.all_errors as e:
+            local_path.unlink(missing_ok=True)  # clean up partial file on connection failure
             raise FTPError(f"Error downloading {remote_path}: {e}")
 
     async def download_files_parallel(self, files: List[Tuple[Path, Path]]) -> List[Path]:

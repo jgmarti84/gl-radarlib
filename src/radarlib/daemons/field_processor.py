@@ -36,6 +36,7 @@ import numpy as np
 
 from radarlib.daemons.metadata_utils import build_product_metadata
 from radarlib.radar_grid import GridGeometry
+from radarlib.radar_grid.interpolate import GeometryDimensionMismatchError
 
 if TYPE_CHECKING:
     from radarlib.daemons.product_daemon import ProductGenerationDaemonConfig
@@ -353,6 +354,12 @@ class RawCogFieldProcessor(FieldProcessor):
             )
             return target_path
 
+        except GeometryDimensionMismatchError as e:
+            logger.warning(
+                f"[RawCogFieldProcessor] Skipping field '{field_name}': {e} "
+                f"Scan may have a transient range reduction — will process normally once geometry matches."
+            )
+            return None
         except Exception as e:
             logger.error(
                 f"[RawCogFieldProcessor] Failed to process field '{field_name}': {e}",

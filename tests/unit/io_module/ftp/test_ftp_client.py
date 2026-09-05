@@ -134,7 +134,7 @@ class TestRadarFTPClientDownload:
         """Should create parent directory if it doesn't exist."""
         client = RadarFTPClient("host", "user", "pass")
         client.ftp = MagicMock()
-        client.ftp.retrbinary.return_value = None
+        client.ftp.retrbinary.side_effect = lambda cmd, callback: callback(b"data")
 
         local_path = tmp_path / "subdir" / "file.bufr"
 
@@ -146,7 +146,7 @@ class TestRadarFTPClientDownload:
         """Should return the local path after download."""
         client = RadarFTPClient("host", "user", "pass")
         client.ftp = MagicMock()
-        client.ftp.retrbinary.return_value = None
+        client.ftp.retrbinary.side_effect = lambda cmd, callback: callback(b"data")
 
         local_path = tmp_path / "file.bufr"
         result = client.download_file("/remote/file.bufr", local_path)
