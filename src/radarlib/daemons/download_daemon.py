@@ -227,7 +227,8 @@ class DownloadDaemon:
                 resume_date = max(latest_by_vol.values())
                 resume_date = resume_date - timedelta(minutes=15)
                 logger.info(
-                    f"[{self.radar_name}] Resuming from newest volume's latest download minus 15 min: {resume_date.isoformat()} "
+                    f"[{self.radar_name}] Resuming from newest volume's latest "
+                    f"download minus 15 min: {resume_date.isoformat()} "
                     f"(vol{sorted(latest_by_vol.keys(), key=lambda k: latest_by_vol[k])[-1]})"
                 )
             elif resume_date:
@@ -272,7 +273,9 @@ class DownloadDaemon:
                         tasks = []
                         for remote, local, fname, dt, status in files:
 
-                            async def download_one(remote_path=remote, local_path=local, fname=fname, dt=dt, status=status):
+                            async def download_one(
+                                remote_path=remote, local_path=local, fname=fname, dt=dt, status=status
+                            ):
                                 components = extract_bufr_filename_components(fname)
                                 try:
                                     await exponential_backoff_retry(
