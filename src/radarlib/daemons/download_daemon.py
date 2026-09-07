@@ -331,7 +331,8 @@ class DownloadDaemon:
                                         observation_datetime=dt.isoformat(),
                                     )
                                     logger.warning(
-                                        f"[{self.radar_name}] BUFR file missing during download — marked as failed: {fname}: {e}"
+                                        f"[{self.radar_name}] BUFR file missing during download"
+                                        f" — marked as failed: {fname}: {e}"
                                     )
                                 finally:
                                     # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
@@ -506,7 +507,8 @@ class DownloadDaemon:
                 except FileNotFoundError as e:
                     self.state_tracker.mark_download_permanently_failed(filename)
                     logger.warning(
-                        f"[{self.radar_name}] BUFR file removed before retry completed — marked permanently failed: {filename}: {e}"
+                        f"[{self.radar_name}] BUFR file removed before retry completed"
+                        f" — marked permanently failed: {filename}: {e}"
                     )
                 except Exception as e:
                     logger.error(f"[{self.radar_name}] Unexpected error retrying {filename}: {e}")
