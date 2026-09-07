@@ -1254,6 +1254,7 @@ class ProductGenerationDaemon:
         from radarlib.daemons.field_processor import apply_coverage_radius_mask
         from radarlib.io.pyart.cores_and_tops import generate_cores_and_tops
         from radarlib.radar_grid import apply_geometry, column_max, constant_elevation_ppi, get_field_data
+        from radarlib.radar_grid.interpolate import GeometryDimensionMismatchError
 
         _ct_dbzh_3d = None
         _ct_colmax_2d = None
@@ -1317,6 +1318,11 @@ class ProductGenerationDaemon:
                     rhohv_2d=_ct_rhohv_2d,
                 )
 
+        except GeometryDimensionMismatchError as e:
+            logger.warning(
+                f"[{self.config.radar_name}] Tops/cores skipped for {filename_stem}: {e} "
+                f"Scan may have a transient range reduction — will retry once geometry matches."
+            )
         except Exception as _ct_exc:
             logger.error(
                 f"[{self.config.radar_name}] Tops/cores detection failed " f"for {filename_stem}: {_ct_exc}",
