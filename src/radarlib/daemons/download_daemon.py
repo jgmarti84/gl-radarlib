@@ -319,6 +319,21 @@ class DownloadDaemon:
                                         observation_datetime=dt.isoformat(),
                                     )
                                     logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
+                                except FileNotFoundError as e:
+                                    self.state_tracker.mark_failed(
+                                        fname,
+                                        str(remote_path),
+                                        str(local_path),
+                                        radar_name=self.radar_name,
+                                        strategy=components["strategy"],
+                                        vol_nr=components["vol_nr"],
+                                        field_type=components["field_type"],
+                                        observation_datetime=dt.isoformat(),
+                                    )
+                                    logger.warning(
+                                        f"[{self.radar_name}] BUFR file missing during download"
+                                        f" — marked as failed: {fname}: {e}"
+                                    )
                                 finally:
                                     # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
                                     if "components" in locals():
@@ -414,6 +429,7 @@ class DownloadDaemon:
                 SELECT filename, remote_path, local_path, field_type, observation_datetime, created_at
                 FROM downloads
                 WHERE radar_name = ? AND status = 'failed' AND created_at > ?
+                  AND (permanently_failed IS NULL OR permanently_failed = 0)
                 ORDER BY created_at DESC
                 LIMIT 50
             """,
@@ -488,6 +504,12 @@ class DownloadDaemon:
 
                 except FTPError as e:
                     logger.warning(f"[{self.radar_name}] Retry still failing for {filename}: {e}")
+                except FileNotFoundError as e:
+                    self.state_tracker.mark_download_permanently_failed(filename)
+                    logger.warning(
+                        f"[{self.radar_name}] BUFR file removed before retry completed"
+                        f" — marked permanently failed: {filename}: {e}"
+                    )
                 except Exception as e:
                     logger.error(f"[{self.radar_name}] Unexpected error retrying {filename}: {e}")
                 finally:
