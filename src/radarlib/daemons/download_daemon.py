@@ -8,6 +8,7 @@ and downloads new files, similar to the process_new_files pattern in FTPRadarDae
 import asyncio
 import gc
 import logging
+import random
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -43,7 +44,7 @@ class DownloadDaemonConfig:
     poll_interval: int = 60
     start_date: Optional[datetime] = None
     vol_types: Optional[Dict] = None
-    max_concurrent_downloads: int = 5
+    max_concurrent_downloads: int = 2
     bufr_download_max_retries: int = 3
     bufr_download_base_delay: float = 1
     bufr_download_max_delay: float = 30
@@ -151,14 +152,16 @@ class DownloadDaemon:
                     _cycle_count += 1
 
                     # Wait before next check — INSIDE try/except so CancelledError is caught
-                    await asyncio.sleep(self.poll_interval)
+                    jitter = random.uniform(-30, 30)
+                    await asyncio.sleep(max(10, self.poll_interval + jitter))
 
                 except asyncio.CancelledError:
                     logger.info(f"[{self.radar_name}] Download daemon cancelled during cycle")
                     raise  # Re-raise to be caught by outer CancelledError handler
                 except Exception as e:
                     logger.exception(f"[{self.radar_name}] Error during FTP poll cycle: {e}")
-                    await asyncio.sleep(self.poll_interval)
+                    jitter = random.uniform(-30, 30)
+                    await asyncio.sleep(max(10, self.poll_interval + jitter))
 
         except asyncio.CancelledError:
             logger.info(f"[{self.radar_name}] Download daemon cancelled, shutting down...")
