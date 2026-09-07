@@ -617,7 +617,12 @@ class ProcessingDaemon:
         for bufr_path in bufr_paths:
             # Guard against 0-byte files that cause the BUFR C library to call _exit(1),
             # silently killing the entire process with no traceback.
-            if Path(bufr_path).stat().st_size == 0:
+            try:
+                bufr_size = Path(bufr_path).stat().st_size
+            except FileNotFoundError:
+                logger.warning(f"Skipping missing BUFR file (may have been cleaned up): {bufr_path}")
+                continue
+            if bufr_size == 0:
                 logger.error(f"Skipping 0-byte BUFR file (corrupt download, will crash C library): {bufr_path}")
                 continue
             try:
