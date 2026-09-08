@@ -438,6 +438,35 @@ class SQLiteStateTracker:
         conn.commit()
         logger.debug(f"Marked '{filename}' as permanently failed - no further retries")
 
+    def reset_corrupt_download(self, filename: str) -> None:
+        """
+        Reset a completed download back to 'failed' so the download daemon re-fetches it.
+
+        Used when a file on disk is corrupt (size mismatch vs FTP) despite being marked
+        completed.  Clears the permanently_failed flag and retry counter so the normal
+        retry path applies.
+
+        Args:
+            filename: Name of the file to reset
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute(
+            """
+            UPDATE downloads
+            SET status = 'failed', retry_attempt_count = 0, permanently_failed = 0,
+                last_retry_error = 'corrupt local file: size mismatch vs FTP',
+                updated_at = ?
+            WHERE filename = ?
+            """,
+            (now, filename),
+        )
+
+        conn.commit()
+        logger.debug(f"Reset '{filename}' to failed for re-download (corrupt local copy)")
+
     def get_downloaded_files(self) -> Set[str]:
         """
         Get set of all successfully downloaded filenames.
@@ -863,7 +892,7 @@ class SQLiteStateTracker:
 
         cursor.execute(
             """
-            SELECT filename, local_path, file_size, field_type FROM downloads
+            SELECT filename, local_path, file_size, field_type, remote_path FROM downloads
             WHERE radar_name = ? AND strategy = ? AND vol_nr = ?
             AND observation_datetime = ? AND status = 'completed'
         """,
@@ -876,6 +905,7 @@ class SQLiteStateTracker:
                 "local_path": row[1],
                 "file_size": row[2],
                 "field_type": row[3],
+                "remote_path": row[4],
             }
             for row in cursor.fetchall()
         ]
