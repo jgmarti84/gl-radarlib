@@ -422,10 +422,9 @@ class DownloadDaemon:
         This runs once at startup on a single persistent FTP connection (no extra
         connections are opened; SIZE is a control-channel command).
         """
-        pending_volumes = (
-            self.state_tracker.get_volumes_by_status("pending")
-            + self.state_tracker.get_volumes_by_status("processing")
-        )
+        pending_volumes = self.state_tracker.get_volumes_by_status(
+            "pending"
+        ) + self.state_tracker.get_volumes_by_status("processing")
 
         if not pending_volumes:
             logger.debug(f"[{self.radar_name}] Startup validation: no stuck volumes found, skipping.")
