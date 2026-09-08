@@ -123,6 +123,26 @@ class RadarFTPClient:
             time.sleep(backoff * (2 ** (attempt - 1)))
         raise FTPError(f"Could not connect to FTP {self.host} after {retries} attempts: {last_exc}")
 
+    def get_remote_size(self, remote_path: str) -> Optional[int]:
+        """
+        Return the size of a remote file via the FTP SIZE command.
+
+        Reuses the existing persistent control connection — no new connection is opened.
+        Returns None if the file does not exist or the command fails for any reason,
+        so callers can skip gracefully without crashing.
+
+        Args:
+            remote_path: Full remote path to the file
+
+        Returns:
+            File size in bytes, or None on any error
+        """
+        try:
+            self._ensure_connection()
+            return self.ftp.size(remote_path)  # type: ignore
+        except Exception:
+            return None
+
     # ----------------------
     # Low-level listing
     # ----------------------
@@ -154,12 +174,15 @@ class RadarFTPClient:
         """Download a single file efficiently using the current session."""
         local_path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            expected_size = self.ftp.size(remote_path)  # type: ignore
             with open(local_path, "wb") as f:
                 self.ftp.retrbinary(f"RETR {remote_path}", f.write)  # type: ignore
-            # Server may return 226 Transfer complete but send 0 bytes — treat as error
-            if local_path.stat().st_size == 0:
+            actual_size = local_path.stat().st_size
+            if actual_size != expected_size:
                 local_path.unlink(missing_ok=True)
-                raise FTPError(f"Empty file after download (server sent 0 bytes): {remote_path}")
+                raise FTPError(
+                    f"Size mismatch after download (expected {expected_size}, got {actual_size}): {remote_path}"
+                )
             logger.info(f"Downloaded {remote_path} -> {local_path}")
             return local_path
         except ftplib.all_errors as e:
@@ -439,13 +462,16 @@ class RadarFTPClientAsync(RadarFTPClient):
                 dir_path = remote_path.parent.as_posix()
                 fname = remote_path.name
                 ftp.cwd(dir_path)
+                expected_size = ftp.size(fname)
                 with open(local_path, "wb") as f:
                     ftp.retrbinary(f"RETR {fname}", f.write)
 
-            # Server may return 226 Transfer complete but send 0 bytes — treat as error
-            if local_path.stat().st_size == 0:
+            actual_size = local_path.stat().st_size
+            if actual_size != expected_size:
                 local_path.unlink(missing_ok=True)
-                raise FTPError(f"Empty file after download (server sent 0 bytes): {remote_path}")
+                raise FTPError(
+                    f"Size mismatch after download (expected {expected_size}, got {actual_size}): {remote_path}"
+                )
             logger.info(f"Downloaded {remote_path} -> {local_path}")
             return local_path
 

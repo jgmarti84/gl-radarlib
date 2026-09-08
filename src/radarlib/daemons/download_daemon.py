@@ -142,6 +142,8 @@ class DownloadDaemon:
         _cycle_count = 0
         log_memory_usage(f"[{self.radar_name}] DownloadDaemon startup")
 
+        await self._validate_stuck_volume_downloads()
+
         try:
             while self._running:
                 try:
@@ -399,6 +401,122 @@ class DownloadDaemon:
             local_path = self.local_dir / fname
             candidates.append((remote, local_path, fname, dt, "new"))
         return candidates
+
+    async def _validate_stuck_volume_downloads(self) -> None:
+        """
+        One-shot startup check: find BUFR files whose local copy is corrupt.
+
+        Queries all volumes currently in 'pending' or 'processing' state (i.e. stuck),
+        looks up their completed downloads, and compares each local file size against
+        the FTP SIZE command.  Any mismatch means the local file was corrupted during
+        a previous download (partial transfer, dropped connection, etc.).
+
+        For each corrupt file:
+          - The local file is deleted so the processing daemon cannot attempt to decode it.
+          - The downloads row is reset to 'failed' so the download daemon re-fetches it
+            on the very next poll cycle via the normal retry path.
+
+        Files on volumes that are no longer on the FTP server (old data purged) are
+        skipped with a warning — the SIZE command returns None and no action is taken.
+
+        This runs once at startup on a single persistent FTP connection (no extra
+        connections are opened; SIZE is a control-channel command).
+        """
+        pending_volumes = (
+            self.state_tracker.get_volumes_by_status("pending")
+            + self.state_tracker.get_volumes_by_status("processing")
+        )
+
+        if not pending_volumes:
+            logger.debug(f"[{self.radar_name}] Startup validation: no stuck volumes found, skipping.")
+            return
+
+        logger.info(
+            f"[{self.radar_name}] Startup validation: checking {len(pending_volumes)} stuck volume(s) "
+            f"for corrupt local BUFR files..."
+        )
+
+        ftp_client = RadarFTPClientAsync(
+            host=self.config.host,
+            user=self.config.username,
+            password=self.config.password,
+        )
+
+        volumes_checked = 0
+        files_reset = 0
+
+        try:
+            for vol in pending_volumes:
+                radar_name = vol.get("radar_name", self.radar_name)
+                strategy = vol.get("strategy", "")
+                vol_nr = vol.get("vol_nr", "")
+                obs_dt = vol.get("observation_datetime", "")
+
+                files = self.state_tracker.get_volume_files(radar_name, strategy, vol_nr, obs_dt)
+                if not files:
+                    continue
+
+                volumes_checked += 1
+
+                for f in files:
+                    local_path = Path(f["local_path"])
+                    remote_path = f.get("remote_path", "")
+                    filename = f["filename"]
+
+                    # File missing from disk entirely — reset so it gets re-downloaded
+                    if not local_path.exists():
+                        logger.warning(
+                            f"[{self.radar_name}] Startup validation: {filename} missing from disk, "
+                            f"resetting to failed for re-download."
+                        )
+                        self.state_tracker.reset_corrupt_download(filename)
+                        files_reset += 1
+                        continue
+
+                    if not remote_path:
+                        continue
+
+                    remote_size = await asyncio.to_thread(ftp_client.get_remote_size, remote_path)
+
+                    if remote_size is None:
+                        logger.warning(
+                            f"[{self.radar_name}] Startup validation: cannot get FTP size for "
+                            f"{filename} (file purged or FTP error) — skipping."
+                        )
+                        continue
+
+                    local_size = local_path.stat().st_size
+                    if local_size != remote_size:
+                        logger.warning(
+                            f"[{self.radar_name}] Startup validation: corrupt local file detected — "
+                            f"{filename} (local={local_size}B, ftp={remote_size}B). "
+                            f"Deleting and resetting for re-download."
+                        )
+                        local_path.unlink(missing_ok=True)
+                        self.state_tracker.reset_corrupt_download(filename)
+                        files_reset += 1
+
+        except Exception as e:
+            logger.warning(
+                f"[{self.radar_name}] Startup validation failed unexpectedly: {e}. "
+                f"Continuing with normal operation."
+            )
+        finally:
+            try:
+                ftp_client.disconnect()
+            except Exception:
+                pass
+
+        if files_reset:
+            logger.info(
+                f"[{self.radar_name}] Startup validation complete: checked {volumes_checked} stuck volume(s), "
+                f"reset {files_reset} corrupt file(s) for re-download."
+            )
+        else:
+            logger.info(
+                f"[{self.radar_name}] Startup validation complete: checked {volumes_checked} stuck volume(s), "
+                f"all local files are intact."
+            )
 
     async def _retry_failed_downloads_async(self) -> None:
         """
