@@ -153,8 +153,7 @@ class ProcessingDaemon:
             n_reset = cursor.rowcount
             if n_reset > 0:
                 logger.info(
-                    f"Startup sweep: reset {n_reset} in-flight volume(s) to 'pending' "
-                    f"(left over from previous run)"
+                    f"Startup sweep: reset {n_reset} in-flight volume(s) to 'pending' " f"(left over from previous run)"
                 )
         except Exception as _e:
             logger.warning(f"Startup sweep failed (non-fatal): {_e}")
