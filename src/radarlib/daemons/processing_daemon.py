@@ -308,15 +308,25 @@ class ProcessingDaemon:
         Check for volumes stuck in 'processing' status and reset them to 'pending'.
 
         Volumes that have been in 'processing' status for longer than the configured
-        timeout will be reset to 'pending' and logged for retry.
+        timeout are reset to 'pending' and their local BUFR files are deleted so the
+        download daemon re-fetches fresh copies from FTP.
         """
         try:
-            num_reset = self.state_tracker.reset_stuck_volumes(self.config.stuck_volume_timeout_minutes)
+            num_reset, paths_to_delete = self.state_tracker.reset_stuck_volumes(
+                self.config.stuck_volume_timeout_minutes
+            )
             if num_reset > 0:
                 logger.warning(
                     f"Reset {num_reset} stuck volume(s) from 'processing' to 'pending' "
-                    f"(timeout: {self.config.stuck_volume_timeout_minutes} minutes)"
+                    f"(timeout: {self.config.stuck_volume_timeout_minutes} minutes); "
+                    f"deleting {len(paths_to_delete)} local BUFR file(s) for re-download"
                 )
+                for path_str in paths_to_delete:
+                    try:
+                        Path(path_str).unlink(missing_ok=True)
+                        logger.debug(f"Deleted stale BUFR file for re-download: {path_str}")
+                    except Exception as del_err:
+                        logger.warning(f"Could not delete {path_str}: {del_err}")
         except Exception as e:
             logger.error(f"Error checking for stuck volumes: {e}", exc_info=True)
 

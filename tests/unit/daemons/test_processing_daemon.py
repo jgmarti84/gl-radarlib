@@ -142,7 +142,7 @@ class TestProcessingDaemon:
     async def test_check_and_reset_stuck_volumes(self, mock_tracker_class, daemon_config):
         """Should call state_tracker.reset_stuck_volumes."""
         mock_tracker = MagicMock()
-        mock_tracker.reset_stuck_volumes.return_value = 2
+        mock_tracker.reset_stuck_volumes.return_value = (2, [])
         mock_tracker_class.return_value = mock_tracker
 
         daemon = ProcessingDaemon(daemon_config)

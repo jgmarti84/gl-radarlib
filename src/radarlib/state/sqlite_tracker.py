@@ -1025,27 +1025,83 @@ class SQLiteStateTracker:
 
         return [dict(row) for row in cursor.fetchall()]
 
-    def reset_stuck_volumes(self, timeout_minutes: int) -> int:
+    def reset_stuck_volumes(self, timeout_minutes: int) -> tuple:
         """
-        Reset volumes that have been stuck in 'processing' status back to 'pending'.
+        Reset volumes stuck in 'processing' back to 'pending' and queue their BUFR
+        files for re-download so fresh copies replace any corrupt local files.
 
-        This allows stuck volumes to be retried. Updates their status and updated_at timestamp.
+        For each stuck volume, completed download records are reset to 'failed' and
+        is_complete is cleared so the volume waits for fresh downloads before the
+        processing daemon picks it up again.
 
         Args:
-            timeout_minutes: Timeout in minutes - volumes in 'processing' status longer than
-                           this will be reset
+            timeout_minutes: Volumes in 'processing' status longer than this are reset.
 
         Returns:
-            Number of volumes that were reset
+            Tuple of (num_reset, local_paths_to_delete) where local_paths_to_delete is
+            a list of str paths the caller should unlink from disk.
         """
         conn = self._get_connection()
         cursor = conn.cursor()
         now = datetime.now(timezone.utc).isoformat()
 
-        # Calculate the cutoff time (timeout_minutes ago)
         cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
         cutoff_iso = cutoff_time.isoformat()
 
+        # Find stuck volumes
+        cursor.execute(
+            """
+            SELECT volume_id, radar_name, strategy, vol_nr, observation_datetime
+            FROM volume_processing
+            WHERE status = 'processing' AND updated_at < ?
+        """,
+            (cutoff_iso,),
+        )
+        stuck_volumes = cursor.fetchall()
+
+        if not stuck_volumes:
+            return 0, []
+
+        local_paths_to_delete = []
+
+        for vol_row in stuck_volumes:
+            volume_id = vol_row[0]
+            radar_name, strategy, vol_nr, obs_dt = vol_row[1], vol_row[2], vol_row[3], vol_row[4]
+
+            # Collect local paths of completed downloads for this volume
+            cursor.execute(
+                """
+                SELECT local_path FROM downloads
+                WHERE radar_name = ? AND strategy = ? AND vol_nr = ?
+                AND observation_datetime = ? AND status = 'completed'
+            """,
+                (radar_name, strategy, vol_nr, obs_dt),
+            )
+            for (local_path,) in cursor.fetchall():
+                if local_path:
+                    local_paths_to_delete.append(local_path)
+
+            # Reset downloads to 'failed' so the download daemon re-fetches them.
+            # Updating updated_at to now ensures the retry-age cutoff lets these through.
+            cursor.execute(
+                """
+                UPDATE downloads
+                SET status = 'failed', retry_attempt_count = 0, permanently_failed = 0,
+                    last_retry_error = 'reset for re-download: volume crashed during processing',
+                    updated_at = ?
+                WHERE radar_name = ? AND strategy = ? AND vol_nr = ?
+                AND observation_datetime = ? AND status = 'completed'
+            """,
+                (now, radar_name, strategy, vol_nr, obs_dt),
+            )
+
+            # Clear is_complete so the volume waits for fresh downloads
+            cursor.execute(
+                "UPDATE volume_processing SET is_complete = 0 WHERE volume_id = ?",
+                (volume_id,),
+            )
+
+        # Reset all stuck volumes to pending
         cursor.execute(
             """
             UPDATE volume_processing
@@ -1054,13 +1110,16 @@ class SQLiteStateTracker:
         """,
             (now, cutoff_iso),
         )
-
         conn.commit()
         num_reset = cursor.rowcount
-        if num_reset > 0:
-            logger.info(f"Reset {num_reset} stuck volumes from 'processing' back to 'pending'")
 
-        return num_reset
+        if num_reset > 0:
+            logger.info(
+                f"Reset {num_reset} stuck volume(s) from 'processing' to 'pending'; "
+                f"queued {len(local_paths_to_delete)} BUFR file(s) for re-download"
+            )
+
+        return num_reset, local_paths_to_delete
 
     # ==================================================================================
     # Product Generation Methods
