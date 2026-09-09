@@ -598,8 +598,7 @@ class ProductGenerationDaemon:
         netcdf_file = Path(netcdf_path)
         if not netcdf_file.exists():
             logger.warning(
-                f"NetCDF file not found for volume {volume_id}: {netcdf_file}. "
-                f"Resetting volume for re-processing."
+                f"NetCDF file not found for volume {volume_id}: {netcdf_file}. " f"Resetting volume for re-processing."
             )
             self.state_tracker.reset_volume_for_reprocessing(volume_id)
             self.state_tracker.mark_product_status(volume_id, self.config.product_type, "pending")
@@ -681,9 +680,7 @@ class ProductGenerationDaemon:
                 self.state_tracker.mark_product_status(volume_id, self.config.product_type, "pending")
                 return False
 
-            error_msg = (
-                f"Failed to generate {self.config.product_type} for {completeness_str} volume {volume_id}: {e}"
-            )
+            error_msg = f"Failed to generate {self.config.product_type} for {completeness_str} volume {volume_id}: {e}"
             logger.error(error_msg, exc_info=True)
             self.state_tracker.mark_product_status(
                 volume_id,
