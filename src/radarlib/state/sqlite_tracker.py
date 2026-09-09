@@ -1356,6 +1356,85 @@ class SQLiteStateTracker:
 
         return [dict(row) for row in cursor.fetchall()]
 
+    def reset_volume_for_reprocessing(self, volume_id: str) -> int:
+        """
+        Reset a completed volume back to 'pending' so the processing daemon
+        re-decodes its BUFR files and writes a fresh NetCDF.
+
+        Called when the product daemon detects a corrupt or missing NetCDF file.
+        If the volume's BUFR files have already been cleaned from disk
+        (cleanup_status = 'cleaned'), their download records are also reset to
+        'failed' so the download daemon re-fetches them, and is_complete is cleared
+        to 0 so the volume waits for fresh downloads before being picked up.
+
+        Args:
+            volume_id: Volume identifier to reset.
+
+        Returns:
+            Number of BUFR download records queued for re-download (0 means BUFR
+            files are still on disk and reprocessing can start immediately).
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute(
+            "SELECT radar_name, strategy, vol_nr, observation_datetime FROM volume_processing WHERE volume_id = ?",
+            (volume_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            logger.warning(f"reset_volume_for_reprocessing: volume_id '{volume_id}' not found")
+            return 0
+
+        radar_name, strategy, vol_nr, obs_dt = row[0], row[1], row[2], row[3]
+
+        # Reset downloads that were cleaned from disk so the download daemon re-fetches them.
+        # Updating updated_at to now makes the retry-age cutoff let these through.
+        cursor.execute(
+            """
+            UPDATE downloads
+            SET status = 'failed', retry_attempt_count = 0, permanently_failed = 0,
+                last_retry_error = 'reset for re-download: BUFR needed for NetCDF re-generation',
+                updated_at = ?
+            WHERE radar_name = ? AND strategy = ? AND vol_nr = ?
+            AND observation_datetime = ? AND cleanup_status = 'cleaned'
+        """,
+            (now, radar_name, strategy, vol_nr, obs_dt),
+        )
+        redownload_count = cursor.rowcount
+
+        # If BUFR files need re-downloading, also clear is_complete so the volume
+        # waits for fresh downloads before the processing daemon picks it up.
+        if redownload_count > 0:
+            cursor.execute(
+                "UPDATE volume_processing SET is_complete = 0 WHERE volume_id = ?",
+                (volume_id,),
+            )
+
+        # Reset volume to pending and clear the corrupt netcdf_path
+        cursor.execute(
+            """
+            UPDATE volume_processing
+            SET status = 'pending', netcdf_path = NULL, updated_at = ?,
+                error_message = 'reset for re-processing: corrupt or missing NetCDF'
+            WHERE volume_id = ?
+        """,
+            (now, volume_id),
+        )
+
+        conn.commit()
+
+        if redownload_count > 0:
+            logger.info(
+                f"Reset volume {volume_id} for re-processing; "
+                f"queued {redownload_count} cleaned BUFR file(s) for re-download"
+            )
+        else:
+            logger.info(f"Reset volume {volume_id} for re-processing from existing BUFR files on disk")
+
+        return redownload_count
+
     def reset_stuck_product_generations(self, timeout_minutes: int, product_type: str = "image") -> int:
         """
         Reset product generations that have been stuck in 'processing' status back to 'pending'.
