@@ -543,11 +543,11 @@ class DownloadDaemon:
 
             cursor.execute(
                 """
-                SELECT filename, remote_path, local_path, field_type, observation_datetime, created_at
+                SELECT filename, remote_path, local_path, field_type, observation_datetime, updated_at
                 FROM downloads
-                WHERE radar_name = ? AND status = 'failed' AND created_at > ?
+                WHERE radar_name = ? AND status = 'failed' AND updated_at > ?
                   AND (permanently_failed IS NULL OR permanently_failed = 0)
-                ORDER BY created_at DESC
+                ORDER BY updated_at DESC
                 LIMIT 50
             """,
                 (self.radar_name, cutoff_datetime),
