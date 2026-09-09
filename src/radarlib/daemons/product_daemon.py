@@ -597,15 +597,12 @@ class ProductGenerationDaemon:
 
         netcdf_file = Path(netcdf_path)
         if not netcdf_file.exists():
-            logger.error(f"NetCDF file not found: {netcdf_file}")
-            self.state_tracker.mark_product_status(
-                volume_id,
-                self.config.product_type,
-                "failed",
-                error_message=f"NetCDF file not found: {netcdf_file}",
-                error_type="FILE_NOT_FOUND",
+            logger.warning(
+                f"NetCDF file not found for volume {volume_id}: {netcdf_file}. "
+                f"Resetting volume for re-processing."
             )
-            self._stats["volumes_failed"] += 1
+            self.state_tracker.reset_volume_for_reprocessing(volume_id)
+            self.state_tracker.mark_product_status(volume_id, self.config.product_type, "pending")
             return False
 
         completeness_str = "complete" if is_complete else "incomplete"
@@ -663,18 +660,37 @@ class ProductGenerationDaemon:
             return False
 
         except Exception as e:
+            # Detect corrupt NetCDF: HDF5 errors (errno -101) or unknown format errors.
+            # These indicate the NetCDF file on disk is damaged (typically from a process
+            # crash mid-write). Delete it and reset the volume for re-processing from BUFR.
+            err_str = str(e)
+            is_netcdf_corrupt = (isinstance(e, OSError) and getattr(e, "errno", None) == -101) or any(
+                kw in err_str for kw in ("HDF error", "unsupported file format", "NetCDF: Unknown file format")
+            )
+            if is_netcdf_corrupt:
+                logger.warning(
+                    f"Corrupt NetCDF detected for volume {volume_id}: {e}. "
+                    f"Deleting and resetting for re-processing.",
+                    exc_info=False,
+                )
+                try:
+                    netcdf_file.unlink(missing_ok=True)
+                except Exception as del_err:
+                    logger.warning(f"Could not delete corrupt NetCDF {netcdf_file}: {del_err}")
+                self.state_tracker.reset_volume_for_reprocessing(volume_id)
+                self.state_tracker.mark_product_status(volume_id, self.config.product_type, "pending")
+                return False
+
             error_msg = (
-                f"Failed to generate {self.config.product_type} for {completeness_str} volume {volume_id}: {str(e)}"
+                f"Failed to generate {self.config.product_type} for {completeness_str} volume {volume_id}: {e}"
             )
             logger.error(error_msg, exc_info=True)
-            # Determine error type from exception
-            error_type = type(e).__name__
             self.state_tracker.mark_product_status(
                 volume_id,
                 self.config.product_type,
                 "failed",
-                error_message=str(e)[:500],  # Limit error message length
-                error_type=error_type,
+                error_message=err_str[:500],
+                error_type=type(e).__name__,
             )
             self._stats["volumes_failed"] += 1
             return False
