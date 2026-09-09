@@ -457,6 +457,22 @@ class ProductGenerationDaemon:
             f"processing_mode=sequential"
         )
 
+        # On startup, immediately reset any product_generation entry left in 'processing'
+        # state from a previous run. Without this, those entries are invisible to
+        # get_volumes_for_product_generation for up to stuck_timeout minutes, causing a
+        # COG to be skipped in the real-time display after every redeployment.
+        try:
+            num_reset = self.state_tracker.reset_stuck_product_generations(
+                timeout_minutes=0, product_type=self.config.product_type
+            )
+            if num_reset > 0:
+                logger.info(
+                    f"Startup sweep: reset {num_reset} in-flight {self.config.product_type} "
+                    f"generation(s) to 'pending' (left over from previous run)"
+                )
+        except Exception as _e:
+            logger.warning(f"Startup sweep failed (non-fatal): {_e}")
+
         try:
             from radarlib.utils.memory_profiling import aggressive_cleanup, log_memory_usage
 
