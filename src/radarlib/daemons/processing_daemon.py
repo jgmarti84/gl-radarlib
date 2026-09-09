@@ -137,6 +137,28 @@ class ProcessingDaemon:
             f"start_date={self.config.start_date or 'None (all dates)'}"
         )
 
+        # On startup, immediately reset any volume left in 'processing' state from a
+        # previous run (crash or clean redeployment). Use timeout_minutes=0 to match
+        # everything currently in-flight. BUFR files are left on disk — they are still
+        # valid and will be re-decoded without a round-trip to FTP.
+        try:
+            conn = self.state_tracker._get_connection()
+            cursor = conn.cursor()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            cursor.execute(
+                "UPDATE volume_processing SET status = 'pending', updated_at = ? WHERE status = 'processing'",
+                (now_iso,),
+            )
+            conn.commit()
+            n_reset = cursor.rowcount
+            if n_reset > 0:
+                logger.info(
+                    f"Startup sweep: reset {n_reset} in-flight volume(s) to 'pending' "
+                    f"(left over from previous run)"
+                )
+        except Exception as _e:
+            logger.warning(f"Startup sweep failed (non-fatal): {_e}")
+
         try:
             from radarlib.utils.memory_profiling import aggressive_cleanup, log_memory_usage
 
