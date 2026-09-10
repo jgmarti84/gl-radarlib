@@ -137,24 +137,25 @@ class ProcessingDaemon:
             f"start_date={self.config.start_date or 'None (all dates)'}"
         )
 
-        # On startup, immediately reset any volume left in 'processing' state from a
-        # previous run (crash or clean redeployment). Use timeout_minutes=0 to match
-        # everything currently in-flight. BUFR files are left on disk — they are still
-        # valid and will be re-decoded without a round-trip to FTP.
+        # On startup, reset any volume left in 'processing' from the previous run and
+        # delete its BUFR files so the download daemon fetches fresh copies. Using
+        # timeout_minutes=0 catches every in-flight volume regardless of age — the
+        # previous process is already dead so no grace period is appropriate.
+        # This prevents a segfaulting BUFR file from locking the service in a crash loop
+        # that the 60-minute periodic check can never reach.
         try:
-            conn = self.state_tracker._get_connection()
-            cursor = conn.cursor()
-            now_iso = datetime.now(timezone.utc).isoformat()
-            cursor.execute(
-                "UPDATE volume_processing SET status = 'pending', updated_at = ? WHERE status = 'processing'",
-                (now_iso,),
-            )
-            conn.commit()
-            n_reset = cursor.rowcount
+            n_reset, paths_to_delete = self.state_tracker.reset_stuck_volumes(timeout_minutes=0)
             if n_reset > 0:
                 logger.info(
-                    f"Startup sweep: reset {n_reset} in-flight volume(s) to 'pending' " f"(left over from previous run)"
+                    f"Startup sweep: reset {n_reset} in-flight volume(s) to 'pending' "
+                    f"(left over from previous run); deleting {len(paths_to_delete)} BUFR file(s) for re-download"
                 )
+                for path_str in paths_to_delete:
+                    try:
+                        Path(path_str).unlink(missing_ok=True)
+                        logger.debug(f"Startup sweep: deleted stale BUFR file: {path_str}")
+                    except Exception as del_err:
+                        logger.warning(f"Startup sweep: could not delete {path_str}: {del_err}")
         except Exception as _e:
             logger.warning(f"Startup sweep failed (non-fatal): {_e}")
 
