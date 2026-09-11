@@ -436,8 +436,16 @@ class RadarFTPClientAsync(RadarFTPClient):
     - Download methods are wrapped with asyncio.to_thread so they run concurrently.
     """
 
-    def __init__(self, host: str, user: str, password: str, base_dir: str = "L2", max_workers: Optional[int] = None):
-        super().__init__(host, user, password, base_dir)
+    def __init__(
+        self,
+        host: str,
+        user: str,
+        password: str,
+        base_dir: str = "L2",
+        max_workers: Optional[int] = None,
+        timeout: int = 30,
+    ):
+        super().__init__(host, user, password, base_dir, timeout=timeout)
         self._max_workers = max_workers
         self._semaphore = asyncio.Semaphore(self.max_workers)
 

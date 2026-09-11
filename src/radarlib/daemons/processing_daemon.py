@@ -59,6 +59,7 @@ class ProcessingDaemonConfig:
     ftp_host: Optional[str] = config.FTP_HOST
     ftp_user: Optional[str] = config.FTP_USER
     ftp_password: Optional[str] = config.FTP_PASS
+    ftp_timeout: int = 120  # Socket timeout (seconds) for each FTP control/data connection
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -239,7 +240,10 @@ class ProcessingDaemon:
                 local_dir = Path(fields_downloaded[0]["local_path"]).parent
 
                 with RadarFTPClientAsync(
-                    self.config.ftp_host, self.config.ftp_user, self.config.ftp_password
+                    self.config.ftp_host,
+                    self.config.ftp_user,
+                    self.config.ftp_password,
+                    timeout=self.config.ftp_timeout,
                 ) as client:
                     for field in fields_to_download:
                         file_name = (

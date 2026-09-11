@@ -3,11 +3,11 @@ local:
     FTP_HOST: "200.16.116.24"
     FTP_USER: "IMontamat"
     FTP_PASS: "1m0nt"
+    FTP_TIMEOUT: 120 # Socket timeout (seconds) for each FTP control/data connection
   VOLUME_TYPES:
     "0315":
       "01":
         - DBZH
-        - DBZV
         - ZDR
         - RHOHV
         - PHIDP

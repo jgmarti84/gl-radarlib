@@ -53,6 +53,7 @@ class DownloadDaemonConfig:
     failed_file_retention_days: int = 1  # Keep retrying for up to 1 day
     ftp_cycle_timeout: int = 3600  # Max seconds for a single FTP poll cycle before timeout
     max_traversal_window_minutes: int = 30  # Max FTP directory window scanned per cycle
+    ftp_timeout: int = 120  # Socket timeout (seconds) for each FTP control/data connection
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -269,6 +270,7 @@ class DownloadDaemon:
                 self.config.username,
                 self.config.password,
                 max_workers=self.config.max_concurrent_downloads,
+                timeout=self.config.ftp_timeout,
             ) as client:
                 logger.debug(f"[{self.radar_name}] Connected to FTP server. Checking for new files...")
 
@@ -468,6 +470,7 @@ class DownloadDaemon:
             host=self.config.host,
             user=self.config.username,
             password=self.config.password,
+            timeout=self.config.ftp_timeout,
         )
 
         volumes_checked = 0
@@ -599,6 +602,7 @@ class DownloadDaemon:
                 self.config.username,
                 self.config.password,
                 max_workers=self.config.max_concurrent_downloads,
+                timeout=self.config.ftp_timeout,
             )
             for failed_file in failed_files:
                 filename = failed_file[0]
