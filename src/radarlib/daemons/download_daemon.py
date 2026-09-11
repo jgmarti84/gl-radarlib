@@ -10,6 +10,7 @@ import gc
 import logging
 import random
 import re
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -51,6 +52,7 @@ class DownloadDaemonConfig:
     failed_file_retry_interval: int = 600  # Retry failed files every 10 minutes (in seconds)
     failed_file_retention_days: int = 1  # Keep retrying for up to 1 day
     ftp_cycle_timeout: int = 3600  # Max seconds for a single FTP poll cycle before timeout
+    max_traversal_window_minutes: int = 30  # Max FTP directory window scanned per cycle
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -105,6 +107,7 @@ class DownloadDaemon:
         self._running = False
         self._last_failed_retry_time: Optional[datetime] = None
         self._last_heartbeat: Optional[datetime] = None
+        self._cancel_traversal = threading.Event()
 
     @property
     def vol_types(self):
@@ -177,13 +180,17 @@ class DownloadDaemon:
 
         Wraps the entire FTP connection + traversal + download in an
         asyncio.wait_for to prevent indefinite hangs on stale connections.
+        The cancel event is signalled on timeout so the traversal thread
+        exits cleanly at the next directory boundary instead of lingering.
         """
+        self._cancel_traversal.clear()
         try:
             await asyncio.wait_for(
                 self._ftp_poll_cycle_inner(_cycle_count),
                 timeout=self.config.ftp_cycle_timeout,
             )
         except asyncio.TimeoutError:
+            self._cancel_traversal.set()
             logger.error(
                 f"[{self.radar_name}] FTP poll cycle timed out after {self.config.ftp_cycle_timeout}s. "
                 f"This likely indicates a hung FTP connection. Will retry next cycle."
@@ -243,6 +250,20 @@ class DownloadDaemon:
             else:
                 logger.warning(f"[{self.radar_name}] No start date configured")
 
+            # Cap the traversal window so a single cycle never scans more than
+            # max_traversal_window_minutes of FTP directories. When catching up from a
+            # backlog, multiple short cycles are far better than one enormous cycle that
+            # exceeds the 3600 s timeout and produces a zombie thread.
+            scan_end = resume_date + timedelta(minutes=self.config.max_traversal_window_minutes)
+            now_utc = datetime.now(timezone.utc)
+            if scan_end > now_utc:
+                scan_end = None  # window fits within real-time; scan to present
+            else:
+                logger.info(
+                    f"[{self.radar_name}] Backlog detected — capping this cycle to "
+                    f"{self.config.max_traversal_window_minutes} min window ending {scan_end.isoformat()}"
+                )
+
             async with RadarFTPClientAsync(
                 self.config.host,
                 self.config.username,
@@ -266,8 +287,9 @@ class DownloadDaemon:
                         self.new_bufr_files,
                         ftp_client=client,
                         start_date=resume_date,
-                        end_date=None,
+                        end_date=scan_end,
                         vol_types=self.vol_types,
+                        cancel_event=self._cancel_traversal,
                     )
                     # Traversal complete — release the control connection now.
                     # Parallel downloads use fresh per-file connections and don't need it.
@@ -376,6 +398,7 @@ class DownloadDaemon:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         vol_types: Optional[re.Pattern] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> list:
         """
         Get new BUFR files from FTP server within the specified date range.
@@ -385,13 +408,15 @@ class DownloadDaemon:
             start_date: Start date for searching files.
             end_date: End date for searching files.
             vol_types: Optional dictionary to filter volume types.
+            cancel_event: If set mid-traversal, exits early at the next directory boundary.
 
         Returns:
             List of tuples (remote_path, local_path, filename, datetime, status).
         """
         candidates = []
         for dt, fname, remote in ftp_client.traverse_radar(
-            self.radar_name, start_date, end_date, include_start=False, vol_types=vol_types
+            self.radar_name, start_date, end_date, include_start=False, vol_types=vol_types,
+            cancel_event=cancel_event,
         ):
             # Skip already-downloaded files (deduplication for multi-volume race condition fix)
             if self.state_tracker.is_file_downloaded(fname, self.radar_name):
