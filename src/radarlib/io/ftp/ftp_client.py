@@ -3,6 +3,7 @@ import ftplib
 import logging
 import os
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -318,10 +319,14 @@ class RadarFTPClient:
         include_start: bool = True,
         include_end: bool = True,
         vol_types: Optional[dict] | re.Pattern = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> Generator[Tuple[datetime, str, str | Path], None, None]:
         """
         Traverse FTP folders for BUFR files, constrained to dt_start..dt_end.
         Correctly handles boundary pruning at each level.
+
+        cancel_event: if set, the traversal exits cleanly at the next directory
+        boundary so the calling thread does not linger after a cycle timeout.
         """
         if vol_types is not None and isinstance(vol_types, dict):
             vol_types = build_vol_types_regex(vol_types)
@@ -335,6 +340,9 @@ class RadarFTPClient:
         try:
             years = sorted(self.list_dir(base_path))
             for y in years:
+                if cancel_event is not None and cancel_event.is_set():
+                    logger.debug(f"Traversal cancelled for radar {radar_name} at year {y}")
+                    return
                 yi = int(y)
                 if yi < dt_start.year or yi > dt_end.year:
                     continue
@@ -360,6 +368,9 @@ class RadarFTPClient:
 
                         hours = sorted(self.list_dir(day_path))
                         for h in hours:
+                            if cancel_event is not None and cancel_event.is_set():
+                                logger.debug(f"Traversal cancelled for radar {radar_name} at hour {y}/{m}/{d}/{h}")
+                                return
                             hi = int(h)
                             if (
                                 yi == dt_start.year
@@ -374,6 +385,11 @@ class RadarFTPClient:
 
                             minutes = sorted(self.list_dir(hour_path))
                             for ms in minutes:
+                                if cancel_event is not None and cancel_event.is_set():
+                                    logger.debug(
+                                        f"Traversal cancelled for radar {radar_name} at minute {y}/{m}/{d}/{h}/{ms}"
+                                    )
+                                    return
                                 mi_val = int(ms[:2])
                                 sec_val = int(ms[2:]) if len(ms) > 2 else 0
                                 dt = datetime(yi, mi, di, hi, mi_val, sec_val, tzinfo=timezone.utc)
