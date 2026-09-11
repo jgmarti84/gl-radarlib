@@ -415,7 +415,11 @@ class DownloadDaemon:
         """
         candidates = []
         for dt, fname, remote in ftp_client.traverse_radar(
-            self.radar_name, start_date, end_date, include_start=False, vol_types=vol_types,
+            self.radar_name,
+            start_date,
+            end_date,
+            include_start=False,
+            vol_types=vol_types,
             cancel_event=cancel_event,
         ):
             # Skip already-downloaded files (deduplication for multi-volume race condition fix)
