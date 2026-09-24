@@ -422,6 +422,7 @@ class DownloadDaemon:
             end_date,
             include_start=False,
             vol_types=vol_types,
+            vol_types_dict=self._vol_types_config,
             cancel_event=cancel_event,
         ):
             # Skip already-downloaded files (deduplication for multi-volume race condition fix)
