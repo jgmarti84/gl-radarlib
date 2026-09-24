@@ -358,10 +358,7 @@ class RadarFTPClient:
                     return
 
                 day_path = (
-                    f"{base_path}"
-                    f"/{current_day.year:04d}"
-                    f"/{current_day.month:02d}"
-                    f"/{current_day.day:02d}"
+                    f"{base_path}" f"/{current_day.year:04d}" f"/{current_day.month:02d}" f"/{current_day.day:02d}"
                 )
 
                 try:
@@ -373,9 +370,7 @@ class RadarFTPClient:
 
                 for h in hours:
                     if cancel_event is not None and cancel_event.is_set():
-                        logger.debug(
-                            f"Traversal cancelled for radar {radar_name} at {current_day}/{h}"
-                        )
+                        logger.debug(f"Traversal cancelled for radar {radar_name} at {current_day}/{h}")
                         return
 
                     hi = int(h)
@@ -393,17 +388,18 @@ class RadarFTPClient:
 
                     for ms in minutes:
                         if cancel_event is not None and cancel_event.is_set():
-                            logger.debug(
-                                f"Traversal cancelled for radar {radar_name} "
-                                f"at {current_day}/{h}/{ms}"
-                            )
+                            logger.debug(f"Traversal cancelled for radar {radar_name} " f"at {current_day}/{h}/{ms}")
                             return
 
                         mi_val = int(ms[:2])
                         sec_val = int(ms[2:]) if len(ms) > 2 else 0
                         dt = datetime(
-                            current_day.year, current_day.month, current_day.day,
-                            hi, mi_val, sec_val,
+                            current_day.year,
+                            current_day.month,
+                            current_day.day,
+                            hi,
+                            mi_val,
+                            sec_val,
                             tzinfo=timezone.utc,
                         )
 
@@ -432,8 +428,7 @@ class RadarFTPClient:
                                 self._ensure_connection()
                             except FTPError as conn_err:
                                 logger.warning(
-                                    f"[traverse] FTP connection lost before SIZE check of "
-                                    f"{minute_path}: {conn_err}"
+                                    f"[traverse] FTP connection lost before SIZE check of " f"{minute_path}: {conn_err}"
                                 )
                                 continue
 
@@ -442,10 +437,7 @@ class RadarFTPClient:
                                     continue
                                 for vol_nr, fields in vol_dict.items():
                                     for field in fields:
-                                        fname = (
-                                            f"{radar_name}_{strategy}_{vol_nr}"
-                                            f"_{field}_{ts}.BUFR"
-                                        )
+                                        fname = f"{radar_name}_{strategy}_{vol_nr}" f"_{field}_{ts}.BUFR"
                                         full_remote = f"{minute_path}/{fname}"
                                         try:
                                             remote_size = self.ftp.size(full_remote)  # type: ignore

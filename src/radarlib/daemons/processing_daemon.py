@@ -316,9 +316,7 @@ class ProcessingDaemon:
                     try:
                         path.unlink(missing_ok=True)
                     except Exception as del_err:
-                        logger.warning(
-                            f"Startup integrity scan: could not delete {local_path}: {del_err}"
-                        )
+                        logger.warning(f"Startup integrity scan: could not delete {local_path}: {del_err}")
                     self.state_tracker.reset_corrupt_download(filename)
                     volume_had_corrupt = True
                     n_corrupt_files += 1
