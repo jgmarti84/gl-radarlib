@@ -174,24 +174,16 @@ class TestRadarFTPClientTraverseRadar:
         client.ftp = MagicMock()
         client.ftp.voidcmd.return_value = None
 
-        # Mock directory structure
+        # Mock directory structure — new traversal starts at the day level
+        # (year/month/day paths are constructed directly, not discovered via NLST).
         def mock_list_dir(path):
-            if path == "/L2/RMA1":
-                return ["2025"]
-            elif path == "/L2/RMA1/2025":
-                return ["01", "02"]
-            elif "/2025/01" in path:
-                if path.endswith("/01"):
-                    return ["15"]  # Day 15
-                elif path.endswith("/15"):
-                    return ["10"]  # Hour 10
-                elif path.endswith("/10"):
-                    return ["30"]  # Minute 30
-                elif path.endswith("/30"):
-                    return ["RMA1_0315_01.bufr"]
-            elif "/2025/02" in path:
-                return []
-            return []
+            if path == "/L2/RMA1/2025/01/15":
+                return ["10"]  # Hour 10 exists on day 15
+            elif path == "/L2/RMA1/2025/01/15/10":
+                return ["30"]  # Minute folder "30" (→ minute=30, second=0)
+            elif path == "/L2/RMA1/2025/01/15/10/30":
+                return ["RMA1_0315_01.bufr"]
+            return []  # All other day / hour / minute paths are empty
 
         client.list_dir = MagicMock(side_effect=mock_list_dir)
 
