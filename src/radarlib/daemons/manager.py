@@ -74,6 +74,7 @@ class DaemonManagerConfig:
     enable_product_daemon: bool = True
     product_dir: Optional[Path] = None
     enable_cleanup_daemon: bool = False  # Disabled by default for safety
+    ftp_timeout: int = 120  # Socket timeout (seconds) for each FTP control/data connection
     product_type: str = "image"
     add_colmax: bool = True
     add_tops_and_cores: bool = False
@@ -167,6 +168,7 @@ class DaemonManager:
             # end_date=self.config.end_date,
             poll_interval=self.config.download_poll_interval,
             vol_types=self.config.volume_types,
+            ftp_timeout=self.config.ftp_timeout,
         )
         return DownloadDaemon(download_config)
 
@@ -183,6 +185,7 @@ class DaemonManager:
             ftp_host=self.config.ftp_host,
             ftp_user=self.config.ftp_user,
             ftp_password=self.config.ftp_password,
+            ftp_timeout=self.config.ftp_timeout,
         )
         return ProcessingDaemon(processing_config)
 
