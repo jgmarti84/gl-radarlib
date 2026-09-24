@@ -169,6 +169,12 @@ class ProcessingDaemon:
 
         _cycle_count = 0
 
+        # Scan all pending-complete volumes for corrupt BUFR files before the main loop
+        # starts.  This runs synchronously (no FTP, no network) and completes in
+        # milliseconds, so the processing daemon cannot race ahead and try to decode a
+        # truncated file that would crash the C library.
+        self._scan_pending_bufr_integrity()
+
         try:
             while self._running:
                 try:
@@ -218,6 +224,128 @@ class ProcessingDaemon:
         """Stop the daemon gracefully."""
         self._running = False
         logger.info("Daemon stop requested")
+
+    def _scan_pending_bufr_integrity(self) -> None:
+        """
+        Scan all pending-complete volumes for corrupt BUFR files before processing starts.
+
+        For each volume in 'pending' state with is_complete=1, reads the BUFR header
+        (magic bytes + 3-byte declared message length) from every associated file and
+        compares it against the actual file size on disk.  Any file that is missing,
+        zero-byte, has bad magic, or is truncated is deleted and its download record is
+        reset to 'failed' so the download daemon re-fetches it.  The volume is also
+        marked incomplete so it waits for fresh downloads before the processing daemon
+        picks it up.
+
+        This is a local, network-free check that runs in milliseconds.  It closes the
+        race between the startup stuck-volume sweep (which only covers volumes that were
+        already in 'processing' state) and the processing loop (which would immediately
+        try to decode whatever files are on disk).
+        """
+        conn = self.state_tracker._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute(
+            """
+            SELECT volume_id, radar_name, strategy, vol_nr, observation_datetime
+            FROM volume_processing
+            WHERE status = 'pending' AND is_complete = 1
+            """
+        )
+        pending_volumes = cursor.fetchall()
+
+        if not pending_volumes:
+            logger.debug("Startup integrity scan: no pending-complete volumes to check")
+            return
+
+        n_corrupt_files = 0
+        n_corrupt_volumes = 0
+
+        for vol_row in pending_volumes:
+            volume_id = vol_row[0]
+            radar_name, strategy, vol_nr, obs_dt = vol_row[1], vol_row[2], vol_row[3], vol_row[4]
+
+            cursor.execute(
+                """
+                SELECT filename, local_path FROM downloads
+                WHERE radar_name = ? AND strategy = ? AND vol_nr = ?
+                AND observation_datetime = ? AND status = 'completed'
+                """,
+                (radar_name, strategy, vol_nr, obs_dt),
+            )
+            downloads = cursor.fetchall()
+
+            volume_had_corrupt = False
+            for filename, local_path in downloads:
+                if not local_path:
+                    continue
+
+                path = Path(local_path)
+                corrupt_reason: str | None = None
+
+                try:
+                    file_size = path.stat().st_size
+                except FileNotFoundError:
+                    corrupt_reason = "file missing from disk"
+                    file_size = 0
+
+                if corrupt_reason is None:
+                    if file_size == 0:
+                        corrupt_reason = "0-byte file"
+                    else:
+                        try:
+                            with open(path, "rb") as fh:
+                                header = fh.read(8)
+                            if len(header) < 8 or header[:4] != b"BUFR":
+                                corrupt_reason = f"invalid BUFR magic: {header[:4]!r}"
+                            else:
+                                declared_length = int.from_bytes(header[4:7], "big")
+                                if file_size < declared_length:
+                                    corrupt_reason = (
+                                        f"truncated: {file_size} bytes on disk, "
+                                        f"{declared_length} declared in BUFR header"
+                                    )
+                        except OSError as read_err:
+                            corrupt_reason = f"cannot read file: {read_err}"
+
+                if corrupt_reason:
+                    logger.warning(
+                        f"Startup integrity scan: corrupt BUFR file detected — "
+                        f"{filename} ({corrupt_reason}); deleting and queuing for re-download"
+                    )
+                    try:
+                        path.unlink(missing_ok=True)
+                    except Exception as del_err:
+                        logger.warning(
+                            f"Startup integrity scan: could not delete {local_path}: {del_err}"
+                        )
+                    self.state_tracker.reset_corrupt_download(filename)
+                    volume_had_corrupt = True
+                    n_corrupt_files += 1
+
+            if volume_had_corrupt:
+                cursor.execute(
+                    "UPDATE volume_processing SET is_complete = 0, updated_at = ? WHERE volume_id = ?",
+                    (now, volume_id),
+                )
+                conn.commit()
+                logger.info(
+                    f"Startup integrity scan: volume {volume_id} has corrupt BUFR file(s) — "
+                    f"marked incomplete, waiting for re-download"
+                )
+                n_corrupt_volumes += 1
+
+        if n_corrupt_files > 0:
+            logger.warning(
+                f"Startup integrity scan: quarantined {n_corrupt_files} corrupt BUFR file(s) "
+                f"across {n_corrupt_volumes} volume(s) — download daemon will re-fetch them"
+            )
+        else:
+            logger.info(
+                f"Startup integrity scan: all {len(pending_volumes)} pending-complete "
+                f"volume(s) passed BUFR integrity check"
+            )
 
     async def _retry_incomplete_volumes(self) -> None:
         """
