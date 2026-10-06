@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import datetime
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import datetime
+
 from radarlib.utils.names_utils import get_netcdf_filename_from_bufr_filename
 
 logger = logging.getLogger(__name__)
@@ -169,29 +170,47 @@ def bufr_fields_to_pyart_radar(
     sweeps = ref_field["info"]["sweeps"]
     nsweeps = len(sweeps)
     t0_row = sweeps.iloc[0]
-    t0 = datetime.datetime(int(t0_row["ano_sweep_ini"]), int(t0_row["mes_sweep_ini"]), int(t0_row["dia_sweep_ini"]),
-                           int(t0_row["hora_sweep_ini"]), int(t0_row["min_sweep_ini"]), int(t0_row["seg_sweep_ini"]), 
-                           tzinfo=datetime.timezone.utc)
+    t0 = datetime.datetime(
+        int(t0_row["ano_sweep_ini"]),
+        int(t0_row["mes_sweep_ini"]),
+        int(t0_row["dia_sweep_ini"]),
+        int(t0_row["hora_sweep_ini"]),
+        int(t0_row["min_sweep_ini"]),
+        int(t0_row["seg_sweep_ini"]),
+        tzinfo=datetime.timezone.utc,
+    )
     radar.time["units"] = f"seconds since {t0.strftime('%Y-%m-%dT%H:%M:%SZ')}"
 
     DT_FMT = "%Y%m%dT%H%M%S"
-    relative_final_sweep_time = np.zeros(nsweeps, dtype=np.float64) # offset to sweep END time
-    relative_initial_sweep_time = np.zeros(nsweeps, dtype=np.float64) # offset to sweep START time
-    initial_sweep_time = np.empty(nsweeps, dtype="S15") # sweep start time in UTC
-    final_sweep_time = np.empty(nsweeps, dtype="S15") # sweep end time in UTC
+    relative_final_sweep_time = np.zeros(nsweeps, dtype=np.float64)  # offset to sweep END time
+    relative_initial_sweep_time = np.zeros(nsweeps, dtype=np.float64)  # offset to sweep START time
+    initial_sweep_time = np.empty(nsweeps, dtype="S15")  # sweep start time in UTC
+    final_sweep_time = np.empty(nsweeps, dtype="S15")  # sweep end time in UTC
 
     for i, (_, row) in enumerate(sweeps.iterrows()):
-        t_ini = datetime.datetime(int(row["ano_sweep_ini"]), int(row["mes_sweep_ini"]), int(row["dia_sweep_ini"]),
-                                  int(row["hora_sweep_ini"]), int(row["min_sweep_ini"]), int(row["seg_sweep_ini"]),
-                                  tzinfo=datetime.timezone.utc)
-        t_end = datetime.datetime(int(row["ano_sweep"]), int(row["mes_sweep"]), int(row["dia_sweep"]),
-                                  int(row["hora_sweep"]), int(row["min_sweep"]), int(row["seg_sweep"]),
-                                  tzinfo=datetime.timezone.utc)
+        t_ini = datetime.datetime(
+            int(row["ano_sweep_ini"]),
+            int(row["mes_sweep_ini"]),
+            int(row["dia_sweep_ini"]),
+            int(row["hora_sweep_ini"]),
+            int(row["min_sweep_ini"]),
+            int(row["seg_sweep_ini"]),
+            tzinfo=datetime.timezone.utc,
+        )
+        t_end = datetime.datetime(
+            int(row["ano_sweep"]),
+            int(row["mes_sweep"]),
+            int(row["dia_sweep"]),
+            int(row["hora_sweep"]),
+            int(row["min_sweep"]),
+            int(row["seg_sweep"]),
+            tzinfo=datetime.timezone.utc,
+        )
         relative_final_sweep_time[i] = (t_end - t0).total_seconds()
         relative_initial_sweep_time[i] = (t_ini - t0).total_seconds()
         initial_sweep_time[i] = t_ini.strftime(DT_FMT).encode()
         final_sweep_time[i] = t_end.strftime(DT_FMT).encode()
-    
+
     # legacy code forced sweep-0 start offset to 0 to avoid negative values
     relative_initial_sweep_time[0] = 0.0
 
@@ -207,7 +226,7 @@ def bufr_fields_to_pyart_radar(
         n = int(sweeps.iloc[i]["nrayos"])
         start_s = relative_initial_sweep_time[i]
         end_s = relative_final_sweep_time[i]
-        ray_times[ray_offset:ray_offset + n] = np.linspace(start_s, end_s, n, endpoint=False)
+        ray_times[ray_offset : ray_offset + n] = np.linspace(start_s, end_s, n, endpoint=False)
         ray_offset += n
 
     radar.time["data"] = ray_times
