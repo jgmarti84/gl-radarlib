@@ -184,8 +184,8 @@ def bufr_fields_to_pyart_radar(
     DT_FMT = "%Y%m%dT%H%M%S"
     relative_final_sweep_time = np.zeros(nsweeps, dtype=np.float64)  # offset to sweep END time
     relative_initial_sweep_time = np.zeros(nsweeps, dtype=np.float64)  # offset to sweep START time
-    initial_sweep_time = np.empty(nsweeps, dtype="S15")  # sweep start time in UTC
-    final_sweep_time = np.empty(nsweeps, dtype="S15")  # sweep end time in UTC
+    initial_sweep_time = np.empty(nsweeps, dtype="U15")  # sweep start time in UTC
+    final_sweep_time = np.empty(nsweeps, dtype="U15")  # sweep end time in UTC
 
     for i, (_, row) in enumerate(sweeps.iterrows()):
         t_ini = datetime.datetime(
@@ -208,8 +208,8 @@ def bufr_fields_to_pyart_radar(
         )
         relative_final_sweep_time[i] = (t_end - t0).total_seconds()
         relative_initial_sweep_time[i] = (t_ini - t0).total_seconds()
-        initial_sweep_time[i] = t_ini.strftime(DT_FMT).encode()
-        final_sweep_time[i] = t_end.strftime(DT_FMT).encode()
+        initial_sweep_time[i] = t_ini.strftime(DT_FMT)
+        final_sweep_time[i] = t_end.strftime(DT_FMT)
 
     # legacy code forced sweep-0 start offset to 0 to avoid negative values
     relative_initial_sweep_time[0] = 0.0
