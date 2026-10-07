@@ -84,13 +84,8 @@ def inspect(nc_path: str) -> None:
     print(f"  {'longitude':<20}: {lon:.5f}°")
     print(f"  {'altitude':<20}: {alt:.1f} m")
 
-    time_units = radar.time.get("units", "")
-    time_start = radar.time["data"][0] if len(radar.time["data"]) > 0 else None
-    time_end = radar.time["data"][-1] if len(radar.time["data"]) > 0 else None
-    print(f"  {'time units':<20}: {time_units}")
-    if time_start is not None:
-        print(f"  {'time start':<20}: {time_start:.1f} s")
-        print(f"  {'time end':<20}: {time_end:.1f} s")
+    time_units = radar.time.get("units", "—")
+    print(f"  {'time.units':<20}: {time_units}")
 
     # --- Gate dimensions ---
     range_data = radar.range["data"]
@@ -103,6 +98,68 @@ def inspect(nc_path: str) -> None:
     print(f"  range first    :{_fmt_m(float(range_data[0]))}")
     print(f"  range last     :{_fmt_m(float(range_data[-1]))}")
     print(f"  gate size      :{_fmt_m(gate_size)}")
+
+    # --- Time metadata (raw from NetCDF, not filtered by PyART) ---
+    import netCDF4 as nc4
+    from datetime import datetime, timezone, timedelta
+
+    print("\n[Time metadata]")
+    with nc4.Dataset(str(p)) as ds:
+        # Global attributes that carry time info
+        for attr in ("created", "institution", "source"):
+            val = getattr(ds, attr, None)
+            if val:
+                print(f"  {attr:<20}: {val}")
+
+        def _read_charvar(ds, name):
+            if name not in ds.variables:
+                return None
+            raw = ds.variables[name][:]
+            import numpy as np
+            chars = [c.decode() if isinstance(c, bytes) else str(c)
+                     for c in raw if not np.ma.is_masked(c) and c not in (b"", "")]
+            return "".join(chars).strip()
+
+        tcs = _read_charvar(ds, "time_coverage_start")
+        tce = _read_charvar(ds, "time_coverage_end")
+        print(f"  {'time_coverage_start':<20}: {tcs or '(missing)'}")
+        print(f"  {'time_coverage_end':<20}: {tce or '(missing)'}")
+
+    # Decode per-sweep wall-clock times from time.units + time.data
+    print("\n[Per-sweep times]")
+    try:
+        from cftime import num2date
+        units = radar.time.get("units", "")
+        cal   = radar.time.get("calendar", "standard")
+        t_data = radar.time["data"]
+
+        has_real_time = "1989" not in units and "2011" not in units
+
+        hdr2 = f"  {'sw':>3}  {'elev':>7}  {'rays':>5}  {'sweep_start (UTC)':>22}  {'sweep_end (UTC)':>22}  {'duration':>9}"
+        print(hdr2)
+        print("  " + "-" * (len(hdr2) - 2))
+
+        for i in range(radar.nsweeps):
+            sl      = radar.get_slice(i)
+            fixed   = float(radar.fixed_angle["data"][i])
+            n_rays  = sl.stop - sl.start
+            if has_real_time and len(t_data) > 0:
+                t_s = num2date(float(t_data[sl.start]),  units, cal)
+                t_e = num2date(float(t_data[sl.stop - 1]), units, cal)
+                dur = float(t_data[sl.stop - 1]) - float(t_data[sl.start])
+                ts_str = t_s.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+                te_str = t_e.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+                dur_str = f"{dur:.1f}s"
+            else:
+                ts_str = te_str = "(dummy epoch)" if "1989" in units or "2011" in units else "?"
+                dur_str = "?"
+            print(f"  {i:>3}  {fixed:>7.3f}°  {n_rays:>5}  {ts_str:>22}  {te_str:>22}  {dur_str:>9}")
+
+        if not has_real_time:
+            print(f"\n  WARNING: time.units = '{units}'")
+            print("  This is a dummy epoch — times above are NOT real observation times.")
+    except Exception as exc:
+        print(f"  (could not decode sweep times: {exc})")
 
     # --- Per-sweep table ---
     print("\n[Per-sweep geometry]")
