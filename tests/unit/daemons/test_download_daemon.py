@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 """Unit tests for radarlib.daemons.download_daemon module."""
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from datetime import timedelta
 
 from radarlib.daemons.download_daemon import DownloadDaemon, DownloadDaemonConfig, compute_scan_window
 
@@ -207,8 +204,11 @@ class TestComputeScanWindow:
     def test_no_downloads_no_start_date_returns_none(self):
         now = datetime(2026, 10, 10, 20, 0, 0, tzinfo=timezone.utc)
         resume, scan_end = compute_scan_window(
-            latest_by_vol={}, scan_cursor=None, now=now,
-            start_date=None, window_minutes=self.WIN,
+            latest_by_vol={},
+            scan_cursor=None,
+            now=now,
+            start_date=None,
+            window_minutes=self.WIN,
         )
         assert resume is None and scan_end is None
 
@@ -217,8 +217,8 @@ class TestComputeScanWindow:
         window back (the old min+60 zombie-growth failure mode)."""
         now = datetime(2026, 10, 10, 12, 0, 0, tzinfo=timezone.utc)
         latest = {
-            "01": now - timedelta(minutes=9),    # fresh
-            "02": now - timedelta(hours=3),      # badly lagging / infrequent
+            "01": now - timedelta(minutes=9),  # fresh
+            "02": now - timedelta(hours=3),  # badly lagging / infrequent
         }
         resume, scan_end = self._win(latest, None, now)
         assert resume == (now - timedelta(minutes=9)) - timedelta(minutes=self.BACKFILL)
