@@ -320,3 +320,30 @@ class TestExtractCogFilenameComponents:
             result = names_utils.extract_cog_filename_components(filename)
             assert isinstance(result, dict)
             assert set(result.keys()) == {"radar_name", "timestamp", "field_type", "sweep", "filtered"}
+
+
+class TestVolNrCandidates:
+    """Tests for names_utils.vol_nr_candidates (zero-padding tolerance)."""
+
+    def test_zero_padded_config_tries_single_digit(self):
+        """A zero-padded config value (RMA style) should also probe the AR single-digit form."""
+        assert names_utils.vol_nr_candidates("03") == ["03", "3"]
+
+    def test_single_digit_config_tries_zero_padded(self):
+        """A single-digit config value (AR style) should also probe the RMA zero-padded form."""
+        assert names_utils.vol_nr_candidates("3") == ["3", "03"]
+
+    def test_two_digit_value_has_single_candidate(self):
+        """A genuine two-digit volume has no alternate spelling."""
+        assert names_utils.vol_nr_candidates("10") == ["10"]
+
+    def test_candidates_are_deduplicated(self):
+        """No spelling should be probed twice."""
+        for value in ("01", "1", "03", "3", "10", "12"):
+            candidates = names_utils.vol_nr_candidates(value)
+            assert len(candidates) == len(set(candidates))
+
+    def test_configured_form_is_tried_first(self):
+        """The exact configured spelling must be the first candidate (avoids an extra SIZE call)."""
+        assert names_utils.vol_nr_candidates("03")[0] == "03"
+        assert names_utils.vol_nr_candidates("3")[0] == "3"

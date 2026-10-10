@@ -176,6 +176,32 @@ def extract_bufr_filename_components(filename: str) -> dict:
         }
 
 
+def vol_nr_candidates(vol_nr: str) -> list:
+    """Return the distinct volume-number spellings to try when building a BUFR
+    filename, ordered by preference (configured form first).
+
+    Radar sites are inconsistent about zero-padding the volume number: RMA sites
+    publish ``RMA17_0315_01_...`` (zero-padded) while the AR/Gematronik sites
+    publish ``AR5_1000_1_...`` (single digit). The config only stores one form,
+    so the SIZE-based FTP detector must probe both. This mirrors the ``0?``
+    tolerance already baked into :func:`build_vol_types_regex`.
+
+    Examples:
+        >>> vol_nr_candidates("03")
+        ['03', '3']
+        >>> vol_nr_candidates("3")
+        ['3', '03']
+        >>> vol_nr_candidates("10")
+        ['10']
+    """
+    stripped = vol_nr.lstrip("0") or "0"
+    candidates = []
+    for variant in (vol_nr, stripped, stripped.zfill(2)):
+        if variant not in candidates:
+            candidates.append(variant)
+    return candidates
+
+
 def build_vol_types_regex(vol_types: Dict[str, Dict[str, list]]) -> Optional[re.Pattern]:
     """
     Build a compiled regex pattern from vol_types dictionary to match BUFR filenames.

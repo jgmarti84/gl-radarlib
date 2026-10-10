@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Generator, List, Optional, Tuple
 
 from radarlib.io.bufr.bufr import BUFRFileInfo, BUFRFilename
-from radarlib.utils.names_utils import build_vol_types_regex
+from radarlib.utils.names_utils import build_vol_types_regex, vol_nr_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -436,27 +436,32 @@ class RadarFTPClient:
                                 if not isinstance(vol_dict, dict):
                                     continue
                                 for vol_nr, fields in vol_dict.items():
+                                    # Sites disagree on zero-padding the volume number
+                                    # (RMA: "01", AR/Gematronik: "1"), so probe both
+                                    # spellings and yield the one that actually exists.
+                                    candidates = vol_nr_candidates(vol_nr)
                                     for field in fields:
-                                        fname = f"{radar_name}_{strategy}_{vol_nr}" f"_{field}_{ts}.BUFR"
-                                        full_remote = f"{minute_path}/{fname}"
-                                        try:
-                                            remote_size = self.ftp.size(full_remote)  # type: ignore
+                                        for vol_variant in candidates:
+                                            fname = f"{radar_name}_{strategy}_{vol_variant}" f"_{field}_{ts}.BUFR"
+                                            full_remote = f"{minute_path}/{fname}"
+                                            try:
+                                                remote_size = self.ftp.size(full_remote)  # type: ignore
+                                            except ftplib.error_perm:
+                                                continue  # 550 — try the next padding variant
+                                            except (EOFError, OSError) as conn_err:
+                                                # Lost control connection mid-loop — try once to recover
+                                                try:
+                                                    self._ensure_connection()
+                                                    remote_size = self.ftp.size(full_remote)  # type: ignore
+                                                except ftplib.all_errors:
+                                                    logger.warning(
+                                                        f"[traverse] connection lost during SIZE check "
+                                                        f"of {full_remote}: {conn_err}"
+                                                    )
+                                                    continue
                                             if remote_size is not None:
                                                 yield dt, fname, Path(full_remote)
-                                        except ftplib.error_perm:
-                                            pass  # 550 — file not present at this timestamp
-                                        except (EOFError, OSError) as conn_err:
-                                            # Lost control connection mid-loop — try once to recover
-                                            try:
-                                                self._ensure_connection()
-                                                remote_size = self.ftp.size(full_remote)  # type: ignore
-                                                if remote_size is not None:
-                                                    yield dt, fname, Path(full_remote)
-                                            except ftplib.all_errors:
-                                                logger.warning(
-                                                    f"[traverse] connection lost during SIZE check "
-                                                    f"of {full_remote}: {conn_err}"
-                                                )
+                                                break  # field found; stop probing variants
                         else:
                             # Fallback: NLST at the minute-folder level (original behaviour
                             # when no vol_types_dict is provided).
