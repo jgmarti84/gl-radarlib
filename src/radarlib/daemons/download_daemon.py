@@ -25,6 +25,68 @@ from radarlib.utils.names_utils import build_vol_types_regex, extract_bufr_filen
 logger = logging.getLogger(__name__)
 
 
+def compute_scan_window(
+    latest_by_vol: Dict[str, datetime],
+    scan_cursor: Optional[datetime],
+    now: datetime,
+    start_date: Optional[datetime],
+    window_minutes: int,
+    backfill_minutes: int = 15,
+):
+    """Decide the FTP traversal window for one poll cycle.
+
+    Returns ``(resume_date, scan_end)``:
+
+    * ``resume_date`` — inclusive-exclusive lower bound to resume scanning from.
+    * ``scan_end`` — upper bound, or ``None`` meaning "scan to the present".
+
+    The window is always capped to ``window_minutes`` so a single cycle never
+    scans an unbounded range (this is what prevents the old ``min + 60`` design's
+    runaway window / zombie-thread problem).
+
+    The key property — and the fix for the "gap ratchet" that froze RMA12/RMA17 —
+    is ``scan_cursor``. Anchoring purely to the newest *downloaded* file means the
+    window cannot advance across a data gap longer than ``window - backfill``
+    minutes: the next scan lands beyond the window and nothing downloads, so the
+    anchor never moves. The cursor decouples *scan progress* from *download
+    progress*: whenever a capped (backlog) window is fully scanned, the caller
+    advances the cursor to ``scan_end``, so the next cycle steps forward by one
+    window — marching through gaps and backlog until it reaches the present, at
+    which point the cursor is cleared and normal ``max - backfill`` tracking (which
+    re-scans the last ``backfill_minutes`` for late-published files) resumes.
+
+    Args:
+        latest_by_vol: Newest downloaded observation datetime per volume number.
+        scan_cursor: Where the previous cycle left off while catching up, or None
+            when tracking the live frontier.
+        now: Current UTC time.
+        start_date: Configured fallback start when nothing has been downloaded yet.
+        window_minutes: Maximum directory span scanned per cycle.
+        backfill_minutes: How far behind the newest download to re-scan, to catch
+            files published slightly late.
+    """
+    if latest_by_vol:
+        base_floor: Optional[datetime] = max(latest_by_vol.values()) - timedelta(minutes=backfill_minutes)
+    else:
+        base_floor = start_date
+
+    if base_floor is not None and scan_cursor is not None:
+        resume_date: Optional[datetime] = max(base_floor, scan_cursor)
+    elif scan_cursor is not None:
+        resume_date = scan_cursor
+    else:
+        resume_date = base_floor
+
+    if resume_date is None:
+        return None, None
+
+    scan_end: Optional[datetime] = resume_date + timedelta(minutes=window_minutes)
+    if scan_end > now:
+        scan_end = None  # window reaches the present; scan to now
+
+    return resume_date, scan_end
+
+
 class DownloadDaemonError(Exception):
     """Base class for Download Daemon errors."""
 
@@ -109,6 +171,10 @@ class DownloadDaemon:
         self._last_failed_retry_time: Optional[datetime] = None
         self._last_heartbeat: Optional[datetime] = None
         self._cancel_traversal = threading.Event()
+        # Where the last backlog/catch-up cycle finished scanning. None means we
+        # are tracking the live frontier. Lets the traversal step forward through
+        # data gaps instead of freezing (see compute_scan_window).
+        self._scan_cursor: Optional[datetime] = None
 
     @property
     def vol_types(self):
@@ -200,10 +266,7 @@ class DownloadDaemon:
     async def _ftp_poll_cycle_inner(self, _cycle_count: int) -> None:
         """Inner FTP poll cycle — connection, traversal, download, retry."""
         try:
-            # Determine resume date: use latest downloaded file per volume, then take minimum
-            resume_date: datetime = self.start_date  # type: ignore
-
-            # Multi-volume resume logic: get latest for each volume and use the oldest
+            # Multi-volume resume logic: newest downloaded observation per volume.
             latest_by_vol: Dict[str, datetime] = {}
             if self._vol_types_config and isinstance(self._vol_types_config, dict):
                 # Extract all unique volume numbers from all strategies
@@ -230,39 +293,35 @@ class DownloadDaemon:
                                 f"[{self.radar_name}] Failed to parse observation_datetime for vol{vol_nr}: {e}"
                             )
 
-            # Use the MAXIMUM observation_datetime from all volumes as resume point.
-            # Using max (most recent) rather than min (oldest) keeps the traversal window
-            # small (~15 min) regardless of minor per-volume lag. A 15-minute buffer is
-            # sufficient for any realistic clock skew between FTP server and container;
-            # using min + 60 min caused the window to grow by 1 h every cycle when one
-            # volume lagged slightly, eventually exceeding the 3600 s cycle timeout.
-            if latest_by_vol:
-                resume_date = max(latest_by_vol.values())
-                resume_date = resume_date - timedelta(minutes=15)
-                logger.info(
-                    f"[{self.radar_name}] Resuming from newest volume's latest"
-                    f" download minus 15 min: {resume_date.isoformat()} "
-                    f"(vol{sorted(latest_by_vol.keys(), key=lambda k: latest_by_vol[k])[-1]})"
-                )
-            elif resume_date:
-                logger.info(
-                    f"[{self.radar_name}] No previous downloads found, starting from: {resume_date.isoformat()}"
-                )
-            else:
-                logger.warning(f"[{self.radar_name}] No start date configured")
-
-            # Cap the traversal window so a single cycle never scans more than
-            # max_traversal_window_minutes of FTP directories. When catching up from a
-            # backlog, multiple short cycles are far better than one enormous cycle that
-            # exceeds the 3600 s timeout and produces a zombie thread.
-            scan_end = resume_date + timedelta(minutes=self.config.max_traversal_window_minutes)
+            # Resume from the newest download minus a small backfill buffer, but keep a
+            # scan cursor so a capped (backlog) window steps forward each cycle instead
+            # of re-scanning the same range forever. Anchoring only to the newest
+            # download froze RMA12/RMA17: a data gap longer than the forward reach
+            # (window - backfill) left the anchor pinned behind the gap permanently.
+            # The cursor marches the window through gaps/backlog until it reaches the
+            # present. See compute_scan_window.
             now_utc = datetime.now(timezone.utc)
-            if scan_end > now_utc:
-                scan_end = None  # window fits within real-time; scan to present
+            resume_date, scan_end = compute_scan_window(
+                latest_by_vol=latest_by_vol,
+                scan_cursor=self._scan_cursor,
+                now=now_utc,
+                start_date=self.start_date,
+                window_minutes=self.config.max_traversal_window_minutes,
+            )
+
+            if resume_date is None:
+                # No downloads yet and no configured start date — nothing to scan.
+                logger.warning(f"[{self.radar_name}] No start date configured; skipping cycle")
+                return
+            elif scan_end is None:
+                logger.info(
+                    f"[{self.radar_name}] Scanning from {resume_date.isoformat()} to present"
+                    + (" (caught up from backlog)" if self._scan_cursor is not None else "")
+                )
             else:
                 logger.info(
-                    f"[{self.radar_name}] Backlog detected — capping this cycle to "
-                    f"{self.config.max_traversal_window_minutes} min window ending {scan_end.isoformat()}"
+                    f"[{self.radar_name}] Backlog detected — scanning capped {self.config.max_traversal_window_minutes}"
+                    f" min window {resume_date.isoformat()} .. {scan_end.isoformat()}; advancing next cycle"
                 )
 
             async with RadarFTPClientAsync(
@@ -297,6 +356,13 @@ class DownloadDaemon:
                     # Parallel downloads use fresh per-file connections and don't need it.
                     # This keeps the concurrent connection count low across all containers.
                     client.disconnect()
+
+                    # Advance the scan cursor now that this window is fully scanned.
+                    # When capped (backlog), step to scan_end so the next cycle moves
+                    # forward even if this window was empty (a data gap) — this is what
+                    # unfreezes a stuck radar. When we reached the present (scan_end is
+                    # None), clear the cursor to resume live-frontier tracking.
+                    self._scan_cursor = scan_end
 
                     if files:
                         tasks = []
