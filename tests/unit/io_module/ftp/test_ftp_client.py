@@ -227,9 +227,7 @@ class TestRadarFTPClientTraverseRadar:
         dt_start = datetime(2026, 1, 15, 10, 29, 0, tzinfo=timezone.utc)
         dt_end = datetime(2026, 1, 15, 10, 31, 0, tzinfo=timezone.utc)
 
-        results = list(
-            client.traverse_radar("AR5", dt_start, dt_end, vol_types_dict=vol_types_dict)
-        )
+        results = list(client.traverse_radar("AR5", dt_start, dt_end, vol_types_dict=vol_types_dict))
 
         assert len(results) == 1
         _dt, fname, _remote = results[0]

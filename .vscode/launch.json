@@ -29,11 +29,14 @@
             //     "--radar",
             //     "RMA12"
             // ],
+            // "args": [
+            //     "--netcdf",
+            //     "data/radares/RMA1/netcdf/RMA1_0315_02_20260227T235110Z.nc",
+            //     "--output",
+            //     "data/radares/RMA1/processed "
+            // ],
             "args": [
-                "--netcdf",
-                "data/radares/RMA1/netcdf/RMA1_0315_02_20260227T235110Z.nc",
-                "--output",
-                "data/radares/RMA1/processed "
+                "RMA1_0315_01_20261010T163542Z.nc"
             ],
             "justMyCode": false
         },
