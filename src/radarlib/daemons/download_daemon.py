@@ -390,7 +390,7 @@ class DownloadDaemon:
             return 0
 
         tasks = []
-        for remote, local, fname, dt, status in files:
+        for remote, local, fname, dt, _ in files:
 
             async def download_one(remote_path=remote, local_path=local, fname=fname, dt=dt):
                 components = extract_bufr_filename_components(fname)
@@ -439,8 +439,7 @@ class DownloadDaemon:
                         observation_datetime=dt.isoformat(),
                     )
                     logger.warning(
-                        f"[{self.radar_name}] BUFR file missing during download"
-                        f" — marked as failed: {fname}: {e}"
+                        f"[{self.radar_name}] BUFR file missing during download" f" — marked as failed: {fname}: {e}"
                     )
                 finally:
                     # Explicit cleanup (per copilot-instructions.md Rules 1, 4)

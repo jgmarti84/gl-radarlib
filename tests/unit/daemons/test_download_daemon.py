@@ -352,8 +352,9 @@ class TestBackfillOriginFloor:
     once the backfill catches up."""
 
     def _daemon(self, tmp_path, *, initial_cursor=None, latest_download=None):
-        return TestLiveFirstAndBackfill._daemon(TestLiveFirstAndBackfill(), tmp_path,
-                                                initial_cursor=initial_cursor, latest_download=latest_download)
+        return TestLiveFirstAndBackfill._daemon(
+            TestLiveFirstAndBackfill(), tmp_path, initial_cursor=initial_cursor, latest_download=latest_download
+        )
 
     async def _run_cycle(self, daemon):
         return await TestLiveFirstAndBackfill._run_cycle(TestLiveFirstAndBackfill(), daemon)
@@ -366,8 +367,14 @@ class TestBackfillOriginFloor:
         await self._run_cycle(daemon)
         assert "backfill_origin" in daemon._store
         # origin == the pre-live frontier (stall point), so processing scans from there
-        assert abs((datetime.fromisoformat(daemon._store["backfill_origin"])
-                    - datetime.fromisoformat(stall)).total_seconds()) < 1
+        assert (
+            abs(
+                (
+                    datetime.fromisoformat(daemon._store["backfill_origin"]) - datetime.fromisoformat(stall)
+                ).total_seconds()
+            )
+            < 1
+        )
 
     @pytest.mark.asyncio
     async def test_origin_cleared_when_caught_up(self, tmp_path):
