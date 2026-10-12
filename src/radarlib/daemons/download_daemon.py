@@ -114,8 +114,17 @@ class DownloadDaemonConfig:
     failed_file_retry_interval: int = 600  # Retry failed files every 10 minutes (in seconds)
     failed_file_retention_days: int = 1  # Keep retrying for up to 1 day
     ftp_cycle_timeout: int = 3600  # Max seconds for a single FTP poll cycle before timeout
-    max_traversal_window_minutes: int = 30  # Max FTP directory window scanned per cycle
+    max_traversal_window_minutes: int = 30  # Max FTP directory window scanned per cycle (backfill step size)
     ftp_timeout: int = 120  # Socket timeout (seconds) for each FTP control/data connection
+    # Live-first download: every cycle scans [now - live_window_minutes, now] so current
+    # data is always fetched before older backlog. Must exceed the largest transient
+    # outage we want the live stream (not the backfill) to self-heal. Default 3h.
+    live_window_minutes: int = 180
+    # Backfill old data (below the live window) so a stall's history is not forgotten.
+    enable_backfill: bool = True
+    # Trickle rate: capped backfill windows fetched per cycle after the live stream.
+    # 1 = "current always wins, backfill trickles".
+    backfill_windows_per_cycle: int = 1
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -171,10 +180,6 @@ class DownloadDaemon:
         self._last_failed_retry_time: Optional[datetime] = None
         self._last_heartbeat: Optional[datetime] = None
         self._cancel_traversal = threading.Event()
-        # Where the last backlog/catch-up cycle finished scanning. None means we
-        # are tracking the live frontier. Lets the traversal step forward through
-        # data gaps instead of freezing (see compute_scan_window).
-        self._scan_cursor: Optional[datetime] = None
 
     @property
     def vol_types(self):
@@ -266,63 +271,17 @@ class DownloadDaemon:
     async def _ftp_poll_cycle_inner(self, _cycle_count: int) -> None:
         """Inner FTP poll cycle — connection, traversal, download, retry."""
         try:
-            # Multi-volume resume logic: newest downloaded observation per volume.
-            latest_by_vol: Dict[str, datetime] = {}
-            if self._vol_types_config and isinstance(self._vol_types_config, dict):
-                # Extract all unique volume numbers from all strategies
-                all_volumes = set()
-                for strategy_dict in self._vol_types_config.values():
-                    if isinstance(strategy_dict, dict):
-                        all_volumes.update(strategy_dict.keys())
-
-                logger.debug(f"[{self.radar_name}] Checking latest downloads for volumes: {sorted(all_volumes)}")
-
-                for vol_nr in sorted(all_volumes):
-                    latest = self.state_tracker.get_latest_downloaded_file_by_volume(self.radar_name, vol_nr)
-                    if latest and latest.get("observation_datetime"):
-                        try:
-                            latest_str = latest["observation_datetime"]
-                            if isinstance(latest_str, str):
-                                latest_date = datetime.fromisoformat(latest_str.replace("Z", "+00:00"))
-                            else:
-                                latest_date = latest_str
-                            latest_by_vol[vol_nr] = latest_date
-                            logger.debug(f"[{self.radar_name}]   vol{vol_nr}: {latest_date.isoformat()}")
-                        except (ValueError, TypeError) as e:
-                            logger.warning(
-                                f"[{self.radar_name}] Failed to parse observation_datetime for vol{vol_nr}: {e}"
-                            )
-
-            # Resume from the newest download minus a small backfill buffer, but keep a
-            # scan cursor so a capped (backlog) window steps forward each cycle instead
-            # of re-scanning the same range forever. Anchoring only to the newest
-            # download froze RMA12/RMA17: a data gap longer than the forward reach
-            # (window - backfill) left the anchor pinned behind the gap permanently.
-            # The cursor marches the window through gaps/backlog until it reaches the
-            # present. See compute_scan_window.
             now_utc = datetime.now(timezone.utc)
-            resume_date, scan_end = compute_scan_window(
-                latest_by_vol=latest_by_vol,
-                scan_cursor=self._scan_cursor,
-                now=now_utc,
-                start_date=self.start_date,
-                window_minutes=self.config.max_traversal_window_minutes,
-            )
 
-            if resume_date is None:
-                # No downloads yet and no configured start date — nothing to scan.
-                logger.warning(f"[{self.radar_name}] No start date configured; skipping cycle")
-                return
-            elif scan_end is None:
-                logger.info(
-                    f"[{self.radar_name}] Scanning from {resume_date.isoformat()} to present"
-                    + (" (caught up from backlog)" if self._scan_cursor is not None else "")
-                )
-            else:
-                logger.info(
-                    f"[{self.radar_name}] Backlog detected — scanning capped {self.config.max_traversal_window_minutes}"
-                    f" min window {resume_date.isoformat()} .. {scan_end.isoformat()}; advancing next cycle"
-                )
+            # Capture the pre-live backfill frontier BEFORE the live stream advances
+            # max(downloaded). The backfill cursor sits below the live window and
+            # records how far through a historical data hole we have backfilled; if we
+            # did not capture it first it would be lost the moment the live stream jumps
+            # to the present, and the old data would be silently forgotten.
+            if self.config.enable_backfill and self.state_tracker.get_cursor(self.radar_name, "backfill") is None:
+                init_cursor = self._initial_backfill_cursor()
+                if init_cursor is not None:
+                    self.state_tracker.set_cursor(self.radar_name, "backfill", init_cursor.isoformat())
 
             async with RadarFTPClientAsync(
                 self.config.host,
@@ -344,109 +303,30 @@ class DownloadDaemon:
                 self._last_heartbeat = datetime.now(timezone.utc)
                 _heartbeat_task = asyncio.create_task(_refresh_heartbeat())
                 try:
-                    files = await asyncio.to_thread(
-                        self.new_bufr_files,
-                        ftp_client=client,
-                        start_date=resume_date,
-                        end_date=scan_end,
-                        vol_types=self.vol_types,
-                        cancel_event=self._cancel_traversal,
+                    total_downloaded = 0
+
+                    # 1) LIVE stream (priority): always fetch the most recent window so
+                    #    current data is produced before any backlog. It is bounded and
+                    #    always reaches the present, so a data gap cannot pin it.
+                    live_resume = now_utc - timedelta(minutes=self.config.live_window_minutes)
+                    logger.info(
+                        f"[{self.radar_name}] Live scan {live_resume.isoformat()} .. present "
+                        f"({self.config.live_window_minutes} min window)"
                     )
-                    # Traversal complete — release the control connection now.
-                    # Parallel downloads use fresh per-file connections and don't need it.
-                    # This keeps the concurrent connection count low across all containers.
-                    client.disconnect()
+                    total_downloaded += await self._scan_and_download(client, live_resume, None, "live")
 
-                    # Advance the scan cursor now that this window is fully scanned.
-                    # When capped (backlog), step to scan_end so the next cycle moves
-                    # forward even if this window was empty (a data gap) — this is what
-                    # unfreezes a stuck radar. When we reached the present (scan_end is
-                    # None), clear the cursor to resume live-frontier tracking.
-                    self._scan_cursor = scan_end
+                    # 2) BACKFILL stream (trickle): fetch older data below the live window
+                    #    so a stall's history is recovered without delaying current data.
+                    if self.config.enable_backfill:
+                        total_downloaded += await self._run_backfill(client, now_utc)
 
-                    if files:
-                        tasks = []
-                        for remote, local, fname, dt, status in files:
-
-                            async def download_one(
-                                remote_path=remote, local_path=local, fname=fname, dt=dt, status=status
-                            ):
-                                components = extract_bufr_filename_components(fname)
-                                try:
-                                    await exponential_backoff_retry(
-                                        lambda: client.download_file_async(remote_path, local_path),
-                                        max_retries=self.config.bufr_download_max_retries,
-                                        base_delay=self.config.bufr_download_base_delay,
-                                        max_delay=self.config.bufr_download_max_delay,
-                                    )
-                                    # success → update DB
-                                    # Calculate checksum if enabled
-                                    checksum = None
-                                    # TODO: implement checksum calculation asynchronously
-                                    # Get file size
-                                    file_size = local_path.stat().st_size
-
-                                    self.state_tracker.mark_downloaded(
-                                        fname,
-                                        str(remote_path),
-                                        str(local_path),
-                                        file_size=file_size,
-                                        checksum=checksum,
-                                        radar_name=self.radar_name,
-                                        strategy=components["strategy"],
-                                        vol_nr=components["vol_nr"],
-                                        field_type=components["field_type"],
-                                        observation_datetime=dt.isoformat(),
-                                    )
-                                    logger.info(f"[{self.radar_name}] Downloaded {fname}")
-                                except FTPError as e:
-                                    self.state_tracker.mark_failed(
-                                        fname,
-                                        str(remote_path),
-                                        str(local_path),
-                                        radar_name=self.radar_name,
-                                        strategy=components["strategy"],
-                                        vol_nr=components["vol_nr"],
-                                        field_type=components["field_type"],
-                                        observation_datetime=dt.isoformat(),
-                                    )
-                                    logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
-                                except FileNotFoundError as e:
-                                    self.state_tracker.mark_failed(
-                                        fname,
-                                        str(remote_path),
-                                        str(local_path),
-                                        radar_name=self.radar_name,
-                                        strategy=components["strategy"],
-                                        vol_nr=components["vol_nr"],
-                                        field_type=components["field_type"],
-                                        observation_datetime=dt.isoformat(),
-                                    )
-                                    logger.warning(
-                                        f"[{self.radar_name}] BUFR file missing during download"
-                                        f" — marked as failed: {fname}: {e}"
-                                    )
-                                finally:
-                                    # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
-                                    if "components" in locals():
-                                        del components
-                                    gc.collect()
-
-                            tasks.append(asyncio.create_task(download_one()))
-
-                        await asyncio.gather(*tasks)
-                        logger.info(f"[{self.radar_name}] Processed {len(files)} files.")
-
-                        # Cleanup task list to release closure references (per copilot-instructions.md Rules 1, 3)
-                        tasks = []
-                        gc.collect()
-
+                    if total_downloaded == 0:
+                        logger.info(f"[{self.radar_name}] No new files.")
+                    else:
                         _cycle_count += 1
                         if _cycle_count % 5 == 0:  # Every 5 cycles, same cadence as other daemons
                             log_memory_usage(f"[{self.radar_name}] DownloadDaemon cycle {_cycle_count}")
                             aggressive_cleanup(f"DownloadDaemon cycle {_cycle_count}")
-                    else:
-                        logger.info(f"[{self.radar_name}] No new files.")
 
                     # Periodically retry failed downloads
                     await self._retry_failed_downloads_async()
@@ -459,6 +339,175 @@ class DownloadDaemon:
 
         except Exception as e:
             logger.exception(f"[{self.radar_name}] Error during FTP poll cycle: {e}")
+
+    def _initial_backfill_cursor(self) -> Optional[datetime]:
+        """Newest already-downloaded observation across volumes (the pre-live
+        frontier), falling back to the configured start_date. This is where the
+        backfill stream begins filling the historical hole from."""
+        latest: Optional[datetime] = None
+        if self._vol_types_config and isinstance(self._vol_types_config, dict):
+            all_volumes = set()
+            for strategy_dict in self._vol_types_config.values():
+                if isinstance(strategy_dict, dict):
+                    all_volumes.update(strategy_dict.keys())
+            for vol_nr in all_volumes:
+                row = self.state_tracker.get_latest_downloaded_file_by_volume(self.radar_name, vol_nr)
+                if row and row.get("observation_datetime"):
+                    val = row["observation_datetime"]
+                    try:
+                        d = datetime.fromisoformat(val.replace("Z", "+00:00")) if isinstance(val, str) else val
+                    except (ValueError, TypeError):
+                        continue
+                    if latest is None or d > latest:
+                        latest = d
+        return latest or self.start_date
+
+    async def _scan_and_download(
+        self,
+        client: RadarFTPClientAsync,
+        resume_date: datetime,
+        scan_end: Optional[datetime],
+        label: str,
+    ) -> int:
+        """Traverse one window and download every new file found. Returns the count.
+
+        ``scan_end=None`` means "scan to the present" (used by the live stream);
+        a datetime means a bounded window (used by each backfill step).
+        """
+        files = await asyncio.to_thread(
+            self.new_bufr_files,
+            ftp_client=client,
+            start_date=resume_date,
+            end_date=scan_end,
+            vol_types=self.vol_types,
+            cancel_event=self._cancel_traversal,
+        )
+        # Traversal complete — release the control connection. Parallel downloads use
+        # fresh per-file connections; the next traversal reconnects automatically.
+        client.disconnect()
+
+        if not files:
+            return 0
+
+        tasks = []
+        for remote, local, fname, dt, status in files:
+
+            async def download_one(remote_path=remote, local_path=local, fname=fname, dt=dt):
+                components = extract_bufr_filename_components(fname)
+                try:
+                    await exponential_backoff_retry(
+                        lambda: client.download_file_async(remote_path, local_path),
+                        max_retries=self.config.bufr_download_max_retries,
+                        base_delay=self.config.bufr_download_base_delay,
+                        max_delay=self.config.bufr_download_max_delay,
+                    )
+                    file_size = local_path.stat().st_size
+                    self.state_tracker.mark_downloaded(
+                        fname,
+                        str(remote_path),
+                        str(local_path),
+                        file_size=file_size,
+                        checksum=None,
+                        radar_name=self.radar_name,
+                        strategy=components["strategy"],
+                        vol_nr=components["vol_nr"],
+                        field_type=components["field_type"],
+                        observation_datetime=dt.isoformat(),
+                    )
+                    logger.info(f"[{self.radar_name}] Downloaded {fname}")
+                except FTPError as e:
+                    self.state_tracker.mark_failed(
+                        fname,
+                        str(remote_path),
+                        str(local_path),
+                        radar_name=self.radar_name,
+                        strategy=components["strategy"],
+                        vol_nr=components["vol_nr"],
+                        field_type=components["field_type"],
+                        observation_datetime=dt.isoformat(),
+                    )
+                    logger.error(f"[{self.radar_name}] FTPError for {fname}: {e}")
+                except FileNotFoundError as e:
+                    self.state_tracker.mark_failed(
+                        fname,
+                        str(remote_path),
+                        str(local_path),
+                        radar_name=self.radar_name,
+                        strategy=components["strategy"],
+                        vol_nr=components["vol_nr"],
+                        field_type=components["field_type"],
+                        observation_datetime=dt.isoformat(),
+                    )
+                    logger.warning(
+                        f"[{self.radar_name}] BUFR file missing during download"
+                        f" — marked as failed: {fname}: {e}"
+                    )
+                finally:
+                    # Explicit cleanup (per copilot-instructions.md Rules 1, 4)
+                    if "components" in locals():
+                        del components
+                    gc.collect()
+
+            tasks.append(asyncio.create_task(download_one()))
+
+        await asyncio.gather(*tasks)
+        logger.info(f"[{self.radar_name}] Processed {len(files)} {label} files.")
+        tasks = []
+        gc.collect()
+        return len(files)
+
+    async def _run_backfill(self, client: RadarFTPClientAsync, now: datetime) -> int:
+        """Advance the persisted backfill cursor through the historical hole below the
+        live window, up to ``backfill_windows_per_cycle`` capped windows per cycle.
+
+        The cursor is advanced to each window's end regardless of whether files were
+        found, so a data gap *inside* the backlog is stepped over (not re-frozen), and
+        it is persisted so the backfill survives restarts (old data is never forgotten).
+        """
+        cap = self.config.max_traversal_window_minutes
+        ceiling = now - timedelta(minutes=self.config.live_window_minutes)
+
+        cur_str = self.state_tracker.get_cursor(self.radar_name, "backfill")
+        if cur_str:
+            cursor = datetime.fromisoformat(cur_str)
+        else:
+            cursor = self._initial_backfill_cursor()
+            if cursor is None:
+                return 0
+            self.state_tracker.set_cursor(self.radar_name, "backfill", cursor.isoformat())
+
+        # Publish the backfill floor so the processing daemon lowers its completeness
+        # scan to include backward-filled data (which predates the daemon's start_date
+        # and would otherwise never be registered/processed). Set it while a real hole
+        # remains (more than one window below the live edge); clear it once caught up so
+        # processing reverts to its efficient live floor.
+        if ceiling - cursor > timedelta(minutes=cap):
+            if self.state_tracker.get_cursor(self.radar_name, "backfill_origin") is None:
+                self.state_tracker.set_cursor(self.radar_name, "backfill_origin", cursor.isoformat())
+        else:
+            self.state_tracker.clear_cursor(self.radar_name, "backfill_origin")
+
+        total = 0
+        for _ in range(max(1, self.config.backfill_windows_per_cycle)):
+            if cursor >= ceiling:
+                # Backfill has reached the live window; everything newer is covered by
+                # the live stream. Nothing older remains to fill.
+                logger.debug(f"[{self.radar_name}] Backfill caught up to the live window.")
+                break
+            resume, end = compute_scan_window(
+                latest_by_vol={},
+                scan_cursor=cursor,
+                now=ceiling,
+                start_date=cursor,
+                window_minutes=cap,
+                backfill_minutes=0,
+            )
+            bf_end = end if end is not None else ceiling
+            logger.info(f"[{self.radar_name}] Backfill scan {resume.isoformat()} .. {bf_end.isoformat()}")
+            total += await self._scan_and_download(client, resume, bf_end, "backfill")
+            cursor = bf_end
+            self.state_tracker.set_cursor(self.radar_name, "backfill", cursor.isoformat())
+        return total
 
     def new_bufr_files(
         self,

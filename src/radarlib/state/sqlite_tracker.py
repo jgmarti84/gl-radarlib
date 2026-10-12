@@ -141,6 +141,22 @@ class SQLiteStateTracker:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_product_status ON product_generation(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_product_type ON product_generation(product_type)")
 
+        # Generic durable key/value cursors for the daemons (e.g. the live-first
+        # download's backfill cursor, which tracks how far through a historical
+        # data hole we have backfilled — it sits below max(downloaded) and so
+        # cannot be derived from the downloads table).
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS daemon_cursor (
+                radar_name TEXT NOT NULL,
+                name TEXT NOT NULL,
+                value TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (radar_name, name)
+            )
+        """
+        )
+
         conn.commit()
 
         # Run migrations to add new columns if needed
@@ -355,6 +371,39 @@ class SQLiteStateTracker:
 
         conn.commit()
         logger.debug(f"Marked '{filename}' as failed")
+
+    def get_cursor(self, radar_name: str, name: str) -> Optional[str]:
+        """Return a durable daemon cursor value, or None if unset."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT value FROM daemon_cursor WHERE radar_name = ? AND name = ?",
+            (radar_name, name),
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def set_cursor(self, radar_name: str, name: str, value: str) -> None:
+        """Persist a durable daemon cursor value (upsert)."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+        cursor.execute(
+            """
+            INSERT INTO daemon_cursor (radar_name, name, value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(radar_name, name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (radar_name, name, value, now),
+        )
+        conn.commit()
+
+    def clear_cursor(self, radar_name: str, name: str) -> None:
+        """Remove a durable daemon cursor (no-op if absent)."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM daemon_cursor WHERE radar_name = ? AND name = ?", (radar_name, name))
+        conn.commit()
 
     def get_retry_count_for_failed_file(self, filename: str) -> int:
         """
@@ -987,7 +1036,7 @@ class SQLiteStateTracker:
             """
             SELECT * FROM volume_processing
             WHERE status = 'pending'
-            ORDER BY observation_datetime ASC
+            ORDER BY observation_datetime DESC
         """
         )
 
@@ -1281,7 +1330,7 @@ class SQLiteStateTracker:
                 OR pg.status = 'pending'
                 OR (pg.status = 'failed' AND (pg.error_type IS NULL OR pg.error_type != 'FILTER_FIELDS_MISSING'))
               )
-            ORDER BY vp.observation_datetime ASC
+            ORDER BY vp.observation_datetime DESC
         """,
             (product_type,),
         )

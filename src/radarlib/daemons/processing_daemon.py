@@ -508,6 +508,20 @@ class ProcessingDaemon:
             # observation_datetime < the latest registered volume and would be permanently
             # invisible if the floor advanced. Already-processed volumes are skipped by
             # the idempotency check below.
+            #
+            # The live-first download daemon fetches old data below start_date (which
+            # defaults to the daemon's startup time). Lower the scan floor to the
+            # backfill origin it publishes so that backward-filled volumes are registered
+            # and processed too; it is cleared once the backfill catches up.
+            floor = self.config.start_date
+            origin_str = self.state_tracker.get_cursor(self.config.radar_name, "backfill_origin")
+            if origin_str:
+                try:
+                    origin = datetime.fromisoformat(origin_str)
+                    if origin < floor:
+                        floor = origin
+                except (ValueError, TypeError):
+                    pass
             cursor.execute(
                 """
                 SELECT filename, radar_name, strategy, vol_nr, field_type, observation_datetime, local_path
@@ -516,7 +530,7 @@ class ProcessingDaemon:
                     AND observation_datetime >= ?
                 ORDER BY observation_datetime
                 """,
-                (self.config.radar_name, self.config.start_date.isoformat()),
+                (self.config.radar_name, floor.isoformat()),
             )
         else:
             # Live mode: the download daemon never goes backward, so using the latest

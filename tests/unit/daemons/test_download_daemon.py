@@ -33,6 +33,10 @@ def _make_daemon(config):
         tracker_instance.mark_downloaded.return_value = None
         tracker_instance.mark_failed.return_value = None
         tracker_instance.get_failed_downloads_for_retry.return_value = []
+        # Backfill cursor already caught up to the live window → these tests exercise
+        # only the live stream (one scan), so download counts stay deterministic.
+        tracker_instance.get_cursor.return_value = datetime.now(timezone.utc).isoformat()
+        tracker_instance.set_cursor.return_value = None
         MockTracker.return_value = tracker_instance
         daemon = DownloadDaemon(config)
     return daemon
@@ -223,3 +227,153 @@ class TestComputeScanWindow:
         resume, scan_end = self._win(latest, None, now)
         assert resume == (now - timedelta(minutes=9)) - timedelta(minutes=self.BACKFILL)
         assert scan_end is None
+
+
+class TestLiveFirstAndBackfill:
+    """Live-first download: current window scanned first every cycle, old data
+    backfilled as a trickle via a persisted cursor (Option A)."""
+
+    def _daemon(self, tmp_path, *, initial_cursor=None, latest_download=None):
+        config = _make_config(tmp_path)
+        config.live_window_minutes = 180
+        config.max_traversal_window_minutes = 30
+        config.backfill_windows_per_cycle = 1
+        config.enable_backfill = True
+        with patch("radarlib.daemons.download_daemon.SQLiteStateTracker") as MockTracker:
+            t = MagicMock()
+            store = {}
+            if initial_cursor is not None:
+                store["backfill"] = initial_cursor
+            t.get_cursor.side_effect = lambda radar, name: store.get(name)
+            t.set_cursor.side_effect = lambda radar, name, value: store.__setitem__(name, value)
+            t.clear_cursor.side_effect = lambda radar, name: store.pop(name, None)
+            t.get_latest_downloaded_file_by_volume.return_value = (
+                {"observation_datetime": latest_download} if latest_download else None
+            )
+            t.get_failed_downloads_for_retry.return_value = []
+            MockTracker.return_value = t
+            daemon = DownloadDaemon(config)
+        daemon._store = store
+        # single-volume config so _initial_backfill_cursor has a volume to look up
+        daemon._vol_types_config = {"0315": {"01": ["DBZH"]}}
+        return daemon
+
+    async def _run_cycle(self, daemon):
+        calls = []
+
+        async def fake_scan(client, resume, scan_end, label):
+            calls.append((label, resume, scan_end))
+            return 0
+
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        with (
+            patch.object(daemon, "_scan_and_download", side_effect=fake_scan),
+            patch("radarlib.daemons.download_daemon.RadarFTPClientAsync", return_value=mock_client),
+            patch.object(daemon, "_retry_failed_downloads_async", new_callable=AsyncMock),
+        ):
+            await daemon._ftp_poll_cycle_inner(_cycle_count=0)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_live_runs_first_scanning_recent_window_to_present(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        stall = (now - timedelta(days=2)).isoformat()
+        daemon = self._daemon(tmp_path, latest_download=stall)
+        calls = await self._run_cycle(daemon)
+        assert calls[0][0] == "live"
+        assert calls[0][2] is None  # scan to present
+        assert abs((calls[0][1] - (now - timedelta(minutes=180))).total_seconds()) < 180
+
+    @pytest.mark.asyncio
+    async def test_backfill_trickles_one_bounded_window_from_the_hole(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        stall = (now - timedelta(days=2)).isoformat()
+        daemon = self._daemon(tmp_path, latest_download=stall)
+        calls = await self._run_cycle(daemon)
+        backfill = [c for c in calls if c[0] == "backfill"]
+        assert len(backfill) == 1  # trickle = 1 window/cycle
+        _, resume, end = backfill[0]
+        assert end is not None and (end - resume) == timedelta(minutes=30)  # bounded
+        # started at the pre-live frontier (the stall point)
+        assert abs((resume - datetime.fromisoformat(stall)).total_seconds()) < 1
+
+    @pytest.mark.asyncio
+    async def test_backfill_cursor_advances_and_persists(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        stall = (now - timedelta(days=2)).isoformat()
+        daemon = self._daemon(tmp_path, latest_download=stall)
+        await self._run_cycle(daemon)
+        advanced = datetime.fromisoformat(daemon._store["backfill"])
+        assert advanced == datetime.fromisoformat(stall) + timedelta(minutes=30)
+
+    @pytest.mark.asyncio
+    async def test_no_backfill_when_caught_up(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        # cursor already at the live edge → nothing older to fill
+        daemon = self._daemon(tmp_path, initial_cursor=now.isoformat(), latest_download=now.isoformat())
+        calls = await self._run_cycle(daemon)
+        assert [c[0] for c in calls] == ["live"]
+
+    @pytest.mark.asyncio
+    async def test_persisted_cursor_is_not_reinitialised(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        mid = (now - timedelta(days=1)).isoformat()
+        daemon = self._daemon(tmp_path, initial_cursor=mid, latest_download=(now - timedelta(days=5)).isoformat())
+        with patch.object(daemon, "_initial_backfill_cursor", side_effect=AssertionError("should not re-init")):
+            calls = await self._run_cycle(daemon)
+        backfill = [c for c in calls if c[0] == "backfill"]
+        # backfill resumes from the persisted cursor (1 day ago), not the 5-day frontier
+        assert abs((backfill[0][1] - datetime.fromisoformat(mid)).total_seconds()) < 1
+
+
+class TestDaemonCursorStore:
+    """Durable backfill cursor persistence in SQLiteStateTracker."""
+
+    def test_cursor_roundtrip_and_upsert(self, tmp_path):
+        from radarlib.state.sqlite_tracker import SQLiteStateTracker
+
+        t = SQLiteStateTracker(tmp_path / "state.db")
+        assert t.get_cursor("RMA10", "backfill") is None
+        t.set_cursor("RMA10", "backfill", "2026-09-29T00:00:00+00:00")
+        assert t.get_cursor("RMA10", "backfill") == "2026-09-29T00:00:00+00:00"
+        t.set_cursor("RMA10", "backfill", "2026-09-29T00:30:00+00:00")  # upsert
+        assert t.get_cursor("RMA10", "backfill") == "2026-09-29T00:30:00+00:00"
+        assert t.get_cursor("RMA11", "backfill") is None  # per-radar isolation
+        t.clear_cursor("RMA10", "backfill")
+        assert t.get_cursor("RMA10", "backfill") is None
+        t.clear_cursor("RMA10", "backfill")  # idempotent (no error if absent)
+
+
+class TestBackfillOriginFloor:
+    """The backfill origin is published for the processing daemon's completeness
+    floor (so backward-filled old data gets registered/processed), and cleared
+    once the backfill catches up."""
+
+    def _daemon(self, tmp_path, *, initial_cursor=None, latest_download=None):
+        return TestLiveFirstAndBackfill._daemon(TestLiveFirstAndBackfill(), tmp_path,
+                                                initial_cursor=initial_cursor, latest_download=latest_download)
+
+    async def _run_cycle(self, daemon):
+        return await TestLiveFirstAndBackfill._run_cycle(TestLiveFirstAndBackfill(), daemon)
+
+    @pytest.mark.asyncio
+    async def test_origin_published_when_hole_exists(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        stall = (now - timedelta(days=2)).isoformat()
+        daemon = self._daemon(tmp_path, latest_download=stall)
+        await self._run_cycle(daemon)
+        assert "backfill_origin" in daemon._store
+        # origin == the pre-live frontier (stall point), so processing scans from there
+        assert abs((datetime.fromisoformat(daemon._store["backfill_origin"])
+                    - datetime.fromisoformat(stall)).total_seconds()) < 1
+
+    @pytest.mark.asyncio
+    async def test_origin_cleared_when_caught_up(self, tmp_path):
+        now = datetime.now(timezone.utc)
+        daemon = self._daemon(tmp_path, initial_cursor=now.isoformat(), latest_download=now.isoformat())
+        # pretend a stale origin is lingering
+        daemon._store["backfill_origin"] = (now - timedelta(days=5)).isoformat()
+        await self._run_cycle(daemon)
+        assert "backfill_origin" not in daemon._store
