@@ -26,4 +26,9 @@ cache/
 docs/es/*.html
 docs/es/*.pdf
 
-.claude/
+# Ignore personal/local Claude config, but version the radarlib-ops toolkit.
+.claude/*
+!.claude/plugins/
+!.claude/skills/
+!.claude/commands/
+!.claude/agents/

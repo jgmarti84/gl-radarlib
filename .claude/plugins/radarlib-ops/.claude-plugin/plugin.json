@@ -1,0 +1,5 @@
+{
+  "name": "radarlib-ops",
+  "version": "0.1.0",
+  "description": "Diagnose and operate radarlib (genpro25) radars: classify log failures, cross-check the FTP, inspect state.db, and spin up containers to reproduce/verify."
+}
