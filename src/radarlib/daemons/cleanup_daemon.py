@@ -10,6 +10,7 @@ re-download from FTP when needed.
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -46,6 +47,11 @@ class CleanupDaemonConfig:
     netcdf_retention_days: int = 7
     enable_bufr_cleanup: bool = True
     enable_netcdf_cleanup: bool = True
+    # NC cubes are pruned by walking the output tree, not from the state DB:
+    # unlike BUFR and CFRadial volumes they have no row recording their path.
+    nccube_dir: Optional[Path] = None
+    nccube_retention_days: float = 7.0
+    enable_nccube_cleanup: bool = True
     product_types: List[str] = field(default_factory=lambda: ["image"])
     max_files_per_cycle: int = 100
     dry_run: bool = False
@@ -96,6 +102,8 @@ class CleanupDaemon:
             "bufr_files_failed": 0,
             "netcdf_files_cleaned": 0,
             "netcdf_files_failed": 0,
+            "nccube_files_cleaned": 0,
+            "nccube_files_failed": 0,
             "last_cleanup_at": None,
             "cycles_completed": 0,
         }
@@ -168,6 +176,8 @@ class CleanupDaemon:
         bufr_failed = 0
         netcdf_cleaned = 0
         netcdf_failed = 0
+        nccube_cleaned = 0
+        nccube_failed = 0
 
         # Cleanup BUFR files
         if self.config.enable_bufr_cleanup:
@@ -177,18 +187,97 @@ class CleanupDaemon:
         if self.config.enable_netcdf_cleanup:
             netcdf_cleaned, netcdf_failed = await self._cleanup_netcdf_files()
 
+        # Cleanup NC cubes (directory-walked, not state-DB driven)
+        if self.config.enable_nccube_cleanup:
+            nccube_cleaned, nccube_failed = await self._cleanup_nccube_files()
+
         # Log summary
-        total_cleaned = bufr_cleaned + netcdf_cleaned
-        total_failed = bufr_failed + netcdf_failed
+        total_cleaned = bufr_cleaned + netcdf_cleaned + nccube_cleaned
+        total_failed = bufr_failed + netcdf_failed + nccube_failed
 
         if total_cleaned > 0 or total_failed > 0:
             logger.info(
                 f"Cleanup cycle complete: "
                 f"BUFR({bufr_cleaned} cleaned, {bufr_failed} failed), "
-                f"NetCDF({netcdf_cleaned} cleaned, {netcdf_failed} failed)"
+                f"NetCDF({netcdf_cleaned} cleaned, {netcdf_failed} failed), "
+                f"NCcube({nccube_cleaned} cleaned, {nccube_failed} failed)"
             )
         else:
             logger.debug("Cleanup cycle complete: no files to clean")
+
+    async def _cleanup_nccube_files(self) -> tuple:
+        """
+        Clean up NC cube files that meet retention criteria.
+
+        Unlike BUFR and NetCDF cleanup this walks the output tree directly: the
+        cube is a published product with no row in the state database recording
+        its path, so there is nothing to query. The file's own timestamped
+        directory (``YYYY/MM/DD``) is not trusted for the age test — mtime is,
+        so a backfilled cube written today is kept for the full retention period
+        rather than deleted immediately.
+
+        Empty day/month/year directories are pruned afterwards so the tree does
+        not accumulate thousands of empty stubs.
+
+        Returns:
+            Tuple of (cleaned_count, failed_count)
+        """
+        if self.config.nccube_dir is None:
+            return 0, 0
+
+        root = Path(self.config.nccube_dir)
+        if not root.is_dir():
+            return 0, 0
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.config.nccube_retention_days)
+        cutoff_ts = cutoff.timestamp()
+
+        cleaned = 0
+        failed = 0
+
+        candidates = []
+        for path in root.rglob("*_NCCUBE.nc"):
+            try:
+                if path.stat().st_mtime < cutoff_ts:
+                    candidates.append(path)
+            except OSError as e:
+                logger.warning(f"NC cube cleanup: cannot stat {path}: {e}")
+                failed += 1
+
+        # Oldest first, so a capped cycle always makes progress on the worst
+        # offenders rather than nibbling at whatever rglob happened to yield.
+        candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0)
+        candidates = candidates[: self.config.max_files_per_cycle]
+
+        for path in candidates:
+            if self.config.dry_run:
+                logger.info(f"[DRY RUN] Would delete NC cube: {path}")
+                cleaned += 1
+                continue
+            try:
+                path.unlink()
+                logger.debug(f"Deleted NC cube: {path}")
+                cleaned += 1
+            except OSError as e:
+                logger.warning(f"NC cube cleanup: failed to delete {path}: {e}")
+                failed += 1
+
+        if cleaned and not self.config.dry_run:
+            self._prune_empty_dirs(root)
+
+        self._stats["nccube_files_cleaned"] += cleaned
+        self._stats["nccube_files_failed"] += failed
+        return cleaned, failed
+
+    @staticmethod
+    def _prune_empty_dirs(root: Path) -> None:
+        """Remove empty directories under *root*, deepest first. Never removes *root*."""
+        for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if path.is_dir() and path != root:
+                try:
+                    path.rmdir()  # only succeeds when empty
+                except OSError:
+                    pass  # not empty, or vanished — either way, leave it
 
     async def _cleanup_bufr_files(self) -> tuple:
         """
@@ -313,6 +402,8 @@ class CleanupDaemon:
         bufr_failed = 0
         netcdf_cleaned = 0
         netcdf_failed = 0
+        nccube_cleaned = 0
+        nccube_failed = 0
 
         if self.config.enable_bufr_cleanup:
             bufr_cleaned, bufr_failed = await self._cleanup_bufr_files()
@@ -320,11 +411,16 @@ class CleanupDaemon:
         if self.config.enable_netcdf_cleanup:
             netcdf_cleaned, netcdf_failed = await self._cleanup_netcdf_files()
 
+        if self.config.enable_nccube_cleanup:
+            nccube_cleaned, nccube_failed = await self._cleanup_nccube_files()
+
         return {
             "bufr_cleaned": bufr_cleaned,
             "bufr_failed": bufr_failed,
             "netcdf_cleaned": netcdf_cleaned,
             "netcdf_failed": netcdf_failed,
-            "total_cleaned": bufr_cleaned + netcdf_cleaned,
-            "total_failed": bufr_failed + netcdf_failed,
+            "nccube_cleaned": nccube_cleaned,
+            "nccube_failed": nccube_failed,
+            "total_cleaned": bufr_cleaned + netcdf_cleaned + nccube_cleaned,
+            "total_failed": bufr_failed + netcdf_failed + nccube_failed,
         }

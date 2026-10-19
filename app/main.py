@@ -116,10 +116,15 @@ def main():
         add_tops_and_cores=config.ADD_TOPS_AND_CORES,  # type: ignore
         tops_and_cores_vol_nr=config.get_config("TOPS_AND_CORES_VOL_NR", default="01"),  # type: ignore
         tops_and_cores_dir=Path(os.path.join(config.ROOT_TOPS_AND_CORES_PATH, radar_name)),  # type: ignore
+        add_nccube=config.ADD_NCCUBE,  # type: ignore
+        nccube_vol_nr=config.NCCUBE_VOL_NR,  # type: ignore
+        nccube_fields=config.NCCUBE_FIELDS,  # type: ignore
+        nccube_dir=Path(os.path.join(config.ROOT_NCCUBE_PATH, radar_name)),  # type: ignore
         field_value_masks=config.get_config("FIELD_VALUE_MASKS", default={}),  # type: ignore
         enable_cleanup_daemon=config.ENABLE_CLEANUP_DAEMON,  # type: ignore
         netcdf_retention_days=config.NETCDF_RETENTION_DAYS,  # type: ignore
         bufr_retention_days=config.BUFR_RETENTION_DAYS,  # type: ignore
+        nccube_retention_days=config.NCCUBE_RETENTION_DAYS,  # type: ignore
         cleanup_poll_interval=config.CLEANUP_POLL_INTERVAL,  # type: ignore
     )
 

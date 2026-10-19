@@ -80,10 +80,17 @@ class DaemonManagerConfig:
     add_tops_and_cores: bool = False
     tops_and_cores_vol_nr: str = "01"
     tops_and_cores_dir: Optional[Path] = None
+    # NC cube: 3D Cartesian grid persisted next to the 2D COGs. Independent of
+    # tops & cores so disabling one never silently stops the other.
+    add_nccube: bool = False
+    nccube_vol_nr: str = "01"
+    nccube_fields: Optional[List[str]] = None
+    nccube_dir: Optional[Path] = None
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
     field_value_masks: Optional[Dict[str, Dict[str, float]]] = None
     bufr_retention_days: int = 7
     netcdf_retention_days: int = 7
+    nccube_retention_days: float = 7.0
     cleanup_product_types: Optional[List[str]] = None
 
     def __post_init__(self):
@@ -147,6 +154,9 @@ class DaemonManager:
         self.tops_and_cores_dir = config.base_path / "tops_and_cores"
         if self.config.tops_and_cores_dir is not None:
             self.tops_and_cores_dir = self.config.tops_and_cores_dir
+        self.nccube_dir = config.base_path / "nccube"
+        if self.config.nccube_dir is not None:
+            self.nccube_dir = self.config.nccube_dir
         self.state_db = config.base_path / "state.db"
 
         # Ensure directories exist
@@ -203,6 +213,10 @@ class DaemonManager:
             add_tops_and_cores=self.config.add_tops_and_cores,
             tops_and_cores_vol_nr=self.config.tops_and_cores_vol_nr,
             tops_and_cores_output_dir=self.tops_and_cores_dir,
+            add_nccube=self.config.add_nccube,
+            nccube_vol_nr=self.config.nccube_vol_nr,
+            nccube_fields=self.config.nccube_fields,
+            nccube_output_dir=self.nccube_dir,
             geometry_types=self.config.geometry_types,
             field_value_masks=self.config.field_value_masks or {},
             ftp_host=self.config.ftp_host,
@@ -220,6 +234,8 @@ class DaemonManager:
             poll_interval=self.config.cleanup_poll_interval,
             bufr_retention_days=self.config.bufr_retention_days,
             netcdf_retention_days=self.config.netcdf_retention_days,
+            nccube_dir=self.nccube_dir,
+            nccube_retention_days=self.config.nccube_retention_days,
             product_types=self.config.cleanup_product_types,
         )
         return CleanupDaemon(cleanup_config)

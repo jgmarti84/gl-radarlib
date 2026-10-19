@@ -321,6 +321,51 @@ def product_path_and_filename(
     return full_path
 
 
+def nccube_path_and_filename(
+    radar_name: str,
+    strategy: str,
+    vol_nr: str,
+    observation_timestamp: _datetime,
+    base_dir: Path,
+) -> Path:
+    """Generate the output path for an NC cube (3D Cartesian grid).
+
+    Format::
+
+        {base_dir}/YYYY/MM/DD/
+        {radar_name}_{strategy}_{vol_nr}_{timestamp}_NCCUBE.nc
+
+    Deliberately the same layout and timestamp format as
+    :func:`product_path_and_filename` and the tops & cores writer, so one
+    indexer convention covers every artifact. As with those, *base_dir* is
+    expected to already include the radar name.
+
+    Args:
+        radar_name: Radar station identifier (e.g. ``"RMA1"``).
+        strategy: Volume scan strategy code (e.g. ``"0315"``).
+        vol_nr: Volume number string (e.g. ``"01"``).
+        observation_timestamp: Observation datetime in UTC with second
+            precision.
+        base_dir: Root output directory for this radar's cubes.
+
+    Returns:
+        :class:`~pathlib.Path` pointing to the full output file path.
+        Parent directories are created automatically.
+
+    Examples:
+        >>> from datetime import datetime, timezone
+        >>> ts = datetime(2026, 4, 1, 20, 50, 0, tzinfo=timezone.utc)
+        >>> nccube_path_and_filename("RMA1", "0315", "01", ts, Path("/nccube/RMA1"))
+        PosixPath('/nccube/RMA1/2026/04/01/RMA1_0315_01_20260401T205000Z_NCCUBE.nc')
+    """
+    timestamp_str = observation_timestamp.strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{radar_name}_{strategy}_{vol_nr}_{timestamp_str}_NCCUBE.nc"
+    date_path = observation_timestamp.strftime("%Y/%m/%d")
+    full_path = Path(base_dir) / date_path / filename
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    return full_path
+
+
 def product_path_and_filename_legacy(radar, field, sweep, round_filename=True, filtered=True, extension="png"):
     """Legacy PNG/GeoTIFF filename generator that accepts a PyART Radar object.
 

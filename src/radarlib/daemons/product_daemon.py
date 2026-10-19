@@ -87,6 +87,13 @@ class ProductGenerationDaemonConfig:
     add_tops_and_cores: bool = False
     tops_and_cores_vol_nr: str = "01"
     tops_and_cores_output_dir: Optional[Path] = None
+    # NC cube: 3D Cartesian grid persisted next to the 2D COGs, for consumers
+    # that need a whole volume (storm tracking, cross-sections). Deliberately
+    # independent of tops & cores — see _generate_nccube().
+    add_nccube: bool = False
+    nccube_vol_nr: str = "01"
+    nccube_fields: Optional[List[str]] = None
+    nccube_output_dir: Optional[Path] = None
     stuck_volume_timeout_minutes: int = 60
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
     field_value_masks: Optional[Dict[str, Dict[str, float]]] = None
@@ -101,6 +108,20 @@ class ProductGenerationDaemonConfig:
             self.geometry_types = {}
         if self.tops_and_cores_output_dir is None:
             self.tops_and_cores_output_dir = self.local_product_dir.parent / "tops_and_cores"
+        if self.nccube_output_dir is None:
+            self.nccube_output_dir = self.local_product_dir.parent / "nccube"
+        if self.nccube_fields is None:
+            self.nccube_fields = ["DBZH", "RHOHV"]
+        # DBZH and RHOHV are what make a cube usable downstream; a cube without
+        # them is written for nothing. Warn loudly at startup rather than
+        # failing silently once per volume.
+        missing_required = [f for f in ("DBZH", "RHOHV") if f not in self.nccube_fields]
+        if self.add_nccube and missing_required:
+            logger.warning(
+                f"NCCUBE_FIELDS is missing {missing_required}. The NC cube will be "
+                f"written but storm tracking cannot read it. Configured fields: "
+                f"{self.nccube_fields}"
+            )
 
         if self.product_type != "raw_cog":
             logger.warning(
@@ -895,6 +916,29 @@ class ProductGenerationDaemon:
                     obs_dt=obs_dt,
                 )
 
+            # --- NC cube (3D Cartesian grid) ---------------------------------------------
+            # Gated independently of tops & cores: sharing that hook would save
+            # ~2.2 s/volume of apply_geometry but would silently stop cube output
+            # whenever tops & cores is disabled. 2.2 s against a ~9 min cycle is
+            # not worth the coupling.
+            if self.config.add_nccube and volume_info.get("vol_nr") == self.config.nccube_vol_nr:
+                self._generate_nccube(
+                    radar=radar,
+                    geom=geom,
+                    filename_stem=filename_stem,
+                    volume_info=volume_info,
+                    obs_dt=obs_dt,
+                    field_aliases={
+                        "DBZH": hrefl_field,
+                        "RHOHV": rhv_field,
+                        "ZDR": zdr_field,
+                        "PHIDP": phidp_field,
+                        "KDP": kdp_field,
+                        "VRAD": vrad_field,
+                        "WRAD": wrad_field,
+                    },
+                )
+
             # --- Filtered fields ---------------------------------------------------------
             logger.info(f"Generating filtered raw COG products for {filename_stem}")
 
@@ -1361,6 +1405,135 @@ class ProductGenerationDaemon:
             for obj in (_ct_dbzh_3d, _ct_colmax_2d, _ct_rhohv_3d, _ct_rhohv_2d):
                 if obj is not None:
                     del obj
+            gc.collect()
+
+    def _generate_nccube(
+        self,
+        radar: Any,
+        geom: GridGeometry,
+        filename_stem: str,
+        volume_info: Dict,
+        obs_dt: "datetime",
+        field_aliases: Dict[str, str],
+    ) -> None:
+        """Persist the 3D Cartesian grid ("NC cube") for this volume.
+
+        The 2D COG products each slice a 3D grid that is built and then freed.
+        Consumers that need a whole volume — storm tracking, cross-sections —
+        would otherwise have to re-run the interpolation themselves. Writing the
+        cube here costs one `apply_geometry` per configured field (~1.1 s and
+        ~23 MB each) plus the write.
+
+        Deliberately independent of `_generate_tops_and_cores`: sharing its
+        already-materialized arrays would be free, but would tie cube output to
+        `ADD_TOPS_AND_CORES` with no signal when that is turned off.
+
+        Never raises. A cube is a secondary product; failing to write one must
+        not break COG generation.
+
+        Args:
+            radar: Standardized Py-ART radar object.
+            geom: Grid geometry for this strategy/volume.
+            filename_stem: Volume stem, used for logging only.
+            volume_info: Carries ``strategy`` and ``vol_nr`` for the filename.
+            obs_dt: Exact observation datetime from the BUFR volume.
+            field_aliases: Logical name -> actual key in ``radar.fields``,
+                resolved by the caller (``DBZH`` comes from
+                ``determine_reflectivity_fields``, the rest from
+                ``get_field_name``).
+        """
+        import gc
+        import tempfile
+
+        from radarlib.io.nccube_writer import write_nccube
+        from radarlib.radar_grid import apply_geometry, get_field_data
+        from radarlib.radar_grid.interpolate import GeometryDimensionMismatchError
+        from radarlib.utils.names_utils import nccube_path_and_filename
+
+        fields: Dict[str, Any] = {}
+        try:
+            for logical in self.config.nccube_fields or []:
+                actual = field_aliases.get(logical, logical)
+                if actual not in radar.fields:
+                    logger.info(
+                        f"[{self.config.radar_name}] NC cube: field {logical} "
+                        f"(as '{actual}') not in this volume, skipping it"
+                    )
+                    continue
+                _fd = get_field_data(radar, actual)
+                fields[logical] = apply_geometry(geom, _fd)
+                del _fd
+
+            # Without both of these the cube cannot drive storm tracking, which
+            # is the only reason it is written. Better to write nothing than a
+            # file whose consumer will reject it.
+            missing = [f for f in ("DBZH", "RHOHV") if f not in fields]
+            if missing:
+                logger.warning(
+                    f"[{self.config.radar_name}] NC cube skipped for {filename_stem}: "
+                    f"missing required field(s) {missing}"
+                )
+                return
+
+            nz, ny, nx = geom.grid_shape
+            _y_min, _y_max = geom.grid_limits[1]
+            _x_min, _x_max = geom.grid_limits[2]
+
+            out_path = nccube_path_and_filename(
+                base_dir=self.config.nccube_output_dir,
+                radar_name=self.config.radar_name,
+                strategy=volume_info.get("strategy"),
+                vol_nr=volume_info.get("vol_nr"),
+                observation_timestamp=obs_dt,
+            )
+
+            # geom.radar_altitude is 0 for daemon-built geometries; the cube's z
+            # axis is antenna-relative, so the REAL antenna altitude has to be
+            # recorded or every echo-height comparison downstream silently shifts
+            # by it. See nccube_writer's module docstring.
+            radar_alt_m = float(radar.altitude["data"][0])
+
+            # Write to a temp file in the destination directory and move it into
+            # place, so a watcher never sees a half-written cube.
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=str(out_path.parent)) as tmpdir:
+                tmp_path = Path(tmpdir) / out_path.name
+                write_nccube(
+                    path=tmp_path,
+                    fields=fields,
+                    x_km=np.linspace(_x_min, _x_max, nx, dtype=np.float32) / 1000.0,
+                    y_km=np.linspace(_y_min, _y_max, ny, dtype=np.float32) / 1000.0,
+                    z_m=geom.z_levels().astype(np.float32),
+                    radar_lat=float(radar.latitude["data"][0]),
+                    radar_lon=float(radar.longitude["data"][0]),
+                    radar_alt_m=radar_alt_m,
+                    timestamp=obs_dt,
+                    referencia_z="radar",
+                    extra_attrs={
+                        "radar_name": self.config.radar_name,
+                        "strategy": str(volume_info.get("strategy", "")),
+                        "vol_nr": str(volume_info.get("vol_nr", "")),
+                    },
+                )
+                shutil.move(str(tmp_path), str(out_path))
+
+            logger.info(
+                f"[{self.config.radar_name}] NC cube written: {out_path.name} "
+                f"({out_path.stat().st_size / 1e6:.1f} MB, fields={list(fields)})"
+            )
+
+        except GeometryDimensionMismatchError as e:
+            logger.warning(
+                f"[{self.config.radar_name}] NC cube skipped for {filename_stem}: {e} "
+                f"Scan may have a transient range reduction — will retry once geometry matches."
+            )
+        except Exception as exc:
+            logger.error(
+                f"[{self.config.radar_name}] NC cube failed for {filename_stem}: {exc}",
+                exc_info=True,
+            )
+        finally:
+            fields.clear()
             gc.collect()
 
     def _generate_products_sync(self, netcdf_path: Path, volume_info: Dict) -> None:

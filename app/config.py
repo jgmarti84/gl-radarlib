@@ -53,9 +53,19 @@ _DEFAULTS: Dict[str, Any] = {
     "ADD_TOPS_AND_CORES": False,
     "ROOT_TOPS_AND_CORES_PATH": "tops_and_cores",
     "GEOMETRY_BUFR_LOOKBACK_HOURS": 72,
+    # NC cube: the 3D Cartesian grid persisted alongside the 2D COG products.
+    # Independent of tops & cores on purpose — see _generate_nccube().
+    # NCCUBE_FIELDS must include DBZH and RHOHV for the cube to be usable by
+    # the storm tracker; extra fields are optional and cost ~7.7 MB each.
+    "ADD_NCCUBE": False,
+    "NCCUBE_VOL_NR": "01",
+    "NCCUBE_FIELDS": ["DBZH", "RHOHV"],
+    "ROOT_NCCUBE_PATH": "nccube",
     # Data retention periods (days)
+    # NOTE: NETCDF_RETENTION_DAYS is the CFRadial *polar* volumes, not the cube.
     "NETCDF_RETENTION_DAYS": 30.0,
     "BUFR_RETENTION_DAYS": 30.0,
+    "NCCUBE_RETENTION_DAYS": 7.0,
     # File system paths (typically overridden by docker-compose.yml env vars)
     "ROOT_LOGS_PATH": "logs",
     "ROOT_RADAR_FILES_PATH": "data/radares",
@@ -165,6 +175,15 @@ def _apply_env_overrides(config: Dict[str, Any]) -> None:
                 config[key] = json.loads(env_val)
             except (ValueError, json.JSONDecodeError):
                 pass
+        elif isinstance(default_val, list):
+            # JSON first, then a plain comma-separated list, which is far more
+            # convenient to write in a compose file. Without this branch a list
+            # default would fall through to the string case below and the
+            # consumer would silently iterate characters.
+            try:
+                config[key] = json.loads(env_val)
+            except (ValueError, json.JSONDecodeError):
+                config[key] = [s.strip() for s in env_val.split(",") if s.strip()]
         else:
             config[key] = env_val
 
