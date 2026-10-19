@@ -1,0 +1,8 @@
+# Los scripts de shell y los Dockerfile se ejecutan dentro de contenedores Linux:
+# con finales de linea CRLF (Windows) fallan con "exec ...: no such file or directory".
+# Forzar LF aunque core.autocrlf=true.
+*.sh         text eol=lf
+Dockerfile*  text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+Makefile     text eol=lf
