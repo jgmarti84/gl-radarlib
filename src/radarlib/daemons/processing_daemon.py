@@ -59,6 +59,7 @@ class ProcessingDaemonConfig:
     ftp_host: Optional[str] = config.FTP_HOST
     ftp_user: Optional[str] = config.FTP_USER
     ftp_password: Optional[str] = config.FTP_PASS
+    ftp_timeout: int = 120  # Socket timeout (seconds) for each FTP control/data connection
 
     def __post_init__(self):
         """Set default start_date to now UTC rounded to nearest hour if not provided."""
@@ -137,6 +138,28 @@ class ProcessingDaemon:
             f"start_date={self.config.start_date or 'None (all dates)'}"
         )
 
+        # On startup, reset any volume left in 'processing' from the previous run and
+        # delete its BUFR files so the download daemon fetches fresh copies. Using
+        # timeout_minutes=0 catches every in-flight volume regardless of age — the
+        # previous process is already dead so no grace period is appropriate.
+        # This prevents a segfaulting BUFR file from locking the service in a crash loop
+        # that the 60-minute periodic check can never reach.
+        try:
+            n_reset, paths_to_delete = self.state_tracker.reset_stuck_volumes(timeout_minutes=0)
+            if n_reset > 0:
+                logger.info(
+                    f"Startup sweep: reset {n_reset} in-flight volume(s) to 'pending' "
+                    f"(left over from previous run); deleting {len(paths_to_delete)} BUFR file(s) for re-download"
+                )
+                for path_str in paths_to_delete:
+                    try:
+                        Path(path_str).unlink(missing_ok=True)
+                        logger.debug(f"Startup sweep: deleted stale BUFR file: {path_str}")
+                    except Exception as del_err:
+                        logger.warning(f"Startup sweep: could not delete {path_str}: {del_err}")
+        except Exception as _e:
+            logger.warning(f"Startup sweep failed (non-fatal): {_e}")
+
         try:
             from radarlib.utils.memory_profiling import aggressive_cleanup, log_memory_usage
 
@@ -145,6 +168,12 @@ class ProcessingDaemon:
             _memory_monitoring = False
 
         _cycle_count = 0
+
+        # Scan all pending-complete volumes for corrupt BUFR files before the main loop
+        # starts.  This runs synchronously (no FTP, no network) and completes in
+        # milliseconds, so the processing daemon cannot race ahead and try to decode a
+        # truncated file that would crash the C library.
+        self._scan_pending_bufr_integrity()
 
         try:
             while self._running:
@@ -196,6 +225,126 @@ class ProcessingDaemon:
         self._running = False
         logger.info("Daemon stop requested")
 
+    def _scan_pending_bufr_integrity(self) -> None:
+        """
+        Scan all pending-complete volumes for corrupt BUFR files before processing starts.
+
+        For each volume in 'pending' state with is_complete=1, reads the BUFR header
+        (magic bytes + 3-byte declared message length) from every associated file and
+        compares it against the actual file size on disk.  Any file that is missing,
+        zero-byte, has bad magic, or is truncated is deleted and its download record is
+        reset to 'failed' so the download daemon re-fetches it.  The volume is also
+        marked incomplete so it waits for fresh downloads before the processing daemon
+        picks it up.
+
+        This is a local, network-free check that runs in milliseconds.  It closes the
+        race between the startup stuck-volume sweep (which only covers volumes that were
+        already in 'processing' state) and the processing loop (which would immediately
+        try to decode whatever files are on disk).
+        """
+        conn = self.state_tracker._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+
+        cursor.execute(
+            """
+            SELECT volume_id, radar_name, strategy, vol_nr, observation_datetime
+            FROM volume_processing
+            WHERE status = 'pending' AND is_complete = 1
+            """
+        )
+        pending_volumes = cursor.fetchall()
+
+        if not pending_volumes:
+            logger.debug("Startup integrity scan: no pending-complete volumes to check")
+            return
+
+        n_corrupt_files = 0
+        n_corrupt_volumes = 0
+
+        for vol_row in pending_volumes:
+            volume_id = vol_row[0]
+            radar_name, strategy, vol_nr, obs_dt = vol_row[1], vol_row[2], vol_row[3], vol_row[4]
+
+            cursor.execute(
+                """
+                SELECT filename, local_path FROM downloads
+                WHERE radar_name = ? AND strategy = ? AND vol_nr = ?
+                AND observation_datetime = ? AND status = 'completed'
+                """,
+                (radar_name, strategy, vol_nr, obs_dt),
+            )
+            downloads = cursor.fetchall()
+
+            volume_had_corrupt = False
+            for filename, local_path in downloads:
+                if not local_path:
+                    continue
+
+                path = Path(local_path)
+                corrupt_reason: str | None = None
+
+                try:
+                    file_size = path.stat().st_size
+                except FileNotFoundError:
+                    corrupt_reason = "file missing from disk"
+                    file_size = 0
+
+                if corrupt_reason is None:
+                    if file_size == 0:
+                        corrupt_reason = "0-byte file"
+                    else:
+                        try:
+                            with open(path, "rb") as fh:
+                                header = fh.read(8)
+                            if len(header) < 8 or header[:4] != b"BUFR":
+                                corrupt_reason = f"invalid BUFR magic: {header[:4]!r}"
+                            else:
+                                declared_length = int.from_bytes(header[4:7], "big")
+                                if file_size < declared_length:
+                                    corrupt_reason = (
+                                        f"truncated: {file_size} bytes on disk, "
+                                        f"{declared_length} declared in BUFR header"
+                                    )
+                        except OSError as read_err:
+                            corrupt_reason = f"cannot read file: {read_err}"
+
+                if corrupt_reason:
+                    logger.warning(
+                        f"Startup integrity scan: corrupt BUFR file detected — "
+                        f"{filename} ({corrupt_reason}); deleting and queuing for re-download"
+                    )
+                    try:
+                        path.unlink(missing_ok=True)
+                    except Exception as del_err:
+                        logger.warning(f"Startup integrity scan: could not delete {local_path}: {del_err}")
+                    self.state_tracker.reset_corrupt_download(filename)
+                    volume_had_corrupt = True
+                    n_corrupt_files += 1
+
+            if volume_had_corrupt:
+                cursor.execute(
+                    "UPDATE volume_processing SET is_complete = 0, updated_at = ? WHERE volume_id = ?",
+                    (now, volume_id),
+                )
+                conn.commit()
+                logger.info(
+                    f"Startup integrity scan: volume {volume_id} has corrupt BUFR file(s) — "
+                    f"marked incomplete, waiting for re-download"
+                )
+                n_corrupt_volumes += 1
+
+        if n_corrupt_files > 0:
+            logger.warning(
+                f"Startup integrity scan: quarantined {n_corrupt_files} corrupt BUFR file(s) "
+                f"across {n_corrupt_volumes} volume(s) — download daemon will re-fetch them"
+            )
+        else:
+            logger.info(
+                f"Startup integrity scan: all {len(pending_volumes)} pending-complete "
+                f"volume(s) passed BUFR integrity check"
+            )
+
     async def _retry_incomplete_volumes(self) -> None:
         """
         Retry downloading missing fields for incomplete volumes with attempt limiting.
@@ -217,7 +366,10 @@ class ProcessingDaemon:
                 local_dir = Path(fields_downloaded[0]["local_path"]).parent
 
                 with RadarFTPClientAsync(
-                    self.config.ftp_host, self.config.ftp_user, self.config.ftp_password
+                    self.config.ftp_host,
+                    self.config.ftp_user,
+                    self.config.ftp_password,
+                    timeout=self.config.ftp_timeout,
                 ) as client:
                     for field in fields_to_download:
                         file_name = (
@@ -308,15 +460,25 @@ class ProcessingDaemon:
         Check for volumes stuck in 'processing' status and reset them to 'pending'.
 
         Volumes that have been in 'processing' status for longer than the configured
-        timeout will be reset to 'pending' and logged for retry.
+        timeout are reset to 'pending' and their local BUFR files are deleted so the
+        download daemon re-fetches fresh copies from FTP.
         """
         try:
-            num_reset = self.state_tracker.reset_stuck_volumes(self.config.stuck_volume_timeout_minutes)
+            num_reset, paths_to_delete = self.state_tracker.reset_stuck_volumes(
+                self.config.stuck_volume_timeout_minutes
+            )
             if num_reset > 0:
                 logger.warning(
                     f"Reset {num_reset} stuck volume(s) from 'processing' to 'pending' "
-                    f"(timeout: {self.config.stuck_volume_timeout_minutes} minutes)"
+                    f"(timeout: {self.config.stuck_volume_timeout_minutes} minutes); "
+                    f"deleting {len(paths_to_delete)} local BUFR file(s) for re-download"
                 )
+                for path_str in paths_to_delete:
+                    try:
+                        Path(path_str).unlink(missing_ok=True)
+                        logger.debug(f"Deleted stale BUFR file for re-download: {path_str}")
+                    except Exception as del_err:
+                        logger.warning(f"Could not delete {path_str}: {del_err}")
         except Exception as e:
             logger.error(f"Error checking for stuck volumes: {e}", exc_info=True)
 
@@ -346,6 +508,20 @@ class ProcessingDaemon:
             # observation_datetime < the latest registered volume and would be permanently
             # invisible if the floor advanced. Already-processed volumes are skipped by
             # the idempotency check below.
+            #
+            # The live-first download daemon fetches old data below start_date (which
+            # defaults to the daemon's startup time). Lower the scan floor to the
+            # backfill origin it publishes so that backward-filled volumes are registered
+            # and processed too; it is cleared once the backfill catches up.
+            floor = self.config.start_date
+            origin_str = self.state_tracker.get_cursor(self.config.radar_name, "backfill_origin")
+            if origin_str:
+                try:
+                    origin = datetime.fromisoformat(origin_str)
+                    if origin < floor:
+                        floor = origin
+                except (ValueError, TypeError):
+                    pass
             cursor.execute(
                 """
                 SELECT filename, radar_name, strategy, vol_nr, field_type, observation_datetime, local_path
@@ -354,7 +530,7 @@ class ProcessingDaemon:
                     AND observation_datetime >= ?
                 ORDER BY observation_datetime
                 """,
-                (self.config.radar_name, self.config.start_date.isoformat()),
+                (self.config.radar_name, floor.isoformat()),
             )
         else:
             # Live mode: the download daemon never goes backward, so using the latest
@@ -617,7 +793,12 @@ class ProcessingDaemon:
         for bufr_path in bufr_paths:
             # Guard against 0-byte files that cause the BUFR C library to call _exit(1),
             # silently killing the entire process with no traceback.
-            if Path(bufr_path).stat().st_size == 0:
+            try:
+                bufr_size = Path(bufr_path).stat().st_size
+            except FileNotFoundError:
+                logger.warning(f"Skipping missing BUFR file (may have been cleaned up): {bufr_path}")
+                continue
+            if bufr_size == 0:
                 logger.error(f"Skipping 0-byte BUFR file (corrupt download, will crash C library): {bufr_path}")
                 continue
             try:

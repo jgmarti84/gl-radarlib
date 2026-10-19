@@ -101,6 +101,7 @@ def main():
         ftp_user=config.FTP_USER,  # type: ignore
         ftp_password=config.FTP_PASS,  # type: ignore
         ftp_base_path="/L2",
+        ftp_timeout=config.get_config("FTP_TIMEOUT", default=120),  # type: ignore
         volume_types=volume_types,
         start_date=config.START_DATE,
         download_poll_interval=config.DOWNLOAD_POLL_INTERVAL,  # type: ignore

@@ -1,9 +1,15 @@
 image: python:3.12
 
+default:
+  tags:
+    - docker-build
+
 stages:
   - lint
   - test
   - integration
+  - build
+  - deploy
 
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -55,7 +61,55 @@ integration_tests:
     paths:
       - report-integration.xml
   rules:
-    # Run only when explicitly requested (manual) or when RUN_INTEGRATION variable is set to "true"
-    - if: '$RUN_INTEGRATION == "true"'
-      when: always
-    - when: manual
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+build_genpro25:
+  stage: build
+  image: docker:27-cli
+  tags:
+    - docker-build
+  services:
+    - name: docker:27-dind
+      command: ["--tls=false"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    IMAGE_NAME: "$CI_REGISTRY_IMAGE/genpro25"
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login --username "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+  script:
+    - docker build --pull --file app/Dockerfile --tag "$IMAGE_NAME:$CI_COMMIT_SHA" --tag "$IMAGE_NAME:latest" .
+    - docker push "$IMAGE_NAME:$CI_COMMIT_SHA"
+    - docker push "$IMAGE_NAME:latest"
+    - echo "$IMAGE_NAME:$CI_COMMIT_SHA"
+  needs:
+    - lint
+    - unit_tests
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "operativo"'
+
+deploy_genpro25:
+  stage: deploy
+  image: docker:27-cli
+  tags:
+    - swarm
+  needs:
+    - build_genpro25
+  resource_group: genpro25-production
+  environment:
+    name: production
+  variables:
+    DOCKER_HOST: unix:///var/run/docker.sock
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - echo "${RADARLIB_REGISTRY_PASSWORD:-$CI_REGISTRY_PASSWORD}" | docker login --username "${RADARLIB_REGISTRY_USER:-$CI_REGISTRY_USER}" --password-stdin "$CI_REGISTRY"
+  script:
+    - test -r /dbpool/swarm-manager/radarlib/docker-compose-genpro25-centro.yml
+    - test -r /dbpool/swarm-manager/radarlib/docker-compose-genpro25-norte.yml
+    - test -r /dbpool/swarm-manager/radarlib/docker-compose-genpro25-sur.yml
+    - IMAGE_TAG="$CI_COMMIT_SHA" docker stack deploy --detach=false --with-registry-auth --resolve-image always --compose-file /dbpool/swarm-manager/radarlib/docker-compose-genpro25-centro.yml genpro25-centro
+    - IMAGE_TAG="$CI_COMMIT_SHA" docker stack deploy --detach=false --with-registry-auth --resolve-image always --compose-file /dbpool/swarm-manager/radarlib/docker-compose-genpro25-norte.yml genpro25-norte
+    - IMAGE_TAG="$CI_COMMIT_SHA" docker stack deploy --detach=false --with-registry-auth --resolve-image always --compose-file /dbpool/swarm-manager/radarlib/docker-compose-genpro25-sur.yml genpro25-sur
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "operativo"'
+  allow_failure: false

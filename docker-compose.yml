@@ -988,7 +988,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      START_DATE: "2026-04-01T00:00:00:+00:00"
+      # START_DATE: "2026-04-01T00:00:00:+00:00"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -1036,7 +1036,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      START_DATE: "2026-04-01T00:00:00:+00:00"
+      # START_DATE: "2026-04-01T00:00:00:+00:00"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app
@@ -1084,7 +1084,7 @@ services:
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
-      START_DATE: "2026-04-01T00:00:00:+00:00"
+      # START_DATE: "2026-04-01T00:00:00:+00:00"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app

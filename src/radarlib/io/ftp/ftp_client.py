@@ -3,13 +3,14 @@ import ftplib
 import logging
 import os
 import re
+import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Generator, List, Optional, Tuple
 
 from radarlib.io.bufr.bufr import BUFRFileInfo, BUFRFilename
-from radarlib.utils.names_utils import build_vol_types_regex
+from radarlib.utils.names_utils import build_vol_types_regex, vol_nr_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,26 @@ class RadarFTPClient:
             time.sleep(backoff * (2 ** (attempt - 1)))
         raise FTPError(f"Could not connect to FTP {self.host} after {retries} attempts: {last_exc}")
 
+    def get_remote_size(self, remote_path: str) -> Optional[int]:
+        """
+        Return the size of a remote file via the FTP SIZE command.
+
+        Reuses the existing persistent control connection — no new connection is opened.
+        Returns None if the file does not exist or the command fails for any reason,
+        so callers can skip gracefully without crashing.
+
+        Args:
+            remote_path: Full remote path to the file
+
+        Returns:
+            File size in bytes, or None on any error
+        """
+        try:
+            self._ensure_connection()
+            return self.ftp.size(remote_path)  # type: ignore
+        except Exception:
+            return None
+
     # ----------------------
     # Low-level listing
     # ----------------------
@@ -154,12 +175,15 @@ class RadarFTPClient:
         """Download a single file efficiently using the current session."""
         local_path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            expected_size = self.ftp.size(remote_path)  # type: ignore
             with open(local_path, "wb") as f:
                 self.ftp.retrbinary(f"RETR {remote_path}", f.write)  # type: ignore
-            # Server may return 226 Transfer complete but send 0 bytes — treat as error
-            if local_path.stat().st_size == 0:
+            actual_size = local_path.stat().st_size
+            if actual_size != expected_size:
                 local_path.unlink(missing_ok=True)
-                raise FTPError(f"Empty file after download (server sent 0 bytes): {remote_path}")
+                raise FTPError(
+                    f"Size mismatch after download (expected {expected_size}, got {actual_size}): {remote_path}"
+                )
             logger.info(f"Downloaded {remote_path} -> {local_path}")
             return local_path
         except ftplib.all_errors as e:
@@ -295,10 +319,21 @@ class RadarFTPClient:
         include_start: bool = True,
         include_end: bool = True,
         vol_types: Optional[dict] | re.Pattern = None,
+        vol_types_dict: Optional[dict] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> Generator[Tuple[datetime, str, str | Path], None, None]:
         """
         Traverse FTP folders for BUFR files, constrained to dt_start..dt_end.
-        Correctly handles boundary pruning at each level.
+
+        Year/month/day directory levels are constructed directly from the time
+        range instead of discovered via NLST, saving 3 passive data sockets per
+        traversal cycle.  When vol_types_dict is provided, leaf-level file
+        detection uses FTP SIZE on the control channel (no PASV socket per
+        minute folder) instead of one NLST per minute folder.  In steady-state
+        with vol_types_dict, only 2 PASV sockets are opened per hour in the
+        window (one for the day listing, one for the hour listing).
+
+        cancel_event: if set, exits cleanly at the next directory boundary.
         """
         if vol_types is not None and isinstance(vol_types, dict):
             vol_types = build_vol_types_regex(vol_types)
@@ -309,77 +344,138 @@ class RadarFTPClient:
         if dt_end is None:
             dt_end = datetime.max.replace(tzinfo=timezone.utc)
 
+        # Build the day-level iteration directly from the time range, skipping
+        # year/month/day NLST calls (3 fewer PASV sockets per cycle).
+        # Cap end_day at today so we never walk into dates that cannot exist yet.
+        today = datetime.now(timezone.utc).date()
+        current_day = dt_start.date()
+        end_day = dt_end.date() if dt_end.year < 9999 else today
+
         try:
-            years = sorted(self.list_dir(base_path))
-            for y in years:
-                yi = int(y)
-                if yi < dt_start.year or yi > dt_end.year:
+            while current_day <= end_day:
+                if cancel_event is not None and cancel_event.is_set():
+                    logger.debug(f"Traversal cancelled for radar {radar_name} at {current_day}")
+                    return
+
+                day_path = (
+                    f"{base_path}" f"/{current_day.year:04d}" f"/{current_day.month:02d}" f"/{current_day.day:02d}"
+                )
+
+                try:
+                    hours = sorted(self.list_dir(day_path))
+                except FTPError:
+                    # Day directory doesn't exist yet — skip silently
+                    current_day += timedelta(days=1)
                     continue
-                year_path = f"{base_path}/{y}"
 
-                months = sorted(self.list_dir(year_path))
-                for m in months:
-                    mi = int(m)
-                    if yi == dt_start.year and mi < dt_start.month:
+                for h in hours:
+                    if cancel_event is not None and cancel_event.is_set():
+                        logger.debug(f"Traversal cancelled for radar {radar_name} at {current_day}/{h}")
+                        return
+
+                    hi = int(h)
+                    # Prune hours outside the requested range
+                    if current_day == dt_start.date() and hi < dt_start.hour:
                         continue
-                    if yi == dt_end.year and mi > dt_end.month:
+                    if current_day == dt_end.date() and hi > dt_end.hour:
                         continue
-                    month_path = f"{year_path}/{m}"
 
-                    days = sorted(self.list_dir(month_path))
-                    for d in days:
-                        di = int(d)
-                        if yi == dt_start.year and mi == dt_start.month and di < dt_start.day:
-                            continue
-                        if yi == dt_end.year and mi == dt_end.month and di > dt_end.day:
-                            continue
-                        day_path = f"{month_path}/{d}"
+                    hour_path = f"{day_path}/{h}"
+                    try:
+                        minutes = sorted(self.list_dir(hour_path))
+                    except FTPError:
+                        continue
 
-                        hours = sorted(self.list_dir(day_path))
-                        for h in hours:
-                            hi = int(h)
-                            if (
-                                yi == dt_start.year
-                                and mi == dt_start.month
-                                and di == dt_start.day
-                                and hi < dt_start.hour
-                            ):
+                    for ms in minutes:
+                        if cancel_event is not None and cancel_event.is_set():
+                            logger.debug(f"Traversal cancelled for radar {radar_name} " f"at {current_day}/{h}/{ms}")
+                            return
+
+                        mi_val = int(ms[:2])
+                        sec_val = int(ms[2:]) if len(ms) > 2 else 0
+                        dt = datetime(
+                            current_day.year,
+                            current_day.month,
+                            current_day.day,
+                            hi,
+                            mi_val,
+                            sec_val,
+                            tzinfo=timezone.utc,
+                        )
+
+                        # Inclusivity check
+                        if include_start:
+                            if dt < dt_start:
                                 continue
-                            if yi == dt_end.year and mi == dt_end.month and di == dt_end.day and hi > dt_end.hour:
+                        else:
+                            if dt <= dt_start:
                                 continue
-                            hour_path = f"{day_path}/{h}"
+                        if include_end:
+                            if dt > dt_end:
+                                continue
+                        else:
+                            if dt >= dt_end:
+                                continue
 
-                            minutes = sorted(self.list_dir(hour_path))
-                            for ms in minutes:
-                                mi_val = int(ms[:2])
-                                sec_val = int(ms[2:]) if len(ms) > 2 else 0
-                                dt = datetime(yi, mi, di, hi, mi_val, sec_val, tzinfo=timezone.utc)
+                        minute_path = f"{hour_path}/{ms}"
 
-                                # ---------- INCLUSIVITY LOGIC ----------
-                                if include_start:
-                                    if dt < dt_start:
-                                        continue
-                                else:
-                                    if dt <= dt_start:
-                                        continue
+                        if vol_types_dict:
+                            # SIZE-based detection: each check is a control-channel command
+                            # (no PASV socket).  Filenames are deterministic from the dict
+                            # and the minute-folder timestamp.
+                            ts = dt.strftime("%Y%m%dT%H%M%SZ")
+                            try:
+                                self._ensure_connection()
+                            except FTPError as conn_err:
+                                logger.warning(
+                                    f"[traverse] FTP connection lost before SIZE check of " f"{minute_path}: {conn_err}"
+                                )
+                                continue
 
-                                if include_end:
-                                    if dt > dt_end:
-                                        continue
-                                else:
-                                    if dt >= dt_end:
-                                        continue
-                                # ---------------------------------------
-
-                                minute_path = f"{hour_path}/{ms}"
+                            for strategy, vol_dict in vol_types_dict.items():
+                                if not isinstance(vol_dict, dict):
+                                    continue
+                                for vol_nr, fields in vol_dict.items():
+                                    # Sites disagree on zero-padding the volume number
+                                    # (RMA: "01", AR/Gematronik: "1"), so probe both
+                                    # spellings and yield the one that actually exists.
+                                    candidates = vol_nr_candidates(vol_nr)
+                                    for field in fields:
+                                        for vol_variant in candidates:
+                                            fname = f"{radar_name}_{strategy}_{vol_variant}" f"_{field}_{ts}.BUFR"
+                                            full_remote = f"{minute_path}/{fname}"
+                                            try:
+                                                remote_size = self.ftp.size(full_remote)  # type: ignore
+                                            except ftplib.error_perm:
+                                                continue  # 550 — try the next padding variant
+                                            except (EOFError, OSError) as conn_err:
+                                                # Lost control connection mid-loop — try once to recover
+                                                try:
+                                                    self._ensure_connection()
+                                                    remote_size = self.ftp.size(full_remote)  # type: ignore
+                                                except ftplib.all_errors:
+                                                    logger.warning(
+                                                        f"[traverse] connection lost during SIZE check "
+                                                        f"of {full_remote}: {conn_err}"
+                                                    )
+                                                    continue
+                                            if remote_size is not None:
+                                                yield dt, fname, Path(full_remote)
+                                                break  # field found; stop probing variants
+                        else:
+                            # Fallback: NLST at the minute-folder level (original behaviour
+                            # when no vol_types_dict is provided).
+                            try:
                                 files = self.list_dir(minute_path)
-                                for fname in files:
-                                    # Filtrado por vol_types si se proporciona
-                                    if vol_types is not None:
-                                        if not vol_types.match(fname):
-                                            continue
-                                    full_remote = Path(f"{minute_path}/{fname}")
-                                    yield dt, fname, full_remote
+                            except FTPError:
+                                continue
+                            for fname in files:
+                                if vol_types is not None and not vol_types.match(fname):
+                                    continue
+                                yield dt, fname, Path(f"{minute_path}/{fname}")
+
+                current_day += timedelta(days=1)
+
         except FTPError as e:
             logger.error(f"Traversal failed for radar {radar_name}: {e}")
 
@@ -397,8 +493,16 @@ class RadarFTPClientAsync(RadarFTPClient):
     - Download methods are wrapped with asyncio.to_thread so they run concurrently.
     """
 
-    def __init__(self, host: str, user: str, password: str, base_dir: str = "L2", max_workers: Optional[int] = None):
-        super().__init__(host, user, password, base_dir)
+    def __init__(
+        self,
+        host: str,
+        user: str,
+        password: str,
+        base_dir: str = "L2",
+        max_workers: Optional[int] = None,
+        timeout: int = 30,
+    ):
+        super().__init__(host, user, password, base_dir, timeout=timeout)
         self._max_workers = max_workers
         self._semaphore = asyncio.Semaphore(self.max_workers)
 
@@ -439,13 +543,16 @@ class RadarFTPClientAsync(RadarFTPClient):
                 dir_path = remote_path.parent.as_posix()
                 fname = remote_path.name
                 ftp.cwd(dir_path)
+                expected_size = ftp.size(fname)
                 with open(local_path, "wb") as f:
                     ftp.retrbinary(f"RETR {fname}", f.write)
 
-            # Server may return 226 Transfer complete but send 0 bytes — treat as error
-            if local_path.stat().st_size == 0:
+            actual_size = local_path.stat().st_size
+            if actual_size != expected_size:
                 local_path.unlink(missing_ok=True)
-                raise FTPError(f"Empty file after download (server sent 0 bytes): {remote_path}")
+                raise FTPError(
+                    f"Size mismatch after download (expected {expected_size}, got {actual_size}): {remote_path}"
+                )
             logger.info(f"Downloaded {remote_path} -> {local_path}")
             return local_path
 

@@ -35,6 +35,7 @@ _DEFAULTS: Dict[str, Any] = {
     "FTP_HOST": None,
     "FTP_USER": None,
     "FTP_PASS": None,
+    "FTP_TIMEOUT": 120,  # Socket timeout (seconds) for each FTP control/data connection
     # Daemon enable/disable toggles
     "ENABLE_DOWNLOAD_DAEMON": True,
     "ENABLE_PROCESSING_DAEMON": True,

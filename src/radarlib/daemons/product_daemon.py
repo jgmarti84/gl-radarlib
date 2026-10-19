@@ -457,6 +457,22 @@ class ProductGenerationDaemon:
             f"processing_mode=sequential"
         )
 
+        # On startup, immediately reset any product_generation entry left in 'processing'
+        # state from a previous run. Without this, those entries are invisible to
+        # get_volumes_for_product_generation for up to stuck_timeout minutes, causing a
+        # COG to be skipped in the real-time display after every redeployment.
+        try:
+            num_reset = self.state_tracker.reset_stuck_product_generations(
+                timeout_minutes=0, product_type=self.config.product_type
+            )
+            if num_reset > 0:
+                logger.info(
+                    f"Startup sweep: reset {num_reset} in-flight {self.config.product_type} "
+                    f"generation(s) to 'pending' (left over from previous run)"
+                )
+        except Exception as _e:
+            logger.warning(f"Startup sweep failed (non-fatal): {_e}")
+
         try:
             from radarlib.utils.memory_profiling import aggressive_cleanup, log_memory_usage
 
@@ -597,15 +613,11 @@ class ProductGenerationDaemon:
 
         netcdf_file = Path(netcdf_path)
         if not netcdf_file.exists():
-            logger.error(f"NetCDF file not found: {netcdf_file}")
-            self.state_tracker.mark_product_status(
-                volume_id,
-                self.config.product_type,
-                "failed",
-                error_message=f"NetCDF file not found: {netcdf_file}",
-                error_type="FILE_NOT_FOUND",
+            logger.warning(
+                f"NetCDF file not found for volume {volume_id}: {netcdf_file}. " f"Resetting volume for re-processing."
             )
-            self._stats["volumes_failed"] += 1
+            self.state_tracker.reset_volume_for_reprocessing(volume_id)
+            self.state_tracker.mark_product_status(volume_id, self.config.product_type, "pending")
             return False
 
         completeness_str = "complete" if is_complete else "incomplete"
@@ -663,18 +675,35 @@ class ProductGenerationDaemon:
             return False
 
         except Exception as e:
-            error_msg = (
-                f"Failed to generate {self.config.product_type} for {completeness_str} volume {volume_id}: {str(e)}"
+            # Detect corrupt NetCDF: HDF5 errors (errno -101) or unknown format errors.
+            # These indicate the NetCDF file on disk is damaged (typically from a process
+            # crash mid-write). Delete it and reset the volume for re-processing from BUFR.
+            err_str = str(e)
+            is_netcdf_corrupt = (isinstance(e, OSError) and getattr(e, "errno", None) == -101) or any(
+                kw in err_str for kw in ("HDF error", "unsupported file format", "NetCDF: Unknown file format")
             )
+            if is_netcdf_corrupt:
+                logger.warning(
+                    f"Corrupt NetCDF detected for volume {volume_id}: {e}. "
+                    f"Deleting and resetting for re-processing.",
+                    exc_info=False,
+                )
+                try:
+                    netcdf_file.unlink(missing_ok=True)
+                except Exception as del_err:
+                    logger.warning(f"Could not delete corrupt NetCDF {netcdf_file}: {del_err}")
+                self.state_tracker.reset_volume_for_reprocessing(volume_id)
+                self.state_tracker.mark_product_status(volume_id, self.config.product_type, "pending")
+                return False
+
+            error_msg = f"Failed to generate {self.config.product_type} for {completeness_str} volume {volume_id}: {e}"
             logger.error(error_msg, exc_info=True)
-            # Determine error type from exception
-            error_type = type(e).__name__
             self.state_tracker.mark_product_status(
                 volume_id,
                 self.config.product_type,
                 "failed",
-                error_message=str(e)[:500],  # Limit error message length
-                error_type=error_type,
+                error_message=err_str[:500],
+                error_type=type(e).__name__,
             )
             self._stats["volumes_failed"] += 1
             return False
@@ -1254,6 +1283,7 @@ class ProductGenerationDaemon:
         from radarlib.daemons.field_processor import apply_coverage_radius_mask
         from radarlib.io.pyart.cores_and_tops import generate_cores_and_tops
         from radarlib.radar_grid import apply_geometry, column_max, constant_elevation_ppi, get_field_data
+        from radarlib.radar_grid.interpolate import GeometryDimensionMismatchError
 
         _ct_dbzh_3d = None
         _ct_colmax_2d = None
@@ -1317,6 +1347,11 @@ class ProductGenerationDaemon:
                     rhohv_2d=_ct_rhohv_2d,
                 )
 
+        except GeometryDimensionMismatchError as e:
+            logger.warning(
+                f"[{self.config.radar_name}] Tops/cores skipped for {filename_stem}: {e} "
+                f"Scan may have a transient range reduction — will retry once geometry matches."
+            )
         except Exception as _ct_exc:
             logger.error(
                 f"[{self.config.radar_name}] Tops/cores detection failed " f"for {filename_stem}: {_ct_exc}",

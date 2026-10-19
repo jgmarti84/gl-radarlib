@@ -134,7 +134,8 @@ class TestRadarFTPClientDownload:
         """Should create parent directory if it doesn't exist."""
         client = RadarFTPClient("host", "user", "pass")
         client.ftp = MagicMock()
-        client.ftp.retrbinary.return_value = None
+        client.ftp.size.return_value = 4
+        client.ftp.retrbinary.side_effect = lambda cmd, callback: callback(b"data")
 
         local_path = tmp_path / "subdir" / "file.bufr"
 
@@ -146,7 +147,8 @@ class TestRadarFTPClientDownload:
         """Should return the local path after download."""
         client = RadarFTPClient("host", "user", "pass")
         client.ftp = MagicMock()
-        client.ftp.retrbinary.return_value = None
+        client.ftp.size.return_value = 4
+        client.ftp.retrbinary.side_effect = lambda cmd, callback: callback(b"data")
 
         local_path = tmp_path / "file.bufr"
         result = client.download_file("/remote/file.bufr", local_path)
@@ -172,24 +174,16 @@ class TestRadarFTPClientTraverseRadar:
         client.ftp = MagicMock()
         client.ftp.voidcmd.return_value = None
 
-        # Mock directory structure
+        # Mock directory structure — new traversal starts at the day level
+        # (year/month/day paths are constructed directly, not discovered via NLST).
         def mock_list_dir(path):
-            if path == "/L2/RMA1":
-                return ["2025"]
-            elif path == "/L2/RMA1/2025":
-                return ["01", "02"]
-            elif "/2025/01" in path:
-                if path.endswith("/01"):
-                    return ["15"]  # Day 15
-                elif path.endswith("/15"):
-                    return ["10"]  # Hour 10
-                elif path.endswith("/10"):
-                    return ["30"]  # Minute 30
-                elif path.endswith("/30"):
-                    return ["RMA1_0315_01.bufr"]
-            elif "/2025/02" in path:
-                return []
-            return []
+            if path == "/L2/RMA1/2025/01/15":
+                return ["10"]  # Hour 10 exists on day 15
+            elif path == "/L2/RMA1/2025/01/15/10":
+                return ["30"]  # Minute folder "30" (→ minute=30, second=0)
+            elif path == "/L2/RMA1/2025/01/15/10/30":
+                return ["RMA1_0315_01.bufr"]
+            return []  # All other day / hour / minute paths are empty
 
         client.list_dir = MagicMock(side_effect=mock_list_dir)
 
@@ -200,6 +194,44 @@ class TestRadarFTPClientTraverseRadar:
         assert results
         # Should have traversed the January directory
         assert any("01" in str(r) for call in client.list_dir.call_args_list for r in call.args)
+
+    def test_size_detection_handles_single_digit_vol_nr(self):
+        """SIZE-based detection must find AR-style single-digit volume files even
+        when the config declares the volume zero-padded (regression: AR5/AR7 froze
+        because 'AR5_1000_03_...' never matched the real 'AR5_1000_3_...')."""
+        client = RadarFTPClient("host", "user", "pass")
+        client.ftp = MagicMock()
+        client.ftp.voidcmd.return_value = None
+
+        # The only file that exists uses the single-digit spelling.
+        real_file = "AR5_1000_3_DBZH_20260115T103000Z.BUFR"
+
+        def mock_list_dir(path):
+            if path == "/L2/AR5/2026/01/15":
+                return ["10"]
+            elif path == "/L2/AR5/2026/01/15/10":
+                return ["3000"]  # minute=30, second=0
+            return []
+
+        def mock_size(remote):
+            if remote.endswith(real_file):
+                return 12345
+            raise ftplib.error_perm("550 Could not get file size.")
+
+        client.list_dir = MagicMock(side_effect=mock_list_dir)
+        client.ftp.size = MagicMock(side_effect=mock_size)
+
+        # Config uses the zero-padded spelling, as in genpro25_arX.yml.
+        vol_types_dict = {"1000": {"03": ["DBZH"]}}
+
+        dt_start = datetime(2026, 1, 15, 10, 29, 0, tzinfo=timezone.utc)
+        dt_end = datetime(2026, 1, 15, 10, 31, 0, tzinfo=timezone.utc)
+
+        results = list(client.traverse_radar("AR5", dt_start, dt_end, vol_types_dict=vol_types_dict))
+
+        assert len(results) == 1
+        _dt, fname, _remote = results[0]
+        assert fname == real_file
 
 
 class TestFTPError:
