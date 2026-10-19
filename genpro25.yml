@@ -32,8 +32,15 @@ local:
     ADD_COLMAX: True # Set to True to add Colmax products
     ADD_TOPS_AND_CORES: True # Set to True to generate cores+tops GeoJSON products
     TOPS_AND_CORES_VOL_NR: "01" # Volume number to use for tops+cores detection (vol01 = full polarimetric scan)
+    # NC cube: the 3D Cartesian grid persisted next to the 2D COGs, for consumers
+    # that need a whole volume (storm tracking, cross-sections). Independent of
+    # ADD_TOPS_AND_CORES on purpose — turning one off never silently stops the other.
+    ADD_NCCUBE: False # Set to True to persist 3D Cartesian grids (~15 MB per volume)
+    NCCUBE_VOL_NR: "01" # Volume number to grid (vol01 = full polarimetric scan)
+    NCCUBE_FIELDS: ["DBZH", "RHOHV"] # DBZH+RHOHV are required by the tracker; each extra field adds ~7.7 MB
     FIELD_VALUE_MASKS:
       RHOHV:
         min: 0.3
-    NETCDF_RETENTION_DAYS: 0.08333333333333333 # in days
+    NETCDF_RETENTION_DAYS: 0.08333333333333333 # in days — CFRadial polar volumes, NOT the NC cube
     BUFR_RETENTION_DAYS: 0.08333333333333333 # in days
+    NCCUBE_RETENTION_DAYS: 7.0 # in days — 15 MB/volume x ~160/day = ~2.5 GB per radar per day

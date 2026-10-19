@@ -491,3 +491,129 @@ class TestDaemonManagerWithCleanup:
         )
 
         assert config.cleanup_product_types == ["image", "raw_cog"]
+
+
+class TestNCCubeCleanup:
+    """NC cube pruning.
+
+    Unlike BUFR/NetCDF cleanup this walks the output tree instead of querying
+    the state DB, because a cube has no row recording its path. These tests pin
+    the three ways that can go wrong: deleting too much, deleting too little,
+    and leaving the tree full of empty stubs.
+    """
+
+    @pytest.fixture
+    def cube_tree(self, tmp_path):
+        """A cube tree with one stale cube, one fresh cube, and one non-cube."""
+        import os
+        import time
+
+        root = tmp_path / "nccube" / "RMA1"
+        stale_day = root / "2026" / "10" / "01"
+        fresh_day = root / "2026" / "10" / "19"
+        stale_day.mkdir(parents=True)
+        fresh_day.mkdir(parents=True)
+
+        stale = stale_day / "RMA1_0315_01_20261001T120000Z_NCCUBE.nc"
+        fresh = fresh_day / "RMA1_0315_01_20261019T120000Z_NCCUBE.nc"
+        other = fresh_day / "RMA1_0315_01_20261019T120000Z_DBZH.tif"
+        for p in (stale, fresh, other):
+            p.write_bytes(b"x")
+
+        past = time.time() - 10 * 86400
+        os.utime(stale, (past, past))
+        return {"root": root, "stale": stale, "fresh": fresh,
+                "other": other, "stale_day": stale_day, "fresh_day": fresh_day}
+
+    def _daemon(self, root, tmp_path, **over):
+        """A daemon with no state DB — cube cleanup never touches one."""
+        cfg = CleanupDaemonConfig(
+            state_db=tmp_path / "state.db",
+            radar_name="RMA1",
+            nccube_dir=root,
+            nccube_retention_days=7.0,
+            enable_bufr_cleanup=False,
+            enable_netcdf_cleanup=False,
+            **over,
+        )
+        daemon = CleanupDaemon.__new__(CleanupDaemon)
+        daemon.config = cfg
+        daemon._stats = {"nccube_files_cleaned": 0, "nccube_files_failed": 0}
+        return daemon
+
+    @pytest.mark.asyncio
+    async def test_deletes_cube_older_than_retention(self, cube_tree, tmp_path):
+        d = self._daemon(cube_tree["root"], tmp_path)
+        await d._cleanup_nccube_files()
+        assert not cube_tree["stale"].exists()
+
+    @pytest.mark.asyncio
+    async def test_keeps_cube_inside_retention(self, cube_tree, tmp_path):
+        d = self._daemon(cube_tree["root"], tmp_path)
+        await d._cleanup_nccube_files()
+        assert cube_tree["fresh"].exists()
+
+    @pytest.mark.asyncio
+    async def test_leaves_non_cube_files_alone(self, cube_tree, tmp_path):
+        """The tree may sit beside other products; only *_NCCUBE.nc is ours."""
+        d = self._daemon(cube_tree["root"], tmp_path)
+        await d._cleanup_nccube_files()
+        assert cube_tree["other"].exists()
+
+    @pytest.mark.asyncio
+    async def test_reports_count_cleaned(self, cube_tree, tmp_path):
+        d = self._daemon(cube_tree["root"], tmp_path)
+        cleaned, failed = await d._cleanup_nccube_files()
+        assert (cleaned, failed) == (1, 0)
+
+    @pytest.mark.asyncio
+    async def test_prunes_emptied_directories(self, cube_tree, tmp_path):
+        d = self._daemon(cube_tree["root"], tmp_path)
+        await d._cleanup_nccube_files()
+        assert not cube_tree["stale_day"].exists()
+
+    @pytest.mark.asyncio
+    async def test_keeps_directories_that_still_hold_files(self, cube_tree, tmp_path):
+        d = self._daemon(cube_tree["root"], tmp_path)
+        await d._cleanup_nccube_files()
+        assert cube_tree["fresh_day"].exists()
+
+    @pytest.mark.asyncio
+    async def test_never_removes_the_root(self, cube_tree, tmp_path):
+        """Pruning must stop at the mount point, which is a volume mount."""
+        cube_tree["fresh"].unlink()
+        cube_tree["other"].unlink()
+        d = self._daemon(cube_tree["root"], tmp_path)
+        await d._cleanup_nccube_files()
+        assert cube_tree["root"].exists()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_deletes_nothing(self, cube_tree, tmp_path):
+        d = self._daemon(cube_tree["root"], tmp_path, dry_run=True)
+        cleaned, _ = await d._cleanup_nccube_files()
+        assert cleaned == 1 and cube_tree["stale"].exists()
+
+    @pytest.mark.asyncio
+    async def test_honours_max_files_per_cycle(self, cube_tree, tmp_path):
+        import os
+        import time
+
+        past = time.time() - 10 * 86400
+        for i in range(4):
+            extra = cube_tree["stale_day"] / f"RMA1_0315_01_2026100{i}T130000Z_NCCUBE.nc"
+            extra.write_bytes(b"x")
+            os.utime(extra, (past, past))
+        d = self._daemon(cube_tree["root"], tmp_path, max_files_per_cycle=2)
+        cleaned, _ = await d._cleanup_nccube_files()
+        assert cleaned == 2
+
+    @pytest.mark.asyncio
+    async def test_missing_directory_is_not_an_error(self, tmp_path):
+        """The cube dir only exists once a radar has ADD_NCCUBE enabled."""
+        d = self._daemon(tmp_path / "does_not_exist", tmp_path)
+        assert await d._cleanup_nccube_files() == (0, 0)
+
+    @pytest.mark.asyncio
+    async def test_unconfigured_directory_is_a_no_op(self, tmp_path):
+        d = self._daemon(None, tmp_path)
+        assert await d._cleanup_nccube_files() == (0, 0)

@@ -57,6 +57,10 @@ services:
     volumes:
       - ../product_output/RMA1:/workspace/app/product_output/RMA1
       - ../tops_and_cores/RMA1:/workspace/app/tops_and_cores/RMA1 # Mount tops_and_cores output dir for RMA1
+      # NC cube output (3D Cartesian grids). Only produced when ADD_NCCUBE is
+      # True; the host dir must exist beforehand or Docker creates it root-owned.
+      # To enable another radar, copy this mount + ROOT_NCCUBE_PATH below.
+      - ../nccube/RMA1:/workspace/app/nccube/RMA1
       - ../logs/RMA1:/workspace/app/logs/RMA1
       - ../geometry/RMA1:/workspace/app/data/geometries
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
@@ -71,10 +75,12 @@ services:
       ROOT_RADAR_FILES_PATH: "/workspace/app/data/radares"
       ROOT_RADAR_PRODUCTS_PATH: "/workspace/app/product_output"
       ROOT_TOPS_AND_CORES_PATH: "/workspace/app/tops_and_cores"
+      ROOT_NCCUBE_PATH: "/workspace/app/nccube"
       ROOT_GATE_COORDS_PATH: "/workspace/app/data/gate_coordinates"
       ROOT_LOGS_PATH: "/workspace/app/logs"
       ROOT_GEOMETRY_PATH: "/workspace/app/data/geometries"
       # NETCDF_RETENTION_DAYS: 180 # in days
+      # ADD_NCCUBE: "true" # uncomment to persist 3D Cartesian grids for this radar
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     working_dir: /workspace/app

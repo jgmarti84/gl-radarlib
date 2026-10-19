@@ -213,3 +213,44 @@ class TestExtractCogFilenameComponentsV2:
         components = extract_cog_filename_components_v2(path.name)
         assert components["field_name"] == "ZDR"
         assert components["filtered"] is False
+
+
+# ---------------------------------------------------------------------------
+# nccube_path_and_filename()
+# ---------------------------------------------------------------------------
+
+
+class TestNCCubePathAndFilename:
+    """The NC cube filename is parsed by webmet25's indexer, so its layout is
+    contractual: same tokens and timestamp format as the COG convention."""
+
+    def test_returns_path_object(self, ts_utc: datetime, tmp_path: Path) -> None:
+        from radarlib.utils.names_utils import nccube_path_and_filename
+
+        assert isinstance(nccube_path_and_filename("RMA1", "0315", "01", ts_utc, tmp_path), Path)
+
+    def test_filename_matches_convention(self, ts_utc: datetime, tmp_path: Path) -> None:
+        from radarlib.utils.names_utils import nccube_path_and_filename
+
+        result = nccube_path_and_filename("RMA1", "0315", "01", ts_utc, tmp_path)
+        assert result.name == "RMA1_0315_01_20260401T205000Z_NCCUBE.nc"
+
+    def test_uses_date_partitioned_subdirectory(self, ts_utc: datetime, tmp_path: Path) -> None:
+        from radarlib.utils.names_utils import nccube_path_and_filename
+
+        result = nccube_path_and_filename("RMA1", "0315", "01", ts_utc, tmp_path)
+        assert result.parent == tmp_path / "2026" / "04" / "01"
+
+    def test_creates_parent_directories(self, ts_utc: datetime, tmp_path: Path) -> None:
+        from radarlib.utils.names_utils import nccube_path_and_filename
+
+        result = nccube_path_and_filename("RMA1", "0315", "01", ts_utc, tmp_path)
+        assert result.parent.is_dir()
+
+    def test_timestamp_keeps_second_precision(self, tmp_path: Path) -> None:
+        """Volumes are ~9 min apart but not aligned; rounding would collide."""
+        from radarlib.utils.names_utils import nccube_path_and_filename
+
+        ts = datetime(2026, 10, 13, 14, 8, 18, tzinfo=timezone.utc)
+        result = nccube_path_and_filename("RMA5", "0315", "01", ts, tmp_path)
+        assert "20261013T140818Z" in result.name
