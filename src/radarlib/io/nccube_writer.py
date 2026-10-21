@@ -121,9 +121,7 @@ def write_nccube(
         if shape is None:
             shape = arr.shape
         elif arr.shape != shape:
-            raise ValueError(
-                f"shape mismatch: {name} {arr.shape} vs {shape} for the other field(s)"
-            )
+            raise ValueError(f"shape mismatch: {name} {arr.shape} vs {shape} for the other field(s)")
         # row 0 south (apply_geometry) -> row 0 north (GDAL convention)
         prepared[name] = arr[:, ::-1, :]
 
@@ -134,8 +132,7 @@ def write_nccube(
 
     if (len(z_m), len(y_km), len(x_km)) != (nz, ny, nx):
         raise ValueError(
-            f"coordinate lengths {(len(z_m), len(y_km), len(x_km))} "
-            f"do not match data shape {(nz, ny, nx)}"
+            f"coordinate lengths {(len(z_m), len(y_km), len(x_km))} " f"do not match data shape {(nz, ny, nx)}"
         )
 
     if timestamp.tzinfo is None:
@@ -164,13 +161,14 @@ def write_nccube(
         for name, data in prepared.items():
             long_name, units = FIELD_METADATA.get(name, ("", ""))
             if not long_name:
-                logger.warning(
-                    "NC cube: no CF metadata for field %s; writing it without "
-                    "long_name/units", name
-                )
+                logger.warning("NC cube: no CF metadata for field %s; writing it without " "long_name/units", name)
             v = nc.createVariable(
-                name, "f4", ("z", "y", "x"),
-                fill_value=_FILL, zlib=True, complevel=1,
+                name,
+                "f4",
+                ("z", "y", "x"),
+                fill_value=_FILL,
+                zlib=True,
+                complevel=1,
             )
             v[:] = np.where(np.isfinite(data), data, _FILL)
             v.long_name = long_name

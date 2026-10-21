@@ -61,9 +61,13 @@ class TestRoundTrip:
 
     def test_creates_parent_directories(self, tmp_path, ts_utc, coords):
         out = write_nccube(
-            path=tmp_path / "a" / "b" / "cube.nc", fields=_fields(),
-            radar_lat=0.0, radar_lon=0.0, radar_alt_m=0.0,
-            timestamp=ts_utc, **coords,
+            path=tmp_path / "a" / "b" / "cube.nc",
+            fields=_fields(),
+            radar_lat=0.0,
+            radar_lon=0.0,
+            radar_alt_m=0.0,
+            timestamp=ts_utc,
+            **coords,
         )
         assert out.is_file()
 

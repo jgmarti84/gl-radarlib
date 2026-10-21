@@ -522,8 +522,14 @@ class TestNCCubeCleanup:
 
         past = time.time() - 10 * 86400
         os.utime(stale, (past, past))
-        return {"root": root, "stale": stale, "fresh": fresh,
-                "other": other, "stale_day": stale_day, "fresh_day": fresh_day}
+        return {
+            "root": root,
+            "stale": stale,
+            "fresh": fresh,
+            "other": other,
+            "stale_day": stale_day,
+            "fresh_day": fresh_day,
+        }
 
     def _daemon(self, root, tmp_path, **over):
         """A daemon with no state DB — cube cleanup never touches one."""
