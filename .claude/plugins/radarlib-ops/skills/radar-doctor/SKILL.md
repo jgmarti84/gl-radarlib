@@ -50,11 +50,23 @@ knobs, and FTP layout.
      `python scripts/reproduce_stall.py --db <scratch state.db> --back 2d`
      then restart the container and watch live + backfill streams.
 
+## Always review raised Python errors
+
+`analyze_log.py` always prints a **Raised errors** census (traceback count, exception
+types, and the top normalized ERROR messages) — and emits an `unclassified-errors`
+finding when non-benign tracebacks aren't explained by a known fingerprint. Always read
+it: a radar can look "stuck/stalled" at the pointer level while the real story is an
+exception raised deep in processing/product generation. Report the top raised errors with
+their counts, and say which are benign (e.g. `FilterFieldsMissingError`) vs real. If the
+census shows an exception type the known modes don't cover, surface it explicitly rather
+than forcing it into an existing mode.
+
 ## Output
 
 Report the verdict (HEALTHY / CATCHING-UP / DEGRADED / STUCK), the matched
-findings with their evidence, and the recommended action. Keep it tight; cite the
-concrete numbers (frozen-at time, lag minutes, 550 counts) the scripts return.
+findings with their evidence, the **raised-error census**, and the recommended action.
+Keep it tight; cite the concrete numbers (frozen-at time, lag minutes, 550 counts,
+traceback/exception counts) the scripts return.
 
 ## Known failure modes (see references/failure_modes.md)
 
@@ -64,3 +76,4 @@ concrete numbers (frozen-at time, lag minutes, 550 counts) the scripts return.
 - `downloading-not-producing` — data downloaded but not processed (processing floor).
 - `pyart-shape-mismatch` — fields in a scan have inconsistent ray counts.
 - `download-stalled` — generic stall (older builds that don't log the resume pointer).
+- `unclassified-errors` — non-benign tracebacks no known fingerprint explains; investigate.

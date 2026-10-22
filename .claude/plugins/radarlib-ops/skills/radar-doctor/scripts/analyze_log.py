@@ -38,6 +38,20 @@ def _obs_to_dt(s):  # 20261012T173138Z
         return None
 
 
+def _normalize_err(msg):
+    """Collapse variable tokens (files, volume ids, timestamps, numbers) so the same
+    error from different volumes aggregates into one census row."""
+    msg = msg.strip()
+    msg = re.sub(r"[A-Z0-9]+_\d{3,4}_\d{1,2}_[A-Z]+_\d{8}T\d{6}Z(?:\.BUFR)?", "<FILE>", msg)
+    msg = re.sub(r"[A-Z0-9]+_\d{3,4}_\d{1,2}_\d{4}-\d{2}-\d{2}T[0-9:+\-]+", "<VOL>", msg)
+    msg = re.sub(r"\d{4}-\d{2}-\d{2}[T ][0-9:.+\-]+", "<TS>", msg)
+    msg = re.sub(r"/\S+", "<PATH>", msg)
+    msg = re.sub(r"\{[^}]*\}", "{..}", msg)
+    msg = re.sub(r"\(\d+(?:, \d+)*\)", "(..)", msg)
+    msg = re.sub(r"\b\d+\b", "N", msg)
+    return msg.strip()
+
+
 def scan(path):
     """Single streaming pass over the log collecting everything we need."""
     d = {
@@ -55,11 +69,17 @@ def scan(path):
         "tracebacks": 0, "benign_tb": 0,
         "restarts": 0,
         "last_download_ts": None, "last_netcdf_ts": None, "last_cog_ts": None,
+        "error_msgs": Counter(),   # normalized ERROR-level log messages -> count
+        "exc_types": Counter(),    # exception class names from tracebacks -> count
     }
     resume_re = re.compile(r"minus 15 min: ([0-9T:+\-]+)")
     proc_re = re.compile(r"Processing complete: (\d+) succeeded, (\d+) failed")
     attempt_re = re.compile(r"attempt (\d+/\d+)")
     missing_re = re.compile(r"incomplete, missing: \{([^}]*)\}")
+    # An ERROR log line: "<ts> [RADAR|ERROR] module - <message>"
+    err_re = re.compile(r"\|ERROR\]\s+\S+\s+-\s+(.*)$")
+    # A traceback's final exception line (not timestamped): "pkg.mod.SomeError: msg"
+    exc_re = re.compile(r"^([A-Za-z_][\w.]*(?:Error|Exception|Warning)):")
 
     with open(path, "r", errors="replace") as fh:
         for line in fh:
@@ -126,6 +146,16 @@ def scan(path):
                 d["tracebacks"] += 1
             if "FilterFieldsMissingError" in line:
                 d["benign_tb"] += 1
+            # Census every ERROR-level log line (normalized) so novel/unanticipated
+            # Python errors surface even when no known fingerprint matches.
+            if "|ERROR]" in line:
+                em = err_re.search(line)
+                if em:
+                    d["error_msgs"][_normalize_err(em.group(1))] += 1
+            # Capture the exception class from a traceback's final line.
+            ex = exc_re.match(line)
+            if ex:
+                d["exc_types"][ex.group(1).split(".")[-1]] += 1
     return d
 
 
@@ -233,6 +263,18 @@ def classify(d):
             evidence=f"{d['benign_tb']} FilterFieldsMissingError tracebacks — expected retry for "
                      f"incomplete volumes awaiting RHOHV; not a fault.",
             action="None."))
+
+    # Always watch for raised Python errors. Flag any that the known modes above do
+    # NOT already explain, so a novel/unanticipated error is never silently missed.
+    explained = any(f["mode"] in ("poison-incomplete-volume", "pyart-shape-mismatch",
+                                  "downloading-not-producing") for f in findings)
+    top_errs = [m for m, _ in d["error_msgs"].most_common(3)]
+    if real_tb > 0 and not explained:
+        findings.append(dict(
+            mode="unclassified-errors", severity="degraded", confidence="medium",
+            evidence=f"{real_tb} non-benign traceback(s); top ERROR(s): " + "; ".join(top_errs) +
+                     (f"  exc_types={dict(d['exc_types'])}" if d["exc_types"] else ""),
+            action="Investigate these raised errors — no known failure fingerprint explains them."))
     return findings, dict(frozen_run=frozen_run, frozen_val=frozen_val, tail_frozen=tail_frozen,
                           real_tracebacks=real_tb)
 
@@ -279,6 +321,10 @@ def main():
                                backfill_scans=d["backfill_scans"], ftp_550=d["ftp_550"],
                                restarts=d["restarts"], real_tracebacks=extra["real_tracebacks"]),
                    frozen_pointer=extra["frozen_val"] if extra["tail_frozen"] else None,
+                   raised_errors=dict(tracebacks=d["tracebacks"], benign=d["benign_tb"],
+                                      real=extra["real_tracebacks"],
+                                      exc_types=dict(d["exc_types"]),
+                                      top=d["error_msgs"].most_common(8)),
                    findings=findings)
         print(json.dumps(out, indent=2))
         return code
@@ -302,6 +348,15 @@ def main():
         print(f"  {tag} [{f['mode']}]  ({f['confidence']} confidence)")
         print(f"       {f['evidence']}")
         print(f"       → {f['action']}")
+    # Always surface the raised-error census (even when a mode already explains them).
+    print(f"{'-'*72}")
+    print(f"  Raised errors : {d['tracebacks']} tracebacks ({extra['real_tracebacks']} non-benign)"
+          + (f", exc_types={dict(d['exc_types'])}" if d["exc_types"] else ""))
+    if d["error_msgs"]:
+        for msg, n in d["error_msgs"].most_common(5):
+            print(f"      {n:5d} x  {msg[:92]}")
+    else:
+        print("      (no ERROR-level lines)")
     print(f"{'='*72}")
     return code
 

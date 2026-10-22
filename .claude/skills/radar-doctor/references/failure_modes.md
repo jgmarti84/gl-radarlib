@@ -35,9 +35,21 @@ fields of the same scan exist.
 **Root cause:** `increment_retry_count`/`mark_download_permanently_failed` update the
 `downloads` row `WHERE filename=?`, but a never-downloaded missing field has no row →
 UPDATE hits 0 rows → counter stuck at 0 → abandonment never fires → volume retried
-forever. Compounded by ~2h BUFR retention deleting the volume's other fields.
-**Fix (pending):** persist the retry counter for never-downloaded fields so they are
-abandoned after N attempts.
+forever. Also `_retry_incomplete_volumes` re-flagged the volume `complete+pending` and
+reset product generation *every cycle* unconditionally, forcing a failed re-decode each
+cycle. Compounded by ~2h BUFR retention deleting the volume's fields.
+**Secondary symptom — `No BUFR files could be decoded` (ValueError, often the top raised
+error):** does NOT mean incomplete volumes skip products. Partial generation IS the design
+— a fresh incomplete volume is processed with its available fields (`Will generate raw
+COGs for available fields: {..}`) and re-rendered when it completes. This error only means
+the volume has *zero* decodable BUFRs left — the available-field BUFRs were cleaned up
+(~2h retention) before this week-old, un-abandonable volume was (endlessly) reprocessed.
+So: lots of `No BUFR files` + a week-old `incomplete, missing` volume = poison volume, not
+a partial-generation defect.
+**Fix:** `fix/incomplete-volume-retry-abandon` (commit 6c96886) — `increment_retry_count`
+upserts so the counter persists → field abandoned after N; `mark_volume_abandoned()` +
+`get_incomplete_volumes` excludes `status='abandoned'`; `_retry_incomplete_volumes` only
+re-queues/resets products when a field was actually recovered (else abandons the volume).
 
 ## 4. downloading-not-producing  (DEGRADED)
 **Fingerprint:** many `Downloaded` lines but ~0 `Successfully saved NetCDF` / `raw COG`
@@ -60,7 +72,19 @@ sweeps → 5040 vs 4680 rays). `_align_field_to_reference` aligns gates, not ray
 but the specific mode can't be pinned (e.g. an older build that doesn't log the resume
 pointer). Treat as a download stall; confirm with ftp_check + state_inspect.
 
+## Always census raised Python errors
+Pointer/download signals don't tell the whole story — real faults often surface only as
+exceptions raised deep in processing/product generation. `analyze_log.py` always reports a
+**Raised errors** census (traceback count, exception classes, top normalized ERROR lines)
+and an `unclassified-errors` finding for non-benign tracebacks no fingerprint explains.
+Read it every time; a new/unexpected exception type is a signal to investigate, not to
+force into an existing mode. The `No BUFR files could be decoded` case above is a good
+example of why: it's a `ValueError` whose meaning is the opposite of what it looks like.
+
 ## Benign (not faults)
 - `FilterFieldsMissingError: Skipping ... COLMAX: filter field(s) ['RHOHV'] not yet
   present in incomplete volume. Will retry when volume is complete.` — expected retry
   while a volume is still arriving. Appears as a traceback but is caught.
+- `CPLE_NotSupported ... COG does not support creation option TILED` — GDAL warning.
+- `Campo de reflectividad vertical inexistente`, `Field 'RHOHV' not found ... No gates
+  excluded`, best-effort COLMAX/COG without RHOHV — handled degraded-mode warnings.
