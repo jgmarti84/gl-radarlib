@@ -85,6 +85,7 @@ class TestRetryCounterAndAbandon:
 
     def _tracker(self, tmp_path):
         from radarlib.state import SQLiteStateTracker
+
         return SQLiteStateTracker(tmp_path / "state.db")
 
     def test_retry_counter_persists_for_never_downloaded_field(self, tmp_path):
@@ -92,9 +93,16 @@ class TestRetryCounterAndAbandon:
         f = "RMA8_0315_02_WRAD_20261015T071206Z.BUFR"
         assert t.get_retry_count_for_failed_file(f) == 0  # no row yet
         for expected in (1, 2, 3):
-            t.increment_retry_count(f, "550", remote_path="/L2/x/" + f, radar_name="RMA8",
-                                    strategy="0315", vol_nr="02", field_type="WRAD",
-                                    observation_datetime="2026-10-15T07:12:06+00:00")
+            t.increment_retry_count(
+                f,
+                "550",
+                remote_path="/L2/x/" + f,
+                radar_name="RMA8",
+                strategy="0315",
+                vol_nr="02",
+                field_type="WRAD",
+                observation_datetime="2026-10-15T07:12:06+00:00",
+            )
             assert t.get_retry_count_for_failed_file(f) == expected
 
     def test_permanently_failed_applies_once_row_exists(self, tmp_path):
@@ -103,6 +111,7 @@ class TestRetryCounterAndAbandon:
         t.increment_retry_count(f, "550", remote_path="/L2/x/" + f)  # creates the row
         t.mark_download_permanently_failed(f)
         import sqlite3
+
         con = sqlite3.connect(str(tmp_path / "state.db"))
         assert con.execute("SELECT permanently_failed FROM downloads WHERE filename=?", (f,)).fetchone()[0] == 1
 

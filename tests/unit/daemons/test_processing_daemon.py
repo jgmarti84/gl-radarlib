@@ -220,18 +220,24 @@ class TestRetryIncompleteVolumes:
         return {
             "volume_id": "RMA8_0315_02_2026-10-15T07:12:06+00:00",
             "expected_fields": "VRAD,WRAD",
-            "strategy": "0315", "vol_nr": "02",
+            "strategy": "0315",
+            "vol_nr": "02",
             "observation_datetime": "2026-10-15T07:12:06+00:00",
         }
 
     def _fields_downloaded(self, tmp_path):
         # VRAD present, WRAD missing.
-        return [{"field_type": "VRAD",
-                 "remote_path": "/L2/RMA8/2026/10/15/07/1206/RMA8_0315_02_VRAD_20261015T071206Z.BUFR",
-                 "local_path": str(tmp_path / "bufr" / "RMA8_0315_02_VRAD_20261015T071206Z.BUFR")}]
+        return [
+            {
+                "field_type": "VRAD",
+                "remote_path": "/L2/RMA8/2026/10/15/07/1206/RMA8_0315_02_VRAD_20261015T071206Z.BUFR",
+                "local_path": str(tmp_path / "bufr" / "RMA8_0315_02_VRAD_20261015T071206Z.BUFR"),
+            }
+        ]
 
     def _daemon(self, mock_tracker_class, cfg, tmp_path, retry_count):
         from radarlib.io.ftp import FTPError
+
         tr = MagicMock()
         tr.get_incomplete_volumes.return_value = [self._inc_vol()]
         tr.get_incomplete_volumes_fields.return_value = self._fields_downloaded(tmp_path)
@@ -276,7 +282,9 @@ class TestRetryIncompleteVolumes:
 
         def fake_download(remote, local):
             from pathlib import Path
+
             Path(local).write_bytes(b"BUFR")
+
         client = MagicMock()
         client.download_file.side_effect = fake_download
         mock_ftp.return_value.__enter__.return_value = client

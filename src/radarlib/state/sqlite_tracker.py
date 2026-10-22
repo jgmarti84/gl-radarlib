@@ -474,8 +474,20 @@ class SQLiteStateTracker:
                  last_retry_error, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'failed', 1, ?, ?, ?)
                 """,
-                (filename, remote_path or filename, local_path, now, radar_name, strategy,
-                 vol_nr, field_type, observation_datetime, error_msg, now, now),
+                (
+                    filename,
+                    remote_path or filename,
+                    local_path,
+                    now,
+                    radar_name,
+                    strategy,
+                    vol_nr,
+                    field_type,
+                    observation_datetime,
+                    error_msg,
+                    now,
+                    now,
+                ),
             )
             new_count = 1
         else:
