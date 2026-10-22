@@ -424,13 +424,32 @@ class SQLiteStateTracker:
         row = cursor.fetchone()
         return row[0] if row else 0
 
-    def increment_retry_count(self, filename: str, error_msg: str) -> int:
+    def increment_retry_count(
+        self,
+        filename: str,
+        error_msg: str,
+        remote_path: Optional[str] = None,
+        local_path: Optional[str] = None,
+        radar_name: Optional[str] = None,
+        strategy: Optional[str] = None,
+        vol_nr: Optional[str] = None,
+        field_type: Optional[str] = None,
+        observation_datetime: Optional[str] = None,
+    ) -> int:
         """
         Increment the retry attempt count for a failed file.
+
+        A missing field that was never downloaded has no row in ``downloads``, so a
+        bare UPDATE would affect 0 rows and the counter would never advance (the
+        counter stayed pinned at 0, so permanently-missing fields were retried
+        forever). This upserts: it creates a 'failed' row (using the metadata passed
+        by the caller) the first time, then increments it on subsequent calls.
 
         Args:
             filename: Name of the file
             error_msg: Error message from the failed download attempt
+            remote_path, local_path, radar_name, strategy, vol_nr, field_type,
+            observation_datetime: metadata used only when the row must be created.
 
         Returns:
             New retry attempt count after increment
@@ -439,28 +458,54 @@ class SQLiteStateTracker:
         cursor = conn.cursor()
         now = datetime.now(timezone.utc).isoformat()
 
-        # Get current count
         cursor.execute(
             "SELECT retry_attempt_count FROM downloads WHERE filename = ?",
             (filename,),
         )
         row = cursor.fetchone()
-        current_count = row[0] if row else 0
-        new_count = current_count + 1
 
-        # Increment count and update last error
-        cursor.execute(
-            """
-            UPDATE downloads
-            SET retry_attempt_count = ?, last_retry_error = ?, updated_at = ?
-            WHERE filename = ?
-            """,
-            (new_count, error_msg, now, filename),
-        )
+        if row is None:
+            # Never-downloaded missing field — create a 'failed' row so the counter persists.
+            cursor.execute(
+                """
+                INSERT INTO downloads
+                (filename, remote_path, local_path, downloaded_at, radar_name, strategy,
+                 vol_nr, field_type, observation_datetime, status, retry_attempt_count,
+                 last_retry_error, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'failed', 1, ?, ?, ?)
+                """,
+                (filename, remote_path or filename, local_path, now, radar_name, strategy,
+                 vol_nr, field_type, observation_datetime, error_msg, now, now),
+            )
+            new_count = 1
+        else:
+            new_count = (row[0] or 0) + 1
+            cursor.execute(
+                """
+                UPDATE downloads
+                SET retry_attempt_count = ?, last_retry_error = ?, updated_at = ?, status = 'failed'
+                WHERE filename = ?
+                """,
+                (new_count, error_msg, now, filename),
+            )
 
         conn.commit()
         logger.debug(f"Incremented retry count for '{filename}' to {new_count}: {error_msg}")
         return new_count
+
+    def mark_volume_abandoned(self, volume_id: str) -> None:
+        """Mark an incomplete volume as abandoned (terminal) so it is no longer
+        retried — used when every missing field is permanently unavailable (550).
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).isoformat()
+        cursor.execute(
+            "UPDATE volume_processing SET status = 'abandoned', updated_at = ? WHERE volume_id = ?",
+            (now, volume_id),
+        )
+        conn.commit()
+        logger.info(f"Marked volume '{volume_id}' as abandoned (all missing fields permanently unavailable)")
 
     def mark_download_permanently_failed(self, filename: str) -> None:
         """
@@ -1017,7 +1062,7 @@ class SQLiteStateTracker:
         cursor.execute(
             """
             SELECT * FROM volume_processing
-            WHERE is_complete = 0
+            WHERE is_complete = 0 AND (status IS NULL OR status != 'abandoned')
             """
         )
         return [dict(row) for row in cursor.fetchall()]

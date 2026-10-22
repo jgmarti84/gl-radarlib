@@ -365,6 +365,11 @@ class ProcessingDaemon:
                 remote_dir = str(Path(fields_downloaded[0]["remote_path"]).parent)
                 local_dir = Path(fields_downloaded[0]["local_path"]).parent
 
+                # Track, per volume: whether we recovered any field this cycle, and
+                # whether every still-missing field has been permanently abandoned.
+                recovered = False
+                all_missing_abandoned = True
+
                 with RadarFTPClientAsync(
                     self.config.ftp_host,
                     self.config.ftp_user,
@@ -394,6 +399,10 @@ class ProcessingDaemon:
                             self.state_tracker.mark_download_permanently_failed(file_name)
                             continue
 
+                        # This field is still in play (will be retried or recovered),
+                        # so the volume is not yet fully abandoned.
+                        all_missing_abandoned = False
+
                         logger.info(
                             f"Retrying download of missing field '{file_name}' "
                             f"for incomplete volume {inc_vol['volume_id']} "
@@ -420,10 +429,22 @@ class ProcessingDaemon:
                                 observation_datetime=inc_vol["observation_datetime"],
                             )
                             logger.info(f"[{self.config.radar_name}] Successfully recovered missing field: {file_name}")
+                            recovered = True
 
                         except FTPError as e:
-                            # Increment retry attempt count
-                            self.state_tracker.increment_retry_count(file_name, str(e))
+                            # Increment retry attempt count (upsert — persists even for a
+                            # field that was never downloaded, so it is abandoned after N).
+                            self.state_tracker.increment_retry_count(
+                                file_name,
+                                str(e),
+                                remote_path=remote_path,
+                                local_path=str(local_path),
+                                radar_name=self.config.radar_name,
+                                strategy=inc_vol["strategy"],
+                                vol_nr=inc_vol["vol_nr"],
+                                field_type=field,
+                                observation_datetime=inc_vol["observation_datetime"],
+                            )
 
                             # Log the specific error type
                             if "550" in str(e):
@@ -434,23 +455,30 @@ class ProcessingDaemon:
                             else:
                                 logger.warning(f"FTP error retrying {file_name}: {e} (attempt {retry_count + 1})")
 
-                conn = self.state_tracker._get_connection()
-                cursor = conn.cursor()
-
-                now = datetime.now(timezone.utc).isoformat()
-                cursor.execute(
-                    """
-                    UPDATE volume_processing
-                    SET status = 'pending', is_complete = 1, updated_at = ?
-                    WHERE volume_id = ?
-                    """,
-                    (now, inc_vol["volume_id"]),
-                )
-                conn.commit()
-
-                # Reset product generation status so the product daemon
-                # will regenerate COGs with the newly available fields.
-                self.state_tracker.reset_product_generation_for_volume(inc_vol["volume_id"])
+                if recovered or not fields_to_download:
+                    # A missing field was recovered (or nothing is missing): re-queue the
+                    # volume so the product daemon regenerates COGs with the new fields.
+                    # Only do this on an actual change — previously this ran every cycle
+                    # unconditionally, which forced endless reprocessing of volumes whose
+                    # BUFRs had already been cleaned up ("No BUFR files could be decoded").
+                    conn = self.state_tracker._get_connection()
+                    cursor = conn.cursor()
+                    now = datetime.now(timezone.utc).isoformat()
+                    cursor.execute(
+                        """
+                        UPDATE volume_processing
+                        SET status = 'pending', is_complete = 1, updated_at = ?
+                        WHERE volume_id = ?
+                        """,
+                        (now, inc_vol["volume_id"]),
+                    )
+                    conn.commit()
+                    self.state_tracker.reset_product_generation_for_volume(inc_vol["volume_id"])
+                elif all_missing_abandoned:
+                    # Every missing field is permanently unavailable (550) — give up on this
+                    # volume so it stops being retried and no longer spams failures.
+                    self.state_tracker.mark_volume_abandoned(inc_vol["volume_id"])
+                # else: still waiting on retriable fields — leave the volume as-is.
 
         except Exception as e:
             logger.error(f"Error retrying incomplete volumes: {e}", exc_info=True)

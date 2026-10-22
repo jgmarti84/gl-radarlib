@@ -200,3 +200,86 @@ class TestProcessingDaemonIntegration:
 
         mock_tracker_class.assert_called_once_with(tmp_path / "state.db")
         assert daemon.state_tracker == mock_tracker
+
+
+class TestRetryIncompleteVolumes:
+    """The retry/abandon logic for incomplete volumes (missing-field 550 handling)."""
+
+    @pytest.fixture
+    def cfg(self, tmp_path):
+        return ProcessingDaemonConfig(
+            local_bufr_dir=tmp_path / "bufr",
+            local_netcdf_dir=tmp_path / "netcdf",
+            state_db=tmp_path / "state.db",
+            volume_types={"0315": {"02": ["VRAD", "WRAD"]}},
+            radar_name="RMA8",
+            incomplete_field_max_retries=3,
+        )
+
+    def _inc_vol(self):
+        return {
+            "volume_id": "RMA8_0315_02_2026-10-15T07:12:06+00:00",
+            "expected_fields": "VRAD,WRAD",
+            "strategy": "0315", "vol_nr": "02",
+            "observation_datetime": "2026-10-15T07:12:06+00:00",
+        }
+
+    def _fields_downloaded(self, tmp_path):
+        # VRAD present, WRAD missing.
+        return [{"field_type": "VRAD",
+                 "remote_path": "/L2/RMA8/2026/10/15/07/1206/RMA8_0315_02_VRAD_20261015T071206Z.BUFR",
+                 "local_path": str(tmp_path / "bufr" / "RMA8_0315_02_VRAD_20261015T071206Z.BUFR")}]
+
+    def _daemon(self, mock_tracker_class, cfg, tmp_path, retry_count):
+        from radarlib.io.ftp import FTPError
+        tr = MagicMock()
+        tr.get_incomplete_volumes.return_value = [self._inc_vol()]
+        tr.get_incomplete_volumes_fields.return_value = self._fields_downloaded(tmp_path)
+        tr.get_retry_count_for_failed_file.return_value = retry_count
+        mock_tracker_class.return_value = tr
+        d = ProcessingDaemon(cfg)
+        return d, tr, FTPError
+
+    @patch("radarlib.daemons.processing_daemon.RadarFTPClientAsync")
+    @patch("radarlib.daemons.processing_daemon.SQLiteStateTracker")
+    @pytest.mark.asyncio
+    async def test_abandons_volume_when_missing_field_exhausted(self, mock_tc, mock_ftp, cfg, tmp_path):
+        """At/after max retries the field is permanently failed and the volume abandoned,
+        and it is NOT re-queued as complete."""
+        d, tr, _ = self._daemon(mock_tc, cfg, tmp_path, retry_count=3)
+        await d._retry_incomplete_volumes()
+        tr.mark_download_permanently_failed.assert_called_once()
+        tr.mark_volume_abandoned.assert_called_once_with(self._inc_vol()["volume_id"])
+        tr.reset_product_generation_for_volume.assert_not_called()
+
+    @patch("radarlib.daemons.processing_daemon.RadarFTPClientAsync")
+    @patch("radarlib.daemons.processing_daemon.SQLiteStateTracker")
+    @pytest.mark.asyncio
+    async def test_still_retrying_does_not_abandon_or_requeue(self, mock_tc, mock_ftp, cfg, tmp_path):
+        """Below max, a 550 just increments the counter — no abandon, no re-queue."""
+        d, tr, FTPError = self._daemon(mock_tc, cfg, tmp_path, retry_count=1)
+        client = MagicMock()
+        client.download_file.side_effect = FTPError("550 not found")
+        mock_ftp.return_value.__enter__.return_value = client
+        await d._retry_incomplete_volumes()
+        tr.increment_retry_count.assert_called_once()
+        tr.mark_volume_abandoned.assert_not_called()
+        tr.reset_product_generation_for_volume.assert_not_called()
+
+    @patch("radarlib.daemons.processing_daemon.RadarFTPClientAsync")
+    @patch("radarlib.daemons.processing_daemon.SQLiteStateTracker")
+    @pytest.mark.asyncio
+    async def test_recovered_field_requeues_volume(self, mock_tc, mock_ftp, cfg, tmp_path):
+        """When the missing field is recovered, the volume is re-queued and products reset."""
+        d, tr, _ = self._daemon(mock_tc, cfg, tmp_path, retry_count=0)
+        (tmp_path / "bufr").mkdir(parents=True, exist_ok=True)
+
+        def fake_download(remote, local):
+            from pathlib import Path
+            Path(local).write_bytes(b"BUFR")
+        client = MagicMock()
+        client.download_file.side_effect = fake_download
+        mock_ftp.return_value.__enter__.return_value = client
+        await d._retry_incomplete_volumes()
+        tr.reset_product_generation_for_volume.assert_called_once_with(self._inc_vol()["volume_id"])
+        tr.mark_volume_abandoned.assert_not_called()

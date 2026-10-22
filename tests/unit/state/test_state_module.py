@@ -72,3 +72,57 @@ class TestFileTrackerNewLocation:
 
         assert tracker.is_downloaded("file1.BUFR")
         assert tracker.count() == 1
+
+
+class TestRetryCounterAndAbandon:
+    """Regression tests for the incomplete-volume retry-counter fix.
+
+    A missing field that was never downloaded has no `downloads` row, so the old
+    UPDATE-only counter stayed at 0 forever and the field (and its volume) were
+    retried indefinitely. The counter must now persist (upsert) and the volume must
+    be abandonable.
+    """
+
+    def _tracker(self, tmp_path):
+        from radarlib.state import SQLiteStateTracker
+        return SQLiteStateTracker(tmp_path / "state.db")
+
+    def test_retry_counter_persists_for_never_downloaded_field(self, tmp_path):
+        t = self._tracker(tmp_path)
+        f = "RMA8_0315_02_WRAD_20261015T071206Z.BUFR"
+        assert t.get_retry_count_for_failed_file(f) == 0  # no row yet
+        for expected in (1, 2, 3):
+            t.increment_retry_count(f, "550", remote_path="/L2/x/" + f, radar_name="RMA8",
+                                    strategy="0315", vol_nr="02", field_type="WRAD",
+                                    observation_datetime="2026-10-15T07:12:06+00:00")
+            assert t.get_retry_count_for_failed_file(f) == expected
+
+    def test_permanently_failed_applies_once_row_exists(self, tmp_path):
+        t = self._tracker(tmp_path)
+        f = "RMA8_0315_02_WRAD_20261015T071206Z.BUFR"
+        t.increment_retry_count(f, "550", remote_path="/L2/x/" + f)  # creates the row
+        t.mark_download_permanently_failed(f)
+        import sqlite3
+        con = sqlite3.connect(str(tmp_path / "state.db"))
+        assert con.execute("SELECT permanently_failed FROM downloads WHERE filename=?", (f,)).fetchone()[0] == 1
+
+    def test_abandon_after_max_retries_sequence(self, tmp_path):
+        """Simulate the daemon loop: 3 attempts, then abandon on the 4th."""
+        t = self._tracker(tmp_path)
+        f = "RMA8_0315_02_WRAD_20261015T071206Z.BUFR"
+        max_retries, abandoned_on = 3, None
+        for cycle in range(1, 6):
+            if t.get_retry_count_for_failed_file(f) >= max_retries:
+                t.mark_download_permanently_failed(f)
+                abandoned_on = cycle
+                break
+            t.increment_retry_count(f, "550", remote_path="/L2/x/" + f)
+        assert abandoned_on == 4
+
+    def test_mark_volume_abandoned_excluded_from_incomplete(self, tmp_path):
+        t = self._tracker(tmp_path)
+        vid = "RMA8_0315_02_2026-10-15T07:12:06+00:00"
+        t.register_volume(vid, "RMA8", "0315", "02", "2026-10-15T07:12:06+00:00", "VRAD,WRAD", False)
+        assert any(v["volume_id"] == vid for v in t.get_incomplete_volumes())
+        t.mark_volume_abandoned(vid)
+        assert not any(v["volume_id"] == vid for v in t.get_incomplete_volumes())
