@@ -27,3 +27,6 @@ docs/es/*.html
 docs/es/*.pdf
 
 .claude/
+
+# Secrets (real values live only on each machine; see .env.example)
+.env

@@ -31,6 +31,20 @@ cd my-python-library
 pip install -r requirements.txt
 ```
 
+### FTP credentials (`.env`)
+
+The genpro25 services read `FTP_USER` / `FTP_PASS` from a `.env` file next to
+`docker-compose.yml`. `genpro25.yml` intentionally keeps these empty — environment
+variables override YAML values (see `app/config.py`).
+
+```bash
+cp .env.example .env   # then fill in the real values
+chmod 600 .env
+```
+
+`.env` is gitignored: **never commit it**, and share it out-of-band (never via git).
+`docker compose` refuses to start the genpro25 services if `.env` is missing.
+
 ## Usage
 
 ### Date-Based FTP Daemon (NEW)
