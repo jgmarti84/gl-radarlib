@@ -13,6 +13,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA00"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -66,6 +67,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA1"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -117,6 +119,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA2"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -165,6 +168,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA3"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -213,6 +217,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA4"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -261,6 +266,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA5"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -309,6 +315,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA6"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -357,6 +364,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA7"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -405,6 +413,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA8"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -453,6 +462,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA9"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -501,6 +511,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA10"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -549,6 +560,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA11"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -597,6 +609,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA12"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -645,6 +658,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA13"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -693,6 +707,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA14"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -741,6 +756,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA15"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -789,6 +805,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA16"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -838,6 +855,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA17"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -887,6 +905,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA18"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -935,6 +954,7 @@ services:
       - ./genpro25.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "RMA20"
       STREAM_LOG_LEVEL: "DEBUG" # debug, info, etc...
@@ -982,6 +1002,7 @@ services:
       - ./genpro25_arX.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "AR5"
       STREAM_LOG_LEVEL: "INFO" # debug, info, etc...
@@ -1030,6 +1051,7 @@ services:
       - ./genpro25_arX.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "AR7"
       STREAM_LOG_LEVEL: "INFO" # debug, info, etc...
@@ -1078,6 +1100,7 @@ services:
       - ./genpro25_arX.yml:/workspace/app/genpro25.yml:ro # Read-only volume for genpro25 configuration
       - ./radarlib_overrides.json:/workspace/app/radarlib_overrides.json:ro # Read-only volume for radarlib overrides
       - ./scripts:/workspace/scripts:ro # Read-only diagnostic scripts
+    env_file: .env # FTP_USER / FTP_PASS — create from .env.example; never commit
     environment:
       RADAR_NAME: "AR8"
       STREAM_LOG_LEVEL: "INFO" # debug, info, etc...
