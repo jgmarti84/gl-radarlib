@@ -23,9 +23,9 @@
             //     "--host",
             //     "200.16.116.24",
             //     "--user",
-            //     "IMontamat",
+            //     "<FTP_USER from .env>",
             //     "--password",
-            //     "1m0nt",
+            //     "<FTP_PASS from .env>",
             //     "--radar",
             //     "RMA12"
             // ],

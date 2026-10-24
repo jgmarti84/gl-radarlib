@@ -142,6 +142,21 @@ local:
                     print(f"    {attr} = {getattr(config, attr, 'N/A')}")
             raise
 
+    def test_ftp_credentials_env_vars_override_yaml(self, mock_yaml_file, monkeypatch):
+        """FTP creds come from .env (env vars) and must win over genpro25.yml values."""
+        monkeypatch.setenv("GENPRO25_CONFIG", str(mock_yaml_file))
+        monkeypatch.setenv("FTP_USER", "env_user")
+        monkeypatch.setenv("FTP_PASS", "env_pass")
+
+        if "config" in sys.modules:
+            del sys.modules["config"]
+        sys.path.insert(0, str(APP_PATH))
+        import config
+
+        assert config.FTP_USER == "env_user"
+        assert config.FTP_PASS == "env_pass"
+        assert config.FTP_HOST == "ftp.example.com"  # untouched keys still come from YAML
+
 
 # class TestConfigMergingBug:
 #     """Test for the potential KeyError bug at line 85."""
