@@ -30,3 +30,14 @@ docs/es/*.pdf
 
 # Secrets (real values live only on each machine; see .env.example)
 .env
+
+# Local artifacts that must never be committed (prod logs, state DBs, dumps).
+# Anchored to the repo root on purpose: src/radarlib/io/bufr/... tracks .zip
+# sources that a global *.zip rule would hide in the future.
+/*.db
+/*.log.txt
+/*.zip
+/*.npz
+# Runtime evidence pulled from stage/operativo (see gl-platform) and personal scratch
+ops-data/
+local/
