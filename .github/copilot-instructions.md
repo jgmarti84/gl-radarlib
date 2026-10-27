@@ -1,5 +1,9 @@
 # radarlib — Copilot Instructions
 
+> **Start with [`AGENTS.md`](../AGENTS.md)** (repo root): the working rules for every
+> agent and human (branches, secrets, tests, PRs). This file is the detailed code
+> reference; if the two disagree, `AGENTS.md` wins.
+
 ## About This Repository
 radarlib is a **data producer** library and one of two repositories
 in the radar/meteorology system. It fetches raw radar data (BUFR format)
