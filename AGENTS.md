@@ -26,9 +26,10 @@ Its consumer is **gl-webmet25**, which indexes and serves these files.
 4. **Run tests in a container, not on your host** (commands below). Static checks
    (`docker compose config`, pre-commit) are fine on the host.
 5. **Don't delete files to tidy up.** Move them into the gitignored `local/` folder.
-6. **Every PR description says:** what changed and why; where it was tested; any
-   deployment notes, in order; whether `.env` needs new keys; and whether it changes
-   the **output contract** (below).
+6. **PR descriptions.** Agents always cover: what changed and why; where it was tested;
+   deployment notes, in order; new `.env` keys; and whether it changes the **output
+   contract** (below). For PRs written by people these are recommended, not required;
+   the ones worth never skipping are new `.env` keys and output-contract changes.
 
 ## Rules specific to this repo
 - **Output contract.** gl-webmet25 depends entirely on this repo's file formats and
