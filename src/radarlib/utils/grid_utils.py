@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Utilities for building gate-coordinate files from BUFR via FTP.
 
-This module provides `create_gate_coords_file` which locates a random
-BUFR file for a specified radar/strategy/vol_nr in a recent time window,
-downloads it, converts it to a small CFRadial NetCDF and writes the gate
-coordinates (x/y/z) as a compressed `.npz` file in `output_dir`.
+This module provides `create_gate_coords_file` which locates BUFR files for a
+specified radar/strategy/vol_nr in a recent time window, downloads a few of
+them, checks that independent files agree on the scan shape (sweeps, rays,
+gates, range axis) and writes the gate coordinates (x/y/z) of an agreeing file
+as a compressed `.npz` file in `output_dir`.
 
 The function reads FTP credentials from arguments or environment variables
 (`FTP_HOST`, `FTP_USER`, `FTP_PASS`) if not provided.
 """
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import random
@@ -18,7 +20,7 @@ import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -28,6 +30,32 @@ from radarlib.radar_grid import get_gate_coordinates
 from radarlib.radar_grid.utils import infer_blind_range_m
 
 logger = logging.getLogger(__name__)
+
+
+def _scan_signature(radar) -> tuple:
+    """Return the scan shape of a Py-ART radar as a hashable tuple.
+
+    The signature is ``(nsweeps, nrays, ngates, first_gate_m, gate_spacing_m)``.
+    Elevation angles are left out on purpose: they jitter by +-0.1 deg between
+    volumes of the same strategy and do not change the array shapes.
+    """
+    rng = np.asarray(radar.range["data"], dtype=float)
+    first_gate = int(round(float(rng[0]))) if rng.size else 0
+    spacing = int(round(float(rng[1] - rng[0]))) if rng.size > 1 else 0
+    return (int(radar.nsweeps), int(radar.nrays), int(radar.ngates), first_gate, spacing)
+
+
+def _extract_gate_payload(radar) -> dict:
+    """Gate coordinates and the scalars saved next to them in the ``.npz``."""
+    gate_x, gate_y, gate_z = get_gate_coordinates(radar)
+    return {
+        "gate_x": gate_x,
+        "gate_y": gate_y,
+        "gate_z": gate_z,
+        "blind_range_m": infer_blind_range_m(radar),
+        # lowest elevation, for the below-beam mask
+        "lowest_elev_deg": float(np.min(radar.fixed_angle["data"])),
+    }
 
 
 def create_gate_coords_file(
@@ -42,8 +70,15 @@ def create_gate_coords_file(
     lookback_hours: int = 72,
     max_download_attempts: int = 3,
     reference_dt: Optional[datetime] = None,
+    min_agreement: int = 2,
 ):
-    """Fetch one random BUFR file and save gate coordinates as compressed .npz.
+    """Fetch BUFR files and save gate coordinates as compressed .npz.
+
+    The gate coordinates (and the geometry built from them) are cached on disk
+    and reused indefinitely, so a single atypical scan (for example a volume
+    with a missing sweep) would corrupt every later product of that volume
+    type. To avoid that, the file is only written once ``min_agreement``
+    independent BUFR files share the same scan shape.
 
     Steps:
     - connect to FTP (credentials from args or env)
@@ -53,10 +88,12 @@ def create_gate_coords_file(
       for those specific fields are considered — this ensures the gate
       coordinates match the scan geometry of the fields that will actually
       be interpolated later
-    - pick one random BUFR file from those found
-    - download it to a temporary directory
-    - convert it to a pyart Radar object and write a small NetCDF file
-      into `output_dir` (so the generated netcdf is available)
+    - download candidates in random order, one at a time, to a temporary directory
+    - convert each to a pyart Radar object and compute its scan signature
+      (sweeps, rays, gates, range axis)
+    - stop as soon as `min_agreement` files share a signature; if the
+      candidates disagree and none reaches that count, raise instead of
+      guessing which one is the typical scan
     - extract gate coordinates with `radar_grid.get_gate_coordinates`
     - save gate coordinates as `{radar_name}_{strategy_name}_{vol_nr}_gate_coordinates.npz`
 
@@ -76,7 +113,15 @@ def create_gate_coords_file(
     ftp_host, ftp_user, ftp_pass : str, optional
         FTP credentials. Falls back to env vars FTP_HOST/FTP_USER/FTP_PASS.
     lookback_hours : int
-        How many hours back to search for BUFR files (default: 24).
+        How many hours back to search for BUFR files (default: 72).
+    max_download_attempts : int
+        The candidate pool holds up to ``2 * max_download_attempts`` files and
+        each one may be downloaded at most once (default pool: 6).
+    min_agreement : int
+        Number of BUFR files that must share the same scan signature
+        (default: 2). If every readable file agrees but fewer than
+        ``min_agreement`` could be read (a radar with very few recent
+        volumes), the file is still written, with a warning.
 
     Returns
     -------
@@ -135,7 +180,12 @@ def create_gate_coords_file(
         random.shuffle(candidates)
         last_error: Optional[Exception] = None
 
-        for attempt, (_, fname, remote_path) in enumerate(candidates[:max_download_attempts], start=1):
+        # signature -> number of files that produced it / coordinates of the first one
+        votes: Dict[tuple, int] = {}
+        payloads: Dict[tuple, dict] = {}
+        pool = len(candidates)
+
+        for attempt, (_, fname, remote_path) in enumerate(candidates, start=1):
             try:
                 with tempfile.TemporaryDirectory(prefix=f"bufr_{radar_name}_{vol_nr}_") as tmpdir:
                     tmpdir = Path(tmpdir)
@@ -143,7 +193,7 @@ def create_gate_coords_file(
                     logger.info(
                         "Attempt %d/%d: downloading %s to %s",
                         attempt,
-                        min(max_download_attempts, len(candidates)),
+                        pool,
                         remote_path,
                         local_bufr,
                     )
@@ -151,53 +201,76 @@ def create_gate_coords_file(
 
                     # convert to pyart Radar (in-memory)
                     radar = bufr_paths_to_pyart([str(local_bufr)], save_path=None)
-
-                    # ensure output dir exists
-                    out = Path(output_dir)
-                    out.mkdir(parents=True, exist_ok=True)
-
-                    # extract gate coordinates and save
-                    gate_x, gate_y, gate_z = get_gate_coordinates(radar)
-                    out_fname = f"{radar_name}_{strategy_name}_{vol_nr}_gate_coordinates.npz"
-                    out_path = out / out_fname
-
-                    # blind range
-                    blind_range_m = infer_blind_range_m(radar)
-
-                    # Extraer elevación mínima para below-beam mask
-                    lowest_elev_deg = float(np.min(radar.fixed_angle["data"]))
-
-                    np.savez_compressed(
-                        out_path,
-                        gate_x=gate_x,
-                        gate_y=gate_y,
-                        gate_z=gate_z,
-                        blind_range_m=blind_range_m,
-                        lowest_elev_deg=lowest_elev_deg,
-                    )
-
-                    logger.info("Wrote gate coordinates to %s", out_path)
-                    return out_path
+                    signature = _scan_signature(radar)
+                    if signature not in payloads:
+                        payloads[signature] = _extract_gate_payload(radar)
+                    del radar
+                    gc.collect()
             except Exception as e:
                 last_error = e
                 logger.warning(
                     "Attempt %d/%d failed for %s: %s. %s",
                     attempt,
-                    min(max_download_attempts, len(candidates)),
+                    pool,
                     fname,
                     e,
-                    (
-                        "Trying next candidate..."
-                        if attempt < min(max_download_attempts, len(candidates))
-                        else "No more candidates."
-                    ),
+                    "Trying next candidate..." if attempt < pool else "No more candidates.",
                 )
+                continue
 
-        # All attempts exhausted
+            votes[signature] = votes.get(signature, 0) + 1
+            logger.info(
+                "%s %s-%s: %s has scan signature %s (nsweeps, nrays, ngates, first_gate_m, spacing_m); "
+                "%d/%d agreeing file(s)",
+                radar_name,
+                strategy_name,
+                vol_nr,
+                fname,
+                signature,
+                votes[signature],
+                min_agreement,
+            )
+            if votes[signature] >= min_agreement:
+                return _write_gate_coords(output_dir, radar_name, strategy_name, vol_nr, payloads[signature])
+
+        readable = sum(votes.values())
+        if len(votes) == 1 and 0 < readable < min_agreement:
+            # Everything we could read agrees, there just are too few files (quiet radar).
+            (signature,) = votes
+            logger.warning(
+                "%s %s-%s: only %d readable BUFR file(s) found, fewer than min_agreement=%d; "
+                "writing gate coordinates from them anyway (signature %s)",
+                radar_name,
+                strategy_name,
+                vol_nr,
+                readable,
+                min_agreement,
+                signature,
+            )
+            return _write_gate_coords(output_dir, radar_name, strategy_name, vol_nr, payloads[signature])
+
+        if votes:
+            raise RuntimeError(
+                f"No agreement on the scan shape for {radar_name} {strategy_name} {vol_nr}: "
+                f"{readable} readable file(s), signatures={dict(votes)} "
+                f"(need {min_agreement} matching). Not writing gate coordinates; will retry later."
+            )
+
+        # Nothing could be read at all
         raise RuntimeError(
-            f"Failed to create gate coordinates after {min(max_download_attempts, len(candidates))} "
+            f"Failed to create gate coordinates after {pool} "
             f"attempts for {radar_name} {strategy_name} {vol_nr}: {last_error}"
         ) from last_error
+
+
+def _write_gate_coords(output_dir: str, radar_name: str, strategy_name: str, vol_nr: str, payload: dict) -> Path:
+    """Write the gate coordinates ``.npz`` and return its path."""
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    out_path = out / f"{radar_name}_{strategy_name}_{vol_nr}_gate_coordinates.npz"
+    np.savez_compressed(out_path, **payload)
+    logger.info("Wrote gate coordinates to %s", out_path)
+    return out_path
 
 
 if __name__ == "__main__":
