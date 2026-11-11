@@ -390,3 +390,125 @@ class TestProductGenerationDaemonRawCog:
             daemon = ProductGenerationDaemon(raw_cog_config)
 
         assert callable(getattr(daemon, "_generate_raw_cog_products_sync", None))
+
+
+class TestProductGenerationNoOutputVisibility:
+    """A volume that writes no product must not be logged as a plain success, and a volume
+    type that keeps producing nothing must raise a searchable ``NO OUTPUT`` error."""
+
+    @pytest.fixture
+    def daemon(self, tmp_path):
+        from radarlib.daemons.product_daemon import ProductGenerationDaemon
+
+        config = ProductGenerationDaemonConfig(
+            local_netcdf_dir=tmp_path / "netcdf",
+            local_product_dir=tmp_path / "products",
+            state_db=tmp_path / "state.db",
+            volume_types={"0315": {"01": ["DBZH"]}},
+            radar_name="RMA5",
+            product_type="raw_cog",
+            no_output_alert_threshold=3,
+        )
+        with patch("radarlib.daemons.product_daemon.SQLiteStateTracker"):
+            with patch.object(ProductGenerationDaemon, "_init_geometry", return_value=None):
+                d = ProductGenerationDaemon(config)
+        d.state_tracker = MagicMock()
+        netcdf = tmp_path / "netcdf" / "fake.nc"
+        netcdf.parent.mkdir(parents=True, exist_ok=True)
+        netcdf.write_bytes(b"fake")
+        d._netcdf = netcdf
+        return d
+
+    def _volume(self, daemon, vol_nr="01", complete=1, vid="v1"):
+        return {
+            "volume_id": vid,
+            "netcdf_path": str(daemon._netcdf),
+            "is_complete": complete,
+            "strategy": "0315",
+            "vol_nr": vol_nr,
+        }
+
+    def _run(self, daemon, volume, **patch_kwargs):
+        import asyncio
+
+        with patch.object(daemon, "_ensure_geometry", return_value=MagicMock()):
+            with patch.object(daemon, "_generate_raw_cog_products_sync", **patch_kwargs):
+                return asyncio.run(daemon._generate_product_async(volume))
+
+    def test_default_threshold(self, tmp_path):
+        config = ProductGenerationDaemonConfig(
+            local_netcdf_dir=tmp_path / "n",
+            local_product_dir=tmp_path / "p",
+            state_db=tmp_path / "s.db",
+            volume_types={},
+            radar_name="RMA1",
+        )
+        assert config.no_output_alert_threshold == 5
+
+    def test_zero_products_is_warned_not_reported_as_success(self, daemon, caplog):
+        with caplog.at_level("INFO"):
+            result = self._run(daemon, self._volume(daemon), return_value=0)
+        assert result is True  # status handling is unchanged: the volume is still marked completed
+        assert "Generated 0 raw_cog products" in caplog.text
+        assert "Successfully generated" not in caplog.text
+
+    def test_success_reports_the_count(self, daemon, caplog):
+        with caplog.at_level("INFO"):
+            self._run(daemon, self._volume(daemon), return_value=4)
+        assert "Successfully generated raw_cog for complete volume v1 (4 product(s))" in caplog.text
+        assert "Generated 0" not in caplog.text
+
+    def test_unknown_count_keeps_the_old_message(self, daemon, caplog):
+        """Callers that do not return a count (mocks, other product types) are treated as success."""
+        with caplog.at_level("INFO"):
+            self._run(daemon, self._volume(daemon))  # MagicMock return value
+        assert "Successfully generated raw_cog for complete volume v1" in caplog.text
+        assert "product(s))" not in caplog.text
+
+    def test_alert_after_threshold_and_repeats(self, daemon, caplog):
+        with caplog.at_level("INFO"):
+            for i in range(1, 7):
+                self._run(daemon, self._volume(daemon, vid=f"v{i}"), return_value=0)
+                alerts = caplog.text.count("NO OUTPUT")
+                assert alerts == (i // 3), f"after volume {i}"
+        assert "[RMA5 0315-01] NO OUTPUT: 3 consecutive complete volume(s)" in caplog.text
+        assert "NO OUTPUT: 6 consecutive" in caplog.text
+
+    def test_a_good_volume_resets_the_streak(self, daemon, caplog):
+        with caplog.at_level("INFO"):
+            for i in range(3):
+                self._run(daemon, self._volume(daemon, vid=f"bad{i}"), return_value=0)
+            self._run(daemon, self._volume(daemon, vid="good"), return_value=2)
+            assert "producing again after 3 consecutive volume(s) without output" in caplog.text
+            caplog.clear()
+            for i in range(2):
+                self._run(daemon, self._volume(daemon, vid=f"bad2{i}"), return_value=0)
+        assert "NO OUTPUT" not in caplog.text
+
+    def test_incomplete_volumes_do_not_count(self, daemon, caplog):
+        with caplog.at_level("INFO"):
+            for i in range(6):
+                self._run(daemon, self._volume(daemon, complete=0, vid=f"inc{i}"), return_value=0)
+        assert "NO OUTPUT" not in caplog.text
+
+    def test_volume_types_are_tracked_separately(self, daemon, caplog):
+        with caplog.at_level("INFO"):
+            for i in range(2):
+                self._run(daemon, self._volume(daemon, vol_nr="01", vid=f"a{i}"), return_value=0)
+            for i in range(2):
+                self._run(daemon, self._volume(daemon, vol_nr="02", vid=f"b{i}"), return_value=0)
+        assert "NO OUTPUT" not in caplog.text
+
+    def test_exceptions_count_towards_the_streak(self, daemon, caplog):
+        with caplog.at_level("INFO"):
+            for i in range(3):
+                result = self._run(daemon, self._volume(daemon, vid=f"e{i}"), side_effect=RuntimeError("boom"))
+                assert result is False
+        assert "NO OUTPUT: 3 consecutive" in caplog.text
+
+    def test_threshold_zero_disables_the_alert(self, daemon, caplog):
+        daemon.config.no_output_alert_threshold = 0
+        with caplog.at_level("INFO"):
+            for i in range(10):
+                self._run(daemon, self._volume(daemon, vid=f"z{i}"), return_value=0)
+        assert "NO OUTPUT" not in caplog.text
