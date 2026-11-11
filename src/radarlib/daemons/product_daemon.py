@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from pyart.config import get_field_name
@@ -73,6 +73,9 @@ class ProductGenerationDaemonConfig:
         tops_and_cores_output_dir: Directory to write tops & cores GeoJSON files.
         stuck_volume_timeout_minutes: Minutes to wait before resetting a stuck volume from
                                       'processing' status back to 'pending' for retry
+        no_output_alert_threshold: Log an ERROR (``NO OUTPUT``) when this many complete
+            volumes of the same strategy/volume number in a row produced no product, and
+            again every that many volumes while it lasts. ``0`` disables the alert.
     """
 
     local_netcdf_dir: Path
@@ -95,6 +98,7 @@ class ProductGenerationDaemonConfig:
     nccube_fields: Optional[List[str]] = None
     nccube_output_dir: Optional[Path] = None
     stuck_volume_timeout_minutes: int = 60
+    no_output_alert_threshold: int = 5
     geometry_types: Optional[Dict[str, Dict[str, Any]]] = None
     field_value_masks: Optional[Dict[str, Dict[str, float]]] = None
     ftp_host: Optional[str] = config.FTP_HOST
@@ -175,6 +179,8 @@ class ProductGenerationDaemon:
             "volumes_processed": 0,
             "volumes_failed": 0,
         }
+        # Consecutive complete volumes without any product, per (strategy, vol_nr).
+        self._no_output_streak: Dict[Tuple[Optional[str], Optional[str]], int] = {}
         # gemoetry for Geotiff generation
         # self.geometry = self.init_geometry(config.geometry)
         self.geometry = self._init_geometry()
@@ -665,21 +671,36 @@ class ProductGenerationDaemon:
                         error_message="Geometry not yet available",
                         error_type="GEOMETRY_UNAVAILABLE",
                     )
+                    self._record_volume_output(volume_info, produced=False, is_complete=is_complete)
                     return False
 
         try:
             # Generate products synchronously (no threading to avoid issues)
             # Route to appropriate generation method based on product_type
+            n_products: Optional[int] = None  # only raw_cog reports how many files it wrote
             if self.config.product_type == "geotiff":
                 self._generate_cog_products_sync(netcdf_file, volume_info)
             elif self.config.product_type == "raw_cog":
-                self._generate_raw_cog_products_sync(netcdf_file, volume_info)
+                n_products = self._generate_raw_cog_products_sync(netcdf_file, volume_info)
             else:  # default to "image" (PNG)
                 self._generate_products_sync(netcdf_file, volume_info)
 
             # Mark as completed
             self.state_tracker.mark_product_status(volume_id, self.config.product_type, "completed")
-            logger.info(f"Successfully generated {self.config.product_type} for {completeness_str} volume {volume_id}")
+            if isinstance(n_products, int) and n_products == 0:
+                # The volume is still marked completed (unchanged behaviour), but say plainly that
+                # nothing was written: this used to be logged as a success.
+                logger.warning(
+                    f"Generated 0 {self.config.product_type} products for {completeness_str} volume {volume_id}"
+                )
+                self._record_volume_output(volume_info, produced=False, is_complete=is_complete)
+            else:
+                suffix = f" ({n_products} product(s))" if isinstance(n_products, int) else ""
+                logger.info(
+                    f"Successfully generated {self.config.product_type} for {completeness_str} "
+                    f"volume {volume_id}{suffix}"
+                )
+                self._record_volume_output(volume_info, produced=True, is_complete=is_complete)
             self._stats["volumes_processed"] += 1
             return True
 
@@ -727,7 +748,43 @@ class ProductGenerationDaemon:
                 error_type=type(e).__name__,
             )
             self._stats["volumes_failed"] += 1
+            self._record_volume_output(volume_info, produced=False, is_complete=is_complete)
             return False
+
+    def _record_volume_output(self, volume_info: Dict, produced: bool, is_complete: bool) -> None:
+        """Track consecutive complete volumes of one type that yielded no product.
+
+        A volume type (strategy + volume number) can stop producing for a reason that
+        every cycle only reports as a per-field warning, e.g. a cached geometry that no
+        longer matches the scan. After ``no_output_alert_threshold`` complete volumes in
+        a row without output, log one ``NO OUTPUT`` ERROR (and repeat it every that many
+        volumes), so it can be found, and counted, with a plain log search.
+
+        Incomplete volumes neither raise nor reset the streak: producing nothing from
+        them is expected until the missing fields arrive.
+        """
+        threshold = self.config.no_output_alert_threshold
+        key = (volume_info.get("strategy"), volume_info.get("vol_nr"))
+        name = f"{self.config.radar_name} {key[0]}-{key[1]}"
+
+        if produced:
+            streak = self._no_output_streak.pop(key, 0)
+            if threshold > 0 and streak >= threshold:
+                logger.info(f"[{name}] producing again after {streak} consecutive volume(s) without output")
+            return
+
+        if threshold <= 0 or not is_complete:
+            return
+
+        streak = self._no_output_streak.get(key, 0) + 1
+        self._no_output_streak[key] = streak
+        if streak >= threshold and (streak - threshold) % threshold == 0:
+            logger.error(
+                f"[{name}] NO OUTPUT: {streak} consecutive complete volume(s) produced no "
+                f"{self.config.product_type} products (last: {volume_info.get('volume_id')}). "
+                f"Look at the per-field warnings above, and at the cached geometry for this "
+                f"strategy/volume."
+            )
 
     def _generate_cog_products_sync(self, netcdf_path: Path, volume_info: Dict) -> None:
         """
@@ -745,7 +802,7 @@ class ProductGenerationDaemon:
 
         return generate_geotiff_products_sync_deprecated(self, netcdf_path, volume_info)
 
-    def _generate_raw_cog_products_sync(self, netcdf_path: Path, volume_info: Dict) -> None:
+    def _generate_raw_cog_products_sync(self, netcdf_path: Path, volume_info: Dict) -> int:
         """
         Synchronous raw float COG product generation logic.
 
@@ -766,6 +823,10 @@ class ProductGenerationDaemon:
         Args:
             netcdf_path: Path to the NetCDF volume file to process.
             volume_info: Dictionary with volume metadata from the state database.
+
+        Returns:
+            Number of raw COG files written (fields and COLMAX, filtered and
+            unfiltered). Tops & Cores GeoJSON and NC cubes are not counted.
         """
         import gc
 
@@ -779,6 +840,7 @@ class ProductGenerationDaemon:
         vol_types = self.config.volume_types
 
         obs_dt = parse_observation_timestamp(volume_info["observation_datetime"])
+        n_cogs = 0
 
         try:
             # --- Load and standardize volume -------------------------------------------
@@ -844,7 +906,7 @@ class ProductGenerationDaemon:
 
             # --- COLMAX (uses column_max, not constant_elevation_ppi) -------------------
             if self.config.add_colmax:
-                self._generate_colmax_cog(
+                n_cogs += self._generate_colmax_cog(
                     radar=radar,
                     geom=geom,
                     volume_info=volume_info,
@@ -858,7 +920,6 @@ class ProductGenerationDaemon:
                 )
 
             # --- Unfiltered fields -------------------------------------------------------
-            raw_cog_generated = False
             logger.info(f"Generating unfiltered raw COG products for {filename_stem}")
 
             for field in list(config.FIELDS_TO_PLOT):
@@ -891,7 +952,7 @@ class ProductGenerationDaemon:
                         output_dir=self.config.local_product_dir,
                     )
                     if result:
-                        raw_cog_generated = True
+                        n_cogs += 1
                 except Exception as e:
                     logger.error(f"Error generating unfiltered raw COG for {plot_field}: {e}")
                 finally:
@@ -990,7 +1051,7 @@ class ProductGenerationDaemon:
                             output_dir=self.config.local_product_dir,
                         )
                         if result:
-                            raw_cog_generated = True
+                            n_cogs += 1
                     except Exception as e:
                         logger.error(f"Error generating filtered raw COG for {field}: {e}")
                     finally:
@@ -1000,7 +1061,7 @@ class ProductGenerationDaemon:
 
                     log_memory_usage(f"After filtered {field}")
 
-            if not raw_cog_generated:
+            if n_cogs == 0:
                 logger.warning(
                     f"No raw COG products were successfully generated for {filename_stem}. "
                     f"This may indicate an incomplete volume with missing fields. "
@@ -1008,6 +1069,8 @@ class ProductGenerationDaemon:
                 )
             else:
                 logger.info(f"Raw COG product generation completed successfully for {filename_stem}")
+
+            return n_cogs
 
         finally:
             try:
@@ -1126,7 +1189,7 @@ class ProductGenerationDaemon:
         zdr_field: str,
         colmax_field: str,
         obs_dt: "datetime",
-    ) -> None:
+    ) -> int:
         """Generate unfiltered and/or filtered COLMAX raw COG files.
 
         COLMAX is derived from the horizontal reflectivity field via
@@ -1145,6 +1208,9 @@ class ProductGenerationDaemon:
             sweep: Lowest-elevation sweep index.
             hrefl_field, rhv_field, wrad_field, zdr_field, colmax_field:
                 Resolved PyART field name strings.
+
+        Returns:
+            Number of COLMAX COG files written (0, 1 or 2).
         """
         import gc
 
@@ -1154,6 +1220,7 @@ class ProductGenerationDaemon:
 
         strategy = volume_info["strategy"]
         vol_nr = volume_info["vol_nr"]
+        n_written = 0
 
         for filtered in (False, True):
             list_key = config.FILTERED_FIELDS_TO_PLOT if filtered else config.FIELDS_TO_PLOT
@@ -1280,6 +1347,7 @@ class ProductGenerationDaemon:
 
                     shutil.move(str(output_file), str(target_path))
                     logger.info(f"Generated {label} raw COLMAX COG -> {target_path.name}")
+                    n_written += 1
 
             except Exception as e:
                 logger.error(f"Error generating {label} raw COLMAX: {e}", exc_info=True)
@@ -1289,6 +1357,8 @@ class ProductGenerationDaemon:
                         del obj
                 gc.collect()
             log_memory_usage(f"After {label} COLMAX saved")
+
+        return n_written
 
     def _generate_tops_and_cores(
         self,
