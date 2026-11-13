@@ -710,7 +710,7 @@ Pre-computed polar-to-Cartesian Barnes interpolation engine. Uses pre-built
 - `column_max(grid_3d, geometry)` — Compute 2D column-maximum reflectivity
 - `create_raw_cog(data_2d, geometry, lat, lon, path, cmap, vmin, vmax, ...)` — Write float32 COG
 - `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Convective core detection; returns list of dicts including `blob_mask` (2D boolean footprint array)
-- `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords)` — Storm top detection (core-anchored)
+- `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords, radius_m, min_dbz, footprint_dilation_px)` — Storm top detection: highest echo voxel (> `TOPS_MIN_Z`) within each core's blob grown by `TOPS_FOOTPRINT_DILATION_PX` px
 - `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Alternative independent top detection
 - `GateFilter(radar)` — Polar gate quality filter (exclude_below, exclude_above)
 - `get_field_data(radar, field_name)` — Extract masked numpy array from PyART Radar object
