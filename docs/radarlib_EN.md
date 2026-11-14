@@ -260,6 +260,23 @@ ftp_host = config.FTP_HOST  # Direct attribute access
 product_type = config.PRODUCT_TYPE
 ```
 
+### Overrides File and Precedence
+
+Library defaults live in `src/radarlib/config.py` (`DEFAULTS`). A value is read from these sources, the later one winning:
+
+1. The library defaults.
+2. A JSON file named by the `RADARLIB_CONFIG` environment variable. Its keys replace the defaults.
+3. An environment variable with the same name as a key. It replaces the file value.
+
+In the Docker Compose deployments, `radarlib_overrides.json` is mounted read-only into each genpro25 service and `RADARLIB_CONFIG` points to it. Keys not listed in the file keep their defaults. The `radarlib_overrides.json` in this repository sets `TOPS_MIN_Z` to 30.0 and raises the core thresholds, so the defaults below do not apply to services that read it.
+
+```json
+{
+    "CORES_MIN_Z": 46.5,
+    "TOPS_MIN_Z": 30.0
+}
+```
+
 ## Key Environment Variables
 
 ### General Paths
@@ -274,6 +291,8 @@ product_type = config.PRODUCT_TYPE
 | `ROOT_GATE_COORDS_PATH` | Gate coordinates cache | `str` | `<project>/data/gate_coordinates` |
 | `ROOT_GEOMETRY_PATH` | Geometries cache | `str` | `<project>/data/geometries` |
 | `ROOT_LOGS_PATH` | Logs directory | `str` | `<project>/logs` |
+
+**Gate coordinates** are cached only after `min_agreement` (default 2) independently downloaded BUFR files share the same scan signature (sweeps, rays, gates, first gate and spacing). If they disagree, the daemon raises and retries on the next cycle. The cache is not re-checked against later scans.
 
 ### FTP Configuration
 
@@ -386,6 +405,43 @@ volumes:
 ```
 
 Individual env vars always win over the JSON file (load order: defaults → JSON file → env vars), so you can use the JSON as a network-wide baseline and per-service env vars to deviate on specific radars.
+
+## Tops & Cores Thresholds (Library Layer)
+
+Defaults from `src/radarlib/config.py`. Keys in `radarlib_overrides.json` replace them.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `CORES_MIN_Z` | `40.0` | COLMAX threshold for a core blob [dBZ] |
+| `CORES_MIN_Z_UPDRAFT` | `58.0` | Max dBZ of a blob for the updraft gate [dBZ] |
+| `CORES_MIN_RANGE` | `10000.0` | Min distance of a core from the radar [m] |
+| `CORES_DEDUP_RADIUS` | `5000.0` | Cores closer than this are merged; their blobs are unioned [m] |
+| `CORES_RHOHV_THRESHOLD` | `0.85` | Min mean RhoHV for the RhoHV gate |
+| `CORES_MIN_PIXELS` | `4` | Min blob size for the RhoHV gate |
+| `CORES_MIN_PIXELS_UPDRAFT` | `6` | Min blob size for the updraft gate |
+| `TOPS_MIN_Z` | `15.0` | Echo threshold [dBZ]. A top is the highest voxel above it. A lower value gives higher tops. |
+| `TOPS_FOOTPRINT_DILATION_PX` | `1` | Pixels the core's blob is grown by before its top is searched (3x3) |
+| `TOPS_DEDUP_RADIUS_M` | `2000.0` | Cylinder radius [m], used only for cores without a `blob_mask` (fallback) |
+
+**Cores** (`detect_cores_from_colmax`):
+
+1. Pixels with COLMAX at or above `CORES_MIN_Z` form blobs (4-neighbour labelling).
+2. A blob needs more than one pixel. Its centroid is the peak-COLMAX pixel. It is dropped if the centroid is closer than `CORES_MIN_RANGE`.
+3. A blob passes if either gate does:
+   - **RhoHV gate:** RhoHV is present, the blob has more than `CORES_MIN_PIXELS` pixels, and mean RhoHV is above `CORES_RHOHV_THRESHOLD`.
+   - **Updraft gate:** max COLMAX is above `CORES_MIN_Z_UPDRAFT` and the blob has more than `CORES_MIN_PIXELS_UPDRAFT` pixels.
+4. Cores closer than `CORES_DEDUP_RADIUS` are merged. The strongest centroid is kept and the blob masks are unioned.
+
+**Tops** (`detect_tops_from_cores`):
+
+1. The footprint of each core is its blob grown by `TOPS_FOOTPRINT_DILATION_PX` pixels.
+2. A voxel is echo when it is finite, not masked, and above `TOPS_MIN_Z`.
+3. In each footprint pixel, the top is the highest echo level.
+4. The core's top is the highest of those pixel tops. Ties go to the stronger echo.
+
+Every core gets a top whenever its blob contains a voxel above `TOPS_MIN_Z`. That holds whenever `TOPS_MIN_Z` is below `CORES_MIN_Z`, which is true for the defaults and for the repository's overrides file.
+
+`altitude_m` is the height above the radar antenna, not above sea level. The levels are the geometry's vertical levels (`res_z` spacing), and the grid top is `toa`, so many tops can sit at `toa` when echo reaches the top of the grid.
 
 ## Example: genpro25.yml
 
@@ -513,6 +569,7 @@ docker restart radarlib-rma1
 - **Check:** Input BUFR files are being downloaded: `ls /data/radares/RADAR_NAME/`
 - **Check:** Processing daemon logs: `docker logs radarlib-rma1`
 - **Check:** Product output directory exists and has write permissions
+- **Check:** `NO OUTPUT` ERROR in the logs. After `no_output_alert_threshold` (default 5) complete volumes in a row produce no output, one ERROR is logged, repeated every that many volumes. A volume that produces output again logs an INFO. This threshold is a code default; the service configuration does not read it.
 
 ### Problem: Out of Disk Space
 - **Solution:** Configure cleanup daemon retention policy
@@ -714,6 +771,19 @@ Pre-computed polar-to-Cartesian Barnes interpolation engine. Uses pre-built
 - `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Alternative independent top detection
 - `GateFilter(radar)` — Polar gate quality filter (exclude_below, exclude_above)
 - `get_field_data(radar, field_name)` — Extract masked numpy array from PyART Radar object
+
+### radarlib.utils
+
+- `create_gate_coords_file(radar_name, strategy_name, vol_nr, output_dir, ..., min_agreement=2)` — Download BUFR files, require `min_agreement` of them to share a scan signature, and write the gate coordinates of an agreeing file as `.npz`. Raises when they disagree.
+
+### Validation Tool: `scripts/compare_tops_variants.py`
+
+Not used at runtime. Reads one NC cube written by `write_nccube` (with a `DBZH` field, produced when `ADD_NCCUBE` is on), derives COLMAX, detects cores, and compares the tops under several echo thresholds and footprint dilations. Optionally it also compares the legacy cylinder search, loaded from a copy of the old `tops.py`.
+
+```bash
+python scripts/compare_tops_variants.py --cube RMA1_..._NCCUBE.nc \
+    --thresholds 0 15 30 --dilation 0 1 [--legacy-tops old_tops.py] [--csv out.csv]
+```
 
 ### radarlib.daemons
 
