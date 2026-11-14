@@ -83,7 +83,7 @@ def detect_tops_from_3d_grid(
         the quality gate is skipped (see note above).
     min_dbz : float, optional
         Reflectivity threshold (dBZ) used to build the binary echo mask at
-        each level.  Defaults to ``config.TOPS_MIN_Z`` (30 dBZ).
+        each level.  Defaults to ``config.TOPS_MIN_Z`` (15 dBZ).
     min_dev_m : float, optional
         Minimum mean altitude (m) for a blob to qualify as a storm top.
         Blobs at low levels are discarded as they represent shallow echoes,
@@ -346,7 +346,7 @@ def detect_tops_from_cores(
         Cylinder radius used only when a core has no ``blob_mask``.
     min_dbz : float, optional
         Echo threshold in dBZ (voxel is echo when ``> min_dbz``). Defaults to
-        ``config.TOPS_MIN_Z`` (30 dBZ). **Changing it changes the tops**: a higher
+        ``config.TOPS_MIN_Z`` (15 dBZ). **Changing it changes the tops**: a higher
         threshold ignores weak echo at the upper levels and lowers the tops.
     footprint_dilation_px : int, optional
         Pixels to grow the blob by (3x3 structuring element). Defaults to

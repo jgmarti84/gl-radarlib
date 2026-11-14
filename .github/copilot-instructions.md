@@ -368,7 +368,7 @@ Inputs:
 3. For each footprint pixel take the highest echo level; the top is the **highest** of those pixels (ties: stronger dBZ)
 4. Record: (x, y) of that pixel, altitude of that level, dBZ at that voxel
 5. Returns one top dict per core that has echo in its footprint (none otherwise)
-> Note: `TOPS_MIN_Z` (default 30 dBZ) is the control that matters. At 0 dBZ any echo counts, so
+> Note: `TOPS_MIN_Z` (default 15 dBZ) is the control that matters. At 0 dBZ any echo counts, so
   weak or smeared echo at the highest levels set the top and most tops sat at the grid top.
   Raising it lowers the tops. Changing it changes the top values.
 
@@ -464,7 +464,7 @@ Tops & cores settings are split across both config layers:
 | `CORES_RHOHV_THRESHOLD` | `0.85` | float | Min mean RhoHV to pass quality gate |
 | `CORES_MIN_PIXELS` | `4` | int | Min blob pixel count for RhoHV gate path |
 | `CORES_MIN_PIXELS_UPDRAFT` | `6` | int | Min blob pixel count for updraft gate path |
-| `TOPS_MIN_Z` | `30.0` | float | Echo threshold [dBZ] for a voxel to count as a top. **Changing it changes the top values**: a higher value ignores weak upper echo and lowers the tops. Overridable in `radarlib_overrides.json`. |
+| `TOPS_MIN_Z` | `15.0` | float | Echo threshold [dBZ] for a voxel to count as a top. **Changing it changes the top values**: a higher value ignores weak upper echo and lowers the tops. Overridable in `radarlib_overrides.json`. |
 | `TOPS_FOOTPRINT_DILATION_PX` | `1` | int | Pixels the core's blob is grown by before searching for its top (3x3 structuring element). |
 | `TOPS_DEDUP_RADIUS_M` | `2000.0` | float | Cylinder radius [m], used only for cores without `blob_mask` (fallback). |
 

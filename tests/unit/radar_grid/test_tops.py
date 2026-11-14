@@ -443,12 +443,13 @@ class TestDetectTopsFromCores:
         grid = _grid_with_echo((2, 10, 10, 30.0))
         assert _tops([_core_at(10, 10)], grid, _CXX, _CYY, np.zeros((2, 2))) == []
 
-    def test_default_threshold_is_30_dbz(self):
-        assert config.TOPS_MIN_Z == 30.0
-        grid = _grid_with_echo((2, 10, 10, 25.0), (4, 10, 11, 35.0))  # 25 dBZ ignored by default
+    def test_default_threshold_is_15_dbz(self):
+        assert config.TOPS_MIN_Z == 15.0
+        # 12 dBZ at the top level is below the default and ignored; 20 dBZ below it counts
+        grid = _grid_with_echo((2, 10, 10, 20.0), (4, 10, 11, 12.0))
         core = _core_at(10, 10, blob_rows=[10], blob_cols=[10, 11])
         tops = detect_tops_from_cores([core], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0)
-        assert tops[0]["altitude_m"] == 15000.0
-        assert tops[0]["dbz"] == 35.0
-        weak_only = _grid_with_echo((2, 10, 10, 25.0))
+        assert tops[0]["altitude_m"] == 9000.0
+        assert tops[0]["dbz"] == 20.0
+        weak_only = _grid_with_echo((2, 10, 10, 12.0))
         assert detect_tops_from_cores([_core_at(10, 10)], weak_only, _CXX, _CYY, _CZ, footprint_dilation_px=0) == []
