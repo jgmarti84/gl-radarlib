@@ -712,7 +712,7 @@ Motor de interpolación Barnes polar-cartesiana con geometría precomputada. Uti
 - `column_max(grid_3d, geometry)` — Computar reflectividad máxima columnar 2D
 - `create_raw_cog(data_2d, geometry, lat, lon, path, cmap, vmin, vmax, ...)` — Escribir COG float32
 - `detect_cores_from_colmax(colmax, x_coords, y_coords, rhohv)` — Detección de núcleos convectivos; retorna `blob_mask` (arreglo booleano 2D) por dict de núcleo
-- `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords)` — Detección de topes de tormenta (anclada en núcleos)
+- `detect_tops_from_cores(cores, grid_3d, x_coords, y_coords, z_coords, radius_m, min_dbz, footprint_dilation_px)` — Detección de topes de tormenta: voxel de eco más alto (> `TOPS_MIN_Z`) dentro del blob de cada núcleo ampliado `TOPS_FOOTPRINT_DILATION_PX` px
 - `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Detección alternativa independiente de topes
 - `GateFilter(radar)` — Filtro de calidad de gate polar (exclude_below, exclude_above)
 - `get_field_data(radar, field_name)` — Extraer array numpy enmascarado desde objeto PyART Radar

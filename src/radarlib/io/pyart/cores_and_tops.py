@@ -21,9 +21,9 @@ Algorithm Overview
    - Output: List of core dicts with centroid (x_m, y_m) and intensity metrics
 
 2. **Top Detection** (from DBZH 3D, relative to cores):
-   - For each detected core, search in cylindrical column (radius from TOPS_DEDUP_RADIUS_M config)
-   - Find the **highest altitude with valid DBZH** within that cylinder
-   - No thresholds applied: accepts first valid DBZH found at upper levels
+   - For each detected core, search the core's own footprint: its COLMAX blob grown by TOPS_FOOTPRINT_DILATION_PX pixels
+   - Echo voxels are those with DBZH > TOPS_MIN_Z (0 dBZ by default; changing it changes the tops)
+   - The top is the **highest echo voxel** in the footprint
    - Output: List of top dicts with altitude and parent core reference
 
 This two-stage design ensures tops are only detected where cores exist, and uses

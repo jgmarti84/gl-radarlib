@@ -20,6 +20,7 @@ import math
 from typing import List, Optional
 
 import numpy as np
+from scipy.ndimage import binary_dilation
 from scipy.ndimage import label as ndimage_label
 
 from radarlib import config
@@ -311,62 +312,59 @@ def detect_tops_from_cores(
     y_coords: np.ndarray,
     z_coords: np.ndarray,
     radius_m: float = config.TOPS_DEDUP_RADIUS_M,
+    min_dbz: float = config.TOPS_MIN_Z,
+    footprint_dilation_px: int = config.TOPS_FOOTPRINT_DILATION_PX,
 ) -> list:
     """
-    Detect storm tops as the highest altitude with valid DBZH within a cylindrical
-    column around each detected convective core centroid.
+    Detect the storm top of each convective core from its own 2D footprint.
 
-    This function implements a core-relative tops detection algorithm: for each
-    detected core, it finds the maximum altitude point in a cylindrical column
-    (radius = ``radius_m``) centered on the core's (x, y) centroid within the 3D
-    reflectivity grid.
+    For each core the search footprint is its COLMAX blob (``blob_mask``)
+    grown by ``footprint_dilation_px`` pixels. Every grid voxel above the
+    footprint with reflectivity ``> min_dbz`` is an echo. The top is the
+    highest echo found in the footprint: the altitude of the highest echo
+    voxel, at the pixel where it occurs.
 
-    Unlike :func:`detect_tops_from_3d_grid`, which performs independent 3D grid
-    analysis with multiple threshold parameters, this function:
-
-    - Is always tethered to core detections (requires non-empty cores list)
-    - Uses only one parameter: the cylindrical search radius
-    - Accepts the **first valid DBZH value encountered** at upper levels (per-core)
-    - Does NOT apply MIN_Z, MIN_DEV_M, MIN_RANGE_M, or RhoHV thresholds
+    This replaces the earlier cylinder search (a fixed radius around the core's
+    peak pixel, highest level with any echo above 0 dBZ). That search tended to
+    return the top of the grid, because weak or smeared echo at the highest
+    levels counted as a top.
 
     Parameters
     ----------
     cores : list of dict
-        Output from :func:`detect_cores_from_colmax`. Each dict must contain:
-        * ``"x_m"`` – centroid x in metres (radar-relative)
-        * ``"y_m"`` – centroid y in metres (radar-relative)
-        * ``"mean_dbz"`` – mean dBZ of the core blob
+        Output from :func:`detect_cores_from_colmax`. Each dict must contain
+        ``"x_m"``, ``"y_m"`` and ``"mean_dbz"``. ``"blob_mask"`` (2D boolean,
+        same shape as the grid horizontal plane) defines the footprint. When it
+        is absent the footprint falls back to a cylinder of ``radius_m``.
     grid_3d : np.ndarray, shape (NZ, NY, NX)
-        3D Cartesian reflectivity grid in dBZ. May be a numpy masked array;
-        masked pixels are skipped when searching for peaks.
-    x_coords : np.ndarray, shape (NY, NX)
-        Cartesian x coordinates in metres, radar-relative.
-    y_coords : np.ndarray, shape (NY, NX)
-        Cartesian y coordinates in metres, radar-relative.
+        3D Cartesian reflectivity grid in dBZ. Masked and NaN voxels are not echo.
+    x_coords, y_coords : np.ndarray, shape (NY, NX)
+        Cartesian coordinates in metres, radar-relative.
     z_coords : np.ndarray, shape (NZ,) or (NZ, NY, NX)
-        Altitude values in metres. A 1D array of level altitudes is broadcast
-        automatically; a 3D array can represent beam height variation.
+        Altitude of each level in metres. A 1D array is broadcast.
     radius_m : float, optional
-        Cylindrical search radius around each core centroid (metres).
-        Defaults to ``config.TOPS_DEDUP_RADIUS_M`` (17 000 m).
+        Cylinder radius used only when a core has no ``blob_mask``.
+    min_dbz : float, optional
+        Echo threshold in dBZ (voxel is echo when ``> min_dbz``). Defaults to
+        ``config.TOPS_MIN_Z`` (0 dBZ). **Raising it changes the tops**: a higher
+        threshold ignores weak echo at the upper levels and lowers the tops.
+    footprint_dilation_px : int, optional
+        Pixels to grow the blob by (3x3 structuring element). Defaults to
+        ``config.TOPS_FOOTPRINT_DILATION_PX`` (1).
 
     Returns
     -------
     list of dict
-        One dict per detected top. Each dict contains:
+        One dict per core that has echo in its footprint. Keys:
+        ``x_m``, ``y_m`` (location of the highest echo pixel), ``altitude_m``,
+        ``altitude_km``, ``dbz`` (reflectivity at that voxel), ``core_x_m``,
+        ``core_y_m``, ``core_mean_dbz``.
 
-        * ``"x_m"`` – location x in metres (of highest DBZH point, *float*)
-        * ``"y_m"`` – location y in metres (of highest DBZH point, *float*)
-        * ``"altitude_m"`` – altitude of the point in metres (*float*)
-        * ``"altitude_km"`` – same value rounded to 1 decimal, in km (*float*)
-        * ``"dbz"`` – reflectivity value at the top (*float*)
-        * ``"core_x_m"`` – parent core centroid x (*float*)
-        * ``"core_y_m"`` – parent core centroid y (*float*)
-        * ``"core_mean_dbz"`` – parent core mean dBZ (*float*)
-
-        Returns an empty list if:
-        * ``cores`` is empty, or
-        * no valid DBZH found within any cylinder.
+    Notes
+    -----
+    Ties between pixels at the same highest altitude are resolved by the higher
+    dBZ at that voxel. The function never raises: on an unexpected error it logs
+    and returns the tops found so far.
     """
     tops: list = []
 
@@ -375,122 +373,93 @@ def detect_tops_from_cores(
             logger.debug("detect_tops_from_cores: no cores provided; returning empty list")
             return []
 
-        # Normalize z_coords to (NZ, NY, NX) — support both 1D and 3D input
-        z_arr = np.asarray(z_coords)
-        if z_arr.ndim == 1:
-            _z_1d = z_arr.astype(np.float32)
-            _z_3d = None
-        elif z_arr.ndim == 3:
-            _z_3d = z_arr.astype(np.float32)
-            _z_1d = None
-        else:
+        z_arr = np.asarray(z_coords, dtype=np.float32)
+        if z_arr.ndim not in (1, 3):
             raise ValueError(f"z_coords must be 1D (NZ,) or 3D (NZ, NY, NX); got shape {z_arr.shape}")
 
-        # Grid dimensions and data extraction
-        nz = grid_3d.shape[0]
         data_3d = np.ma.getdata(grid_3d).astype(np.float32, copy=False)
         mask_3d_invalid = np.ma.getmaskarray(grid_3d)
+        nz, ny, nx = data_3d.shape
 
         x2d = np.asarray(x_coords, dtype=np.float32)
         y2d = np.asarray(y_coords, dtype=np.float32)
+        structure = np.ones((3, 3), dtype=bool)
 
-        # Process each core
         for core in cores:
             core_x = float(core["x_m"])
             core_y = float(core["y_m"])
             core_mean_dbz = float(core["mean_dbz"])
 
-            logger.debug(
-                "detect_tops_from_cores: searching for top near core at (%.1f, %.1f) m within radius %.0f m",
-                core_x,
-                core_y,
-                radius_m,
-            )
+            # Footprint: the core's own blob grown by N px; cylinder only as fallback
+            blob = core.get("blob_mask")
+            if blob is not None:
+                footprint = np.asarray(blob, dtype=bool)
+                if footprint_dilation_px > 0:
+                    footprint = binary_dilation(footprint, structure=structure, iterations=int(footprint_dilation_px))
+            else:
+                dx = x2d - core_x
+                dy = y2d - core_y
+                footprint = np.sqrt(dx * dx + dy * dy) <= radius_m
 
-            # Find grid points within cylindrical radius of core centroid
-            dx = x2d - core_x
-            dy = y2d - core_y
-            horizontal_distance = np.sqrt(dx * dx + dy * dy)
-            in_cylinder = horizontal_distance <= radius_m
+            rows, cols = np.nonzero(footprint)
+            if rows.size == 0:
+                continue
 
-            if not in_cylinder.any():
+            # Columns of the footprint across all levels: shape (NZ, n_pixels)
+            values = data_3d[:, rows, cols]
+            invalid = mask_3d_invalid[:, rows, cols]
+            if z_arr.ndim == 1:
+                altitudes = np.broadcast_to(z_arr[:, None], values.shape)
+            else:
+                altitudes = z_arr[:, rows, cols]
+
+            echo = (~invalid) & np.isfinite(values) & (values > min_dbz)
+            if not echo.any():
                 logger.debug(
-                    "detect_tops_from_cores: no grid points within cylinder (%.0f m) of core (%.1f, %.1f) m",
-                    radius_m,
+                    "detect_tops_from_cores: no echo above %.1f dBZ in footprint of core (%.1f, %.1f) m",
+                    min_dbz,
                     core_x,
                     core_y,
                 )
                 continue
 
-            # Search all altitude levels for the highest valid DBZH
-            highest_top = None
-            highest_altitude = -1.0
-            highest_dbz = None
+            # Highest echo altitude per pixel, and the level where it occurs
+            alt_echo = np.where(echo, altitudes, -np.inf)
+            pixel_top_alt = alt_echo.max(axis=0)
+            pixel_top_level = alt_echo.argmax(axis=0)
+            pixel_idx = np.arange(values.shape[1])
+            pixel_top_dbz = values[pixel_top_level, pixel_idx]
 
-            for k in range(nz):
-                level_data = data_3d[k]
-                level_invalid = mask_3d_invalid[k]
+            # Highest altitude wins; ties go to the stronger echo
+            best_alt = pixel_top_alt.max()
+            ties = np.flatnonzero(pixel_top_alt == best_alt)
+            best = ties[np.argmax(pixel_top_dbz[ties])]
 
-                # Get z value for this level
-                if _z_3d is not None:
-                    z_level = _z_3d[k]
-                else:
-                    z_level = _z_1d[k]
-
-                # Extract values within cylinder at this level
-                valid_in_cylinder = in_cylinder & (~level_invalid)
-
-                if not valid_in_cylinder.any():
-                    continue
-
-                # Find the grid point with maximum reflectivity
-                dbz_in_cylinder = level_data[valid_in_cylinder]
-                max_dbz = float(np.nanmax(dbz_in_cylinder))
-
-                # If this level has a higher altitude with valid echo, use it
-                # (prefer higher altitudes when available)
-                z_at_level = float(z_level[valid_in_cylinder].max()) if z_level.ndim > 1 else float(z_level)
-
-                if z_at_level > highest_altitude and max_dbz > 0:  # Guard against NaN/extreme values
-                    highest_altitude = z_at_level
-                    highest_dbz = max_dbz
-
-                    # Find the (x, y) location of the max dBZ point within cylinder
-                    max_idx = np.argmax(dbz_in_cylinder)
-                    valid_points_idx = np.where(valid_in_cylinder)
-                    point_y_idx = valid_points_idx[0][max_idx]
-                    point_x_idx = valid_points_idx[1][max_idx]
-
-                    highest_top = {
-                        "x_m": float(x2d[point_y_idx, point_x_idx]),
-                        "y_m": float(y2d[point_y_idx, point_x_idx]),
-                        "altitude_m": highest_altitude,
-                        "altitude_km": round(highest_altitude / 1000.0, 1),
-                        "dbz": highest_dbz,
-                        "core_x_m": core_x,
-                        "core_y_m": core_y,
-                        "core_mean_dbz": core_mean_dbz,
-                    }
-
-            if highest_top is not None:
-                tops.append(highest_top)
-                logger.debug(
-                    "detect_tops_from_cores: found top for core (%.1f, %.1f) m at altitude %.0f m, dBZ=%.1f",
-                    core_x,
-                    core_y,
-                    highest_top["altitude_m"],
-                    highest_top["dbz"],
-                )
-            else:
-                logger.debug(
-                    "detect_tops_from_cores: no valid DBZH found within cylinder around core (%.1f, %.1f) m",
-                    core_x,
-                    core_y,
-                )
+            top_alt = float(best_alt)
+            row, col = int(rows[best]), int(cols[best])
+            tops.append(
+                {
+                    "x_m": float(x2d[row, col]),
+                    "y_m": float(y2d[row, col]),
+                    "altitude_m": top_alt,
+                    "altitude_km": round(top_alt / 1000.0, 1),
+                    "dbz": float(pixel_top_dbz[best]),
+                    "core_x_m": core_x,
+                    "core_y_m": core_y,
+                    "core_mean_dbz": core_mean_dbz,
+                }
+            )
+            logger.debug(
+                "detect_tops_from_cores: core (%.1f, %.1f) m -> top at %.0f m, %.1f dBZ",
+                core_x,
+                core_y,
+                top_alt,
+                float(pixel_top_dbz[best]),
+            )
 
         logger.debug("detect_tops_from_cores: %d top(s) detected for %d core(s)", len(tops), len(cores))
         return tops
 
     except Exception as exc:
         logger.error("detect_tops_from_cores failed: %s", exc, exc_info=True)
-        return tops  # return whatever was accumulated before the failure
+        return tops

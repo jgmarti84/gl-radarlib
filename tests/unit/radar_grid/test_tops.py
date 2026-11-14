@@ -309,3 +309,129 @@ class TestDetectTopsFrom3dGrid:
 
         assert len(result) == 1
         assert abs(result[0]["altitude_m"] - 12000.0) < 1e-3
+
+
+# ---------------------------------------------------------------------------
+# detect_tops_from_cores — footprint search (blob + dilation)
+# ---------------------------------------------------------------------------
+
+from radarlib.radar_grid.tops import detect_tops_from_cores  # noqa: E402
+
+_CZ = np.array([3000.0, 6000.0, 9000.0, 12000.0, 15000.0], dtype=np.float32)
+_CNZ = len(_CZ)
+_CNY = _CNX = 21
+_CLIN = np.linspace(-100_000.0, 100_000.0, _CNX, dtype=np.float32)
+_CYY, _CXX = np.meshgrid(_CLIN, _CLIN, indexing="ij")
+_PIX = 10_000.0  # metres per pixel on this grid
+
+
+def _core_at(row: int, col: int, blob_rows=None, blob_cols=None, mean_dbz: float = 50.0) -> dict:
+    """Core whose blob is the given pixel(s); centroid = (row, col)."""
+    mask = np.zeros((_CNY, _CNX), dtype=bool)
+    if blob_rows is None:
+        mask[row, col] = True
+    else:
+        mask[np.ix_(blob_rows, blob_cols)] = True
+    return {
+        "x_m": float(_CXX[row, col]),
+        "y_m": float(_CYY[row, col]),
+        "mean_dbz": mean_dbz,
+        "blob_mask": mask,
+    }
+
+
+def _grid_with_echo(*voxels) -> np.ndarray:
+    """Grid of -20 dBZ with given (k, row, col, dbz) voxels set."""
+    g = np.full((_CNZ, _CNY, _CNX), -20.0, dtype=np.float32)
+    for k, r, c, dbz in voxels:
+        g[k, r, c] = dbz
+    return g
+
+
+class TestDetectTopsFromCores:
+    def test_top_found_inside_blob(self):
+        grid = _grid_with_echo((4, 10, 10, 30.0))
+        tops = detect_tops_from_cores([_core_at(10, 10)], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0)
+        assert len(tops) == 1
+        assert tops[0]["altitude_m"] == 15000.0
+        assert tops[0]["dbz"] == 30.0
+        assert tops[0]["x_m"] == float(_CXX[10, 10])
+
+    def test_dilation_reaches_tower_just_outside_blob(self):
+        core = _core_at(10, 10)  # one-pixel blob
+        # Tower two pixels away: not reached by a 1-px dilation
+        far = _grid_with_echo((3, 10, 12, 25.0))
+        assert detect_tops_from_cores([core], far, _CXX, _CYY, _CZ, footprint_dilation_px=1) == []
+        # Tower one pixel away: reached by a 1-px dilation, not by none
+        near = _grid_with_echo((3, 10, 11, 25.0))
+        assert detect_tops_from_cores([core], near, _CXX, _CYY, _CZ, footprint_dilation_px=0) == []
+        tops = detect_tops_from_cores([core], near, _CXX, _CYY, _CZ, footprint_dilation_px=1)
+        assert len(tops) == 1 and tops[0]["x_m"] == float(_CXX[10, 11])
+
+    def test_highest_altitude_wins_over_stronger_lower_echo(self):
+        grid = _grid_with_echo((1, 10, 10, 55.0), (4, 11, 10, 22.0))
+        core = _core_at(10, 10, blob_rows=[10, 11], blob_cols=[10])
+        tops = detect_tops_from_cores([core], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0)
+        assert tops[0]["altitude_m"] == 15000.0
+        assert tops[0]["x_m"] == float(_CXX[11, 10])  # location of the highest echo, not the peak
+
+    def test_tie_resolved_by_stronger_echo(self):
+        grid = _grid_with_echo((2, 10, 10, 20.0), (2, 10, 11, 35.0))
+        core = _core_at(10, 10, blob_rows=[10], blob_cols=[10, 11])
+        tops = detect_tops_from_cores([core], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0)
+        assert tops[0]["dbz"] == 35.0
+        assert tops[0]["x_m"] == float(_CXX[10, 11])
+
+    def test_threshold_changes_top(self):
+        grid = _grid_with_echo((4, 10, 10, 12.0), (2, 10, 10, 30.0))
+        core = _core_at(10, 10)
+        t0 = detect_tops_from_cores([core], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0, min_dbz=0.0)
+        t18 = detect_tops_from_cores([core], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0, min_dbz=18.0)
+        assert t0[0]["altitude_m"] == 15000.0  # 12 dBZ counts as echo at 0 dBZ
+        assert t18[0]["altitude_m"] == 9000.0  # 12 dBZ ignored at 18 dBZ; top drops to the 30 dBZ echo
+
+    def test_nan_voxels_are_not_echo_and_do_not_hide_real_max(self):
+        grid = _grid_with_echo((2, 10, 10, 28.0))
+        grid[4, 10, 10] = np.nan
+        grid[4, 10, 11] = np.nan
+        core = _core_at(10, 10, blob_rows=[10], blob_cols=[10, 11])
+        tops = detect_tops_from_cores([core], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0)
+        assert len(tops) == 1
+        assert tops[0]["altitude_m"] == 9000.0
+        assert tops[0]["dbz"] == 28.0
+
+    def test_masked_voxels_are_not_echo(self):
+        grid = np.ma.masked_array(_grid_with_echo((2, 10, 10, 28.0), (4, 10, 10, 50.0)))
+        grid.mask = np.zeros(grid.shape, dtype=bool)
+        grid.mask[4, 10, 10] = True
+        tops = detect_tops_from_cores([_core_at(10, 10)], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0)
+        assert tops[0]["altitude_m"] == 9000.0
+
+    def test_echo_at_highest_level_returns_that_level(self):
+        grid = _grid_with_echo((4, 10, 10, 40.0))
+        tops = detect_tops_from_cores([_core_at(10, 10)], grid, _CXX, _CYY, _CZ, footprint_dilation_px=0)
+        assert tops[0]["altitude_m"] == float(_CZ[-1])  # no truncation flag, the top is the top
+
+    def test_no_echo_in_footprint_gives_no_top(self):
+        grid = _grid_with_echo((4, 0, 0, 40.0))  # echo far from the core
+        assert detect_tops_from_cores([_core_at(10, 10)], grid, _CXX, _CYY, _CZ, footprint_dilation_px=1) == []
+
+    def test_no_cores_returns_empty(self):
+        grid = _grid_with_echo((4, 10, 10, 40.0))
+        assert detect_tops_from_cores([], grid, _CXX, _CYY, _CZ) == []
+
+    def test_cylinder_fallback_without_blob_mask(self):
+        grid = _grid_with_echo((3, 10, 11, 30.0))
+        core = {"x_m": float(_CXX[10, 10]), "y_m": float(_CYY[10, 10]), "mean_dbz": 45.0}
+        tops = detect_tops_from_cores([core], grid, _CXX, _CYY, _CZ, radius_m=20_000.0)
+        assert len(tops) == 1 and tops[0]["x_m"] == float(_CXX[10, 11])
+
+    def test_3d_z_coords(self):
+        z3d = np.broadcast_to(_CZ[:, None, None], (_CNZ, _CNY, _CNX)).astype(np.float32)
+        grid = _grid_with_echo((2, 10, 10, 30.0))
+        tops = detect_tops_from_cores([_core_at(10, 10)], grid, _CXX, _CYY, z3d, footprint_dilation_px=0)
+        assert tops[0]["altitude_m"] == 9000.0
+
+    def test_bad_z_shape_is_logged_not_raised(self):
+        grid = _grid_with_echo((2, 10, 10, 30.0))
+        assert detect_tops_from_cores([_core_at(10, 10)], grid, _CXX, _CYY, np.zeros((2, 2))) == []

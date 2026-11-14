@@ -120,7 +120,7 @@ GeoJSON schema per feature (three types):
   }
 }
 
-// Top feature — Point at highest valid echo above the core cylinder:
+// Top feature — Point at the highest echo voxel in the core's footprint (blob + 1 px):
 {
   "type": "Feature",
   "geometry": { "type": "Point", "coordinates": [lon, lat] },
@@ -363,13 +363,14 @@ Inputs:
 6. Deduplication: pairs within `CORES_DEDUP_RADIUS` → keep **strongest core's peak-pixel location**; union their `blob_mask` arrays so the merged footprint covers both original blobs; update `pixel_count` from the unioned mask
 
 **Top detection** — `detect_tops_from_cores()` in `src/radarlib/radar_grid/tops.py`:
-1. For each detected core: define a cylinder of radius `TOPS_DEDUP_RADIUS_M` around its (x_m, y_m)
-2. Scan all NZ levels top-to-bottom; for each level find grid cells within cylinder that are not masked
-3. Track the **highest altitude** where any valid (non-masked, > 0 dBZ) echo exists
-4. Record: position of max-dBZ pixel at that highest level, altitude, dBZ value
-5. Returns one top dict per core (or none if no valid echo found in cylinder)
-> Note: No MIN_Z_TOP, MIN_DEV, or RhoHV threshold is applied in this function.
-  The only parameter is the cylindrical search radius.
+1. For each detected core: footprint = the core's `blob_mask` grown by `TOPS_FOOTPRINT_DILATION_PX` pixels (3x3). A core without `blob_mask` falls back to a cylinder of `TOPS_DEDUP_RADIUS_M`.
+2. Voxels in the footprint are **echo** when not NaN, not masked and `> TOPS_MIN_Z` dBZ
+3. For each footprint pixel take the highest echo level; the top is the **highest** of those pixels (ties: stronger dBZ)
+4. Record: (x, y) of that pixel, altitude of that level, dBZ at that voxel
+5. Returns one top dict per core that has echo in its footprint (none otherwise)
+> Note: `TOPS_MIN_Z` (default 0 dBZ) is the control that matters. Any echo above it counts, so
+  weak or smeared echo at the highest levels sets the top. Raising it (e.g. 18 dBZ) lowers the
+  tops and removes the pile-up at the grid top. Changing it changes the top values.
 
 **Coordinate conversion:**
 `pyart.core.transforms.cartesian_to_geographic_aeqd(x, y, origin_lon, origin_lat)` → (lon, lat)
@@ -377,7 +378,7 @@ Inputs:
 **Important Implementation Notes**
 - Uses `scipy.ndimage.label()` — NOT `pyart.correct.find_objects()` (which requires polar Radar objects)
 - Core detection operates on the 2D COLMAX grid, not on 3D levels
-- Top detection is core-anchored (cylindrical, per-core) — not independent per-level scanning
+- Top detection is core-anchored (per-core, over the core's own footprint) — not independent per-level scanning
 - RhoHV field name resolved via `pyart.config.get_field_name('cross_correlation_ratio')`
 - Missing RhoHV → WARNING logged; detection continues with updraft-gate only for cores, no RhoHV gate for tops
 - Missing DBZH → WARNING logged, tops/cores skipped entirely
@@ -463,11 +464,11 @@ Tops & cores settings are split across both config layers:
 | `CORES_RHOHV_THRESHOLD` | `0.85` | float | Min mean RhoHV to pass quality gate |
 | `CORES_MIN_PIXELS` | `4` | int | Min blob pixel count for RhoHV gate path |
 | `CORES_MIN_PIXELS_UPDRAFT` | `6` | int | Min blob pixel count for updraft gate path |
-| `TOPS_DEDUP_RADIUS_M` | `2000.0` | float | Cylindrical search radius around each core [m] |
+| `TOPS_MIN_Z` | `0.0` | float | Echo threshold [dBZ] for a voxel to count as a top. **Changing it changes the top values**: raising it (e.g. 18) ignores weak upper echo and lowers the tops. |
+| `TOPS_FOOTPRINT_DILATION_PX` | `1` | int | Pixels the core's blob is grown by before searching for its top (3x3 structuring element). |
+| `TOPS_DEDUP_RADIUS_M` | `2000.0` | float | Cylinder radius [m], used only for cores without `blob_mask` (fallback). |
 
-> `TOPS_DEDUP_RADIUS_M` is the **cylindrical search radius** used by `detect_tops_from_cores`,
-> not a deduplication parameter. There is no deduplication step for tops — one top is returned
-> per core.
+> There is no deduplication step for tops — one top is returned per core.
 
 ### Other Service-Layer Config Keys (app/config.py)
 
