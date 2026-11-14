@@ -260,6 +260,23 @@ host_ftp = config.FTP_HOST  # Acceso directo a atributos
 tipo_producto = config.PRODUCT_TYPE
 ```
 
+### Archivo de Overrides y Precedencia
+
+Los valores por defecto de la biblioteca están en `src/radarlib/config.py` (`DEFAULTS`). Un valor se lee de estas fuentes; gana la última:
+
+1. Los valores por defecto de la biblioteca.
+2. Un archivo JSON indicado por la variable de entorno `RADARLIB_CONFIG`. Sus claves reemplazan los valores por defecto.
+3. Una variable de entorno con el mismo nombre que la clave. Reemplaza el valor del archivo.
+
+En los despliegues con Docker Compose, `radarlib_overrides.json` se monta en modo lectura en cada servicio genpro25 y `RADARLIB_CONFIG` apunta a él. Las claves que no están en el archivo conservan su valor por defecto. El `radarlib_overrides.json` de este repositorio fija `TOPS_MIN_Z` en 30.0 y sube los umbrales de núcleos, así que los valores por defecto de abajo no aplican a los servicios que lo leen.
+
+```json
+{
+    "CORES_MIN_Z": 46.5,
+    "TOPS_MIN_Z": 30.0
+}
+```
+
 ## Variables de Entorno Clave
 
 ### Rutas Generales
@@ -274,6 +291,8 @@ tipo_producto = config.PRODUCT_TYPE
 | `ROOT_GATE_COORDS_PATH` | Caché de coordenadas de gates | `str` | `<proyecto>/data/gate_coordinates` |
 | `ROOT_GEOMETRY_PATH` | Caché de geometrías | `str` | `<proyecto>/data/geometries` |
 | `ROOT_LOGS_PATH` | Directorio de logs | `str` | `<proyecto>/logs` |
+
+**Coordenadas de gates**: la caché solo se escribe después de que `min_agreement` (por defecto 2) archivos BUFR descargados de forma independiente compartan la misma firma de barrido (sweeps, rayos, gates, primer gate y espaciado). Si no coinciden, el daemon lanza un error y reintenta en el siguiente ciclo. La caché no se vuelve a verificar contra barridos posteriores.
 
 ### Configuración FTP
 
@@ -386,6 +405,43 @@ volumes:
 ```
 
 Las variables de entorno individuales siempre tienen precedencia sobre el archivo JSON (orden de carga: defaults → archivo JSON → variables de entorno), por lo que el JSON puede usarse como línea base de red y las env vars para sobreescribir radares individuales.
+
+## Umbrales de Núcleos y Topes (Capa de Biblioteca)
+
+Valores por defecto de `src/radarlib/config.py`. Las claves de `radarlib_overrides.json` los reemplazan.
+
+| Clave | Valor por defecto | Significado |
+|---|---|---|
+| `CORES_MIN_Z` | `40.0` | Umbral de COLMAX para un blob de núcleo [dBZ] |
+| `CORES_MIN_Z_UPDRAFT` | `58.0` | Máximo dBZ de un blob para la compuerta de updraft [dBZ] |
+| `CORES_MIN_RANGE` | `10000.0` | Distancia mínima de un núcleo al radar [m] |
+| `CORES_DEDUP_RADIUS` | `5000.0` | Los núcleos más cercanos se unen; sus blobs se unifican [m] |
+| `CORES_RHOHV_THRESHOLD` | `0.85` | RhoHV medio mínimo para la compuerta RhoHV |
+| `CORES_MIN_PIXELS` | `4` | Tamaño mínimo de blob para la compuerta RhoHV |
+| `CORES_MIN_PIXELS_UPDRAFT` | `6` | Tamaño mínimo de blob para la compuerta de updraft |
+| `TOPS_MIN_Z` | `15.0` | Umbral de eco [dBZ]. El tope es el voxel más alto por encima de él. Un valor más bajo da topes más altos. |
+| `TOPS_FOOTPRINT_DILATION_PX` | `1` | Píxeles en que se expande el blob del núcleo antes de buscar su tope (3x3) |
+| `TOPS_DEDUP_RADIUS_M` | `2000.0` | Radio de cilindro [m], usado solo para núcleos sin `blob_mask` (respaldo) |
+
+**Núcleos** (`detect_cores_from_colmax`):
+
+1. Los píxeles con COLMAX igual o mayor que `CORES_MIN_Z` forman blobs (etiquetado de 4 vecinos).
+2. Un blob necesita más de un píxel. Su centroide es el píxel de COLMAX máximo. Se descarta si el centroide está más cerca que `CORES_MIN_RANGE`.
+3. Un blob pasa si cumple cualquiera de las compuertas:
+   - **Compuerta RhoHV:** hay RhoHV, el blob tiene más de `CORES_MIN_PIXELS` píxeles y el RhoHV medio supera `CORES_RHOHV_THRESHOLD`.
+   - **Compuerta de updraft:** el COLMAX máximo supera `CORES_MIN_Z_UPDRAFT` y el blob tiene más de `CORES_MIN_PIXELS_UPDRAFT` píxeles.
+4. Los núcleos más cercanos que `CORES_DEDUP_RADIUS` se unen. Se conserva el centroide más fuerte y se unifican las máscaras de blob.
+
+**Topes** (`detect_tops_from_cores`):
+
+1. La huella de cada núcleo es su blob expandido `TOPS_FOOTPRINT_DILATION_PX` píxeles.
+2. Un voxel es eco cuando es finito, no está enmascarado y supera `TOPS_MIN_Z`.
+3. En cada píxel de la huella, el tope es el nivel de eco más alto.
+4. El tope del núcleo es el más alto de esos topes de píxel. En caso de empate gana el eco más fuerte.
+
+Todo núcleo tiene tope siempre que su blob contenga un voxel por encima de `TOPS_MIN_Z`. Eso se cumple siempre que `TOPS_MIN_Z` esté por debajo de `CORES_MIN_Z`, lo que ocurre con los valores por defecto y con el archivo de overrides del repositorio.
+
+`altitude_m` es la altura sobre la antena del radar, no sobre el nivel del mar. Los niveles son los niveles verticales de la geometría (espaciado `res_z`), y el tope de la grilla es `toa`, así que muchos topes pueden quedar en `toa` cuando el eco llega al tope de la grilla.
 
 ## Ejemplo: genpro25.yml
 
@@ -513,6 +569,7 @@ docker restart radarlib-rma1
 - **Verificar:** Los archivos BUFR se descargan: `ls /data/radares/RADAR_NAME/`
 - **Verificar:** Logs del daemon de procesamiento: `docker logs radarlib-rma1`
 - **Verificar:** El directorio de salida existe y tiene permisos de escritura
+- **Verificar:** Error `NO OUTPUT` en los logs. Después de `no_output_alert_threshold` (por defecto 5) volúmenes completos seguidos sin salida, se registra un ERROR, que se repite cada esa cantidad de volúmenes. Un volumen que vuelve a producir salida registra un INFO. Este umbral es un valor por defecto del código; la configuración del servicio no lo lee.
 
 ### Problema: Sin Espacio en Disco
 - **Solución:** Configurar política de retención del daemon de limpieza
@@ -716,6 +773,19 @@ Motor de interpolación Barnes polar-cartesiana con geometría precomputada. Uti
 - `detect_tops_from_3d_grid(grid_3d, x_coords, y_coords, z_coords, rhohv_3d)` — Detección alternativa independiente de topes
 - `GateFilter(radar)` — Filtro de calidad de gate polar (exclude_below, exclude_above)
 - `get_field_data(radar, field_name)` — Extraer array numpy enmascarado desde objeto PyART Radar
+
+### radarlib.utils
+
+- `create_gate_coords_file(radar_name, strategy_name, vol_nr, output_dir, ..., min_agreement=2)` — Descarga archivos BUFR, exige que `min_agreement` de ellos compartan una firma de barrido y escribe las coordenadas de gates de un archivo que coincida como `.npz`. Lanza un error si no coinciden.
+
+### Herramienta de Validación: `scripts/compare_tops_variants.py`
+
+No se usa en tiempo de ejecución. Lee un cubo NC escrito por `write_nccube` (con el campo `DBZH`, que se genera cuando `ADD_NCCUBE` está activo), deriva el COLMAX, detecta núcleos y compara los topes con varios umbrales de eco y dilataciones de huella. Opcionalmente compara también la búsqueda de cilindro anterior, cargada desde una copia del `tops.py` antiguo.
+
+```bash
+python scripts/compare_tops_variants.py --cube RMA1_..._NCCUBE.nc \
+    --thresholds 0 15 30 --dilation 0 1 [--legacy-tops tops_antiguo.py] [--csv salida.csv]
+```
 
 ### radarlib.daemons
 
