@@ -155,6 +155,11 @@ DEFAULTS: Dict[str, Any] = {
     "CORES_MIN_PIXELS_UPDRAFT": 6,
     # Storm tops detection thresholds
     "TOPS_DEDUP_RADIUS_M": 2000.0,
+    # Echo threshold (dBZ) for a voxel to count as echo top. 0 = any echo (legacy).
+    # Raising it (e.g. 18) lowers and de-noises the tops; see docs.
+    "TOPS_MIN_Z": 0.0,
+    # Footprint grown from each core's 2D blob before searching for its top (pixels)
+    "TOPS_FOOTPRINT_DILATION_PX": 1,
     # Feature flags
     "ADD_TOPS_AND_CORES": False,
 }
@@ -315,6 +320,7 @@ CORES_MIN_PIXELS_UPDRAFT: int = get("CORES_MIN_PIXELS_UPDRAFT")
 TOPS_MIN_RANGE_M: float = get("TOPS_MIN_RANGE_M")
 TOPS_MIN_DEV_M: float = get("TOPS_MIN_DEV_M")
 TOPS_MIN_Z: float = get("TOPS_MIN_Z")
+TOPS_FOOTPRINT_DILATION_PX: int = get("TOPS_FOOTPRINT_DILATION_PX")
 TOPS_RHOHV_THRESHOLD: float = get("TOPS_RHOHV_THRESHOLD")
 TOPS_DEDUP_RADIUS_M: float = get("TOPS_DEDUP_RADIUS_M")
 TOPS_MIN_PIXELS: int = get("TOPS_MIN_PIXELS")

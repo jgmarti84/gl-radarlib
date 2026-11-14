@@ -7,6 +7,7 @@
     "CORES_MIN_PIXELS": 3,
     "CORES_MIN_PIXELS_UPDRAFT": 5,
     "TOPS_DEDUP_RADIUS_M": 2000.0,
+    "TOPS_MIN_Z": 18.0,
     "ROI_PARAMS_VOL04": {
         "res_xy": 1000,
         "res_z": 600,
