@@ -155,9 +155,10 @@ DEFAULTS: Dict[str, Any] = {
     "CORES_MIN_PIXELS_UPDRAFT": 6,
     # Storm tops detection thresholds
     "TOPS_DEDUP_RADIUS_M": 2000.0,
-    # Echo threshold (dBZ) for a voxel to count as echo top. 0 = any echo (legacy).
-    # Raising it (e.g. 18) lowers and de-noises the tops; see docs.
-    "TOPS_MIN_Z": 0.0,
+    # Echo threshold (dBZ) for a voxel to count as echo top. Tops are the highest
+    # voxel above this value. 0 dBZ (any echo) put most tops at the grid top; see docs.
+    # Overridable with RADARLIB_CONFIG (radarlib_overrides.json) or the TOPS_MIN_Z env var.
+    "TOPS_MIN_Z": 30.0,
     # Footprint grown from each core's 2D blob before searching for its top (pixels)
     "TOPS_FOOTPRINT_DILATION_PX": 1,
     # Feature flags
