@@ -470,6 +470,11 @@ Tops & cores settings are split across both config layers:
 
 > There is no deduplication step for tops — one top is returned per core.
 
+> **Overrides:** values come from the defaults, then `RADARLIB_CONFIG` (`radarlib_overrides.json`, mounted into the genpro25 services), then environment variables. The repository file sets `TOPS_MIN_Z` to 30.0 and raises the core thresholds; check it before assuming a default.
+> **Gate coordinates:** cached only after `min_agreement` (2) BUFR files agree (`src/radarlib/utils/grid_utils.py`).
+> **No-output alert:** `no_output_alert_threshold` (code default 5) logs `NO OUTPUT` after that many complete volumes without output; it is not read from the service configuration.
+> **Validation:** `scripts/compare_tops_variants.py` compares tops variants on one NC cube; it is not used at runtime.
+
 ### Other Service-Layer Config Keys (app/config.py)
 
 | Key | Default | Type | Description |
