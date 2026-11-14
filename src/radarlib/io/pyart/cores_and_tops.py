@@ -22,7 +22,7 @@ Algorithm Overview
 
 2. **Top Detection** (from DBZH 3D, relative to cores):
    - For each detected core, search the core's own footprint: its COLMAX blob grown by TOPS_FOOTPRINT_DILATION_PX pixels
-   - Echo voxels are those with DBZH > TOPS_MIN_Z (30 dBZ by default; changing it changes the tops)
+   - Echo voxels are those with DBZH > TOPS_MIN_Z (15 dBZ by default; changing it changes the tops)
    - The top is the **highest echo voxel** in the footprint
    - Output: List of top dicts with altitude and parent core reference
 
